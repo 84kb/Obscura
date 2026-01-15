@@ -307,6 +307,31 @@ ipcMain.handle('create-library', async (_, name: string, parentPath: string) => 
     return libraryDB.createLibrary(name, parentPath)
 })
 
+ipcMain.handle('open-library', async () => {
+    const win = BrowserWindow.getFocusedWindow() || mainWindow
+    if (!win) return null
+
+    const result = await dialog.showOpenDialog(win, {
+        properties: ['openDirectory'],
+        title: 'ライブラリフォルダ (.library) を選択',
+    })
+
+    if (result.canceled || result.filePaths.length === 0) {
+        return null
+    }
+
+    const libraryPath = result.filePaths[0]
+    // .library フォルダであることを簡易チェック（必須ではないが親切）
+    // if (!libraryPath.endsWith('.library')) ...
+
+    try {
+        return libraryDB.addLibraryPath(libraryPath)
+    } catch (e) {
+        console.error('Failed to open library:', e)
+        throw e
+    }
+})
+
 ipcMain.handle('get-libraries', async () => {
     return libraryDB.getLibraries()
 })

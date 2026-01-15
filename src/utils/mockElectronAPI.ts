@@ -120,6 +120,12 @@ export const mockElectronAPI = {
         return library
     },
 
+    openLibrary: async (): Promise<Library | null> => {
+        console.log('[Mock] openLibrary called')
+        const { sampleLibrary } = createSampleData()
+        return sampleLibrary
+    },
+
     getLibraries: async (): Promise<Library[]> => {
         const { sampleLibrary } = createSampleData()
         const libraries = storage.get<Library[]>(STORAGE_KEYS.LIBRARIES, [sampleLibrary])

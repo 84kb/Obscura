@@ -18,6 +18,7 @@ export function initUpdater(win: BrowserWindow) {
     // 自動ダウンロードを有効にする (デフォルトはtrueだが明示的に)
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = true
+    autoUpdater.allowPrerelease = true // Alpha版のためプレリリースを許可
 
     // === イベントハンドラ ===
 

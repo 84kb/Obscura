@@ -60,7 +60,8 @@ export default function App() {
         deleteGenre,
         activeRemoteLibrary,
         switchToRemoteLibrary,
-        switchToLocalLibrary
+        switchToLocalLibrary,
+        openLibrary
     } = useLibrary()
 
 
@@ -697,6 +698,7 @@ export default function App() {
                 onRenameGenre={renameGenre}
                 onDeleteGenre={deleteGenre}
                 onOpenLibraryModal={() => setShowLibraryModal(true)}
+                onOpenLibrary={openLibrary}
                 onSwitchLibrary={switchToLocalLibrary}
                 onSwitchRemoteLibrary={switchToRemoteLibrary}
                 onOpenSettings={() => setShowSettingsModal(true)}
@@ -750,6 +752,7 @@ export default function App() {
                 <LibraryModal
                     onClose={() => setShowLibraryModal(false)}
                     onCreateLibrary={createLibrary}
+                    onOpenLibrary={openLibrary}
                 />
             )}
 

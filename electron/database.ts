@@ -229,6 +229,33 @@ export const libraryDB = {
     return library
   },
 
+  // 既存のライブラリを開く（登録）
+  addLibraryPath(libraryPath: string) {
+    if (!fs.existsSync(libraryPath)) {
+      throw new Error('Library directory not found')
+    }
+
+    // 重複チェック
+    const existing = librariesConfig.libraries.find(l => l.path === libraryPath)
+    if (existing) {
+      this.setActiveLibrary(libraryPath)
+      return existing
+    }
+
+    // 名前をフォルダ名から取得 (.libraryを除去)
+    const name = path.basename(libraryPath).replace(/\.library$/i, '')
+
+    const library = {
+      name,
+      path: libraryPath,
+      createdAt: new Date().toISOString(),
+    }
+
+    librariesConfig.libraries.push(library)
+    this.setActiveLibrary(libraryPath)
+    return library
+  },
+
   // ライブラリ一覧取得
   getLibraries() {
     return librariesConfig.libraries

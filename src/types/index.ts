@@ -111,6 +111,8 @@ export interface ElectronAPI {
     selectFile: (options?: any) => Promise<string | null>
 
     // ライブラリ管理
+    createLibrary: (name: string, parentPath: string) => Promise<Library>
+    openLibrary: () => Promise<Library | null>
     getLibraries: () => Promise<Library[]>
     setActiveLibrary: (libraryPath: string) => Promise<void>
     getActiveLibrary: () => Promise<Library | null>

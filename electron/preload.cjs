@@ -21,6 +21,7 @@ try {
     contextBridge.exposeInMainWorld('electronAPI', {
         // ライブラリ管理
         createLibrary: (name, parentPath) => ipcRenderer.invoke('create-library', name, parentPath),
+        openLibrary: () => ipcRenderer.invoke('open-library'),
         getLibraries: () => ipcRenderer.invoke('get-libraries'),
         setActiveLibrary: (libraryPath) => ipcRenderer.invoke('set-active-library', libraryPath),
         getActiveLibrary: () => ipcRenderer.invoke('get-active-library'),

@@ -16,6 +16,7 @@ interface SidebarProps {
     onDeleteGenre: (id: number) => Promise<void>
     onRenameGenre: (id: number, newName: string) => void
     onOpenLibraryModal: () => void
+    onOpenLibrary: () => Promise<any>
     onSwitchLibrary: (lib: Library) => void
     onSwitchRemoteLibrary: (lib: RemoteLibrary) => void // Added
     onOpenSettings: () => void
@@ -88,6 +89,7 @@ export function Sidebar({
     onDeleteGenre,
     onRenameGenre,
     onOpenLibraryModal,
+    onOpenLibrary,
     onSwitchLibrary,
     onSwitchRemoteLibrary,
     onOpenSettings,
@@ -486,6 +488,21 @@ export function Sidebar({
                                     <line x1="9" y1="15" x2="15" y2="15"></line>
                                 </svg>
                                 <span>新しいライブラリを作成...</span>
+                            </button>
+
+                            <button
+                                className="library-menu-item"
+                                onClick={async () => {
+                                    await onOpenLibrary()
+                                    setIsLibraryMenuOpen(false)
+                                }}
+                            >
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                                    <line x1="9" y1="13" x2="15" y2="13"></line>
+                                    <line x1="12" y1="10" x2="12" y2="16"></line>
+                                </svg>
+                                <span>既存のライブラリを開く...</span>
                             </button>
 
                             <div className="library-menu-item-header">ローカルライブラリ</div>

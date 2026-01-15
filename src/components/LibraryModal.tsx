@@ -4,12 +4,27 @@ import './LibraryModal.css'
 interface LibraryModalProps {
     onClose: () => void
     onCreateLibrary: (name: string, parentPath: string) => Promise<void>
+    onOpenLibrary: () => Promise<any>
 }
 
-export function LibraryModal({ onClose, onCreateLibrary }: LibraryModalProps) {
+export function LibraryModal({ onClose, onCreateLibrary, onOpenLibrary }: LibraryModalProps) {
     const [libraryName, setLibraryName] = useState('')
     const [isCreating, setIsCreating] = useState(false)
     const [error, setError] = useState<string | null>(null)
+
+    const handleOpen = async () => {
+        setIsCreating(true)
+        try {
+            const result = await onOpenLibrary()
+            if (result) {
+                onClose()
+            }
+        } catch (e) {
+            setError('ライブラリを開けませんでした。')
+        } finally {
+            setIsCreating(false)
+        }
+    }
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -45,7 +60,7 @@ export function LibraryModal({ onClose, onCreateLibrary }: LibraryModalProps) {
                     <h2 className="library-modal-title">新しいライブラリを作成</h2>
                     <button className="library-modal-close" onClick={onClose}>
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+                            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 17.59 13.41 12z" />
                         </svg>
                     </button>
                 </div>
@@ -85,6 +100,15 @@ export function LibraryModal({ onClose, onCreateLibrary }: LibraryModalProps) {
                     </div>
 
                     <div className="library-modal-actions">
+                        <button
+                            type="button"
+                            className="btn btn-outline"
+                            onClick={handleOpen}
+                            disabled={isCreating}
+                            style={{ marginRight: 'auto' }}
+                        >
+                            既存を開く
+                        </button>
                         <button
                             type="button"
                             className="btn btn-outline"

@@ -55,53 +55,6 @@ export function useLibrary() {
         }))
     }, [])
 
-    // リモートライブラリへの切り替え
-    const switchToRemoteLibrary = useCallback((lib: RemoteLibrary) => {
-        setActiveLibrary(null)
-        setActiveRemoteLibrary(lib)
-        setMediaFiles([]) // クリア
-        setTags([])
-        setGenres([])
-    }, [])
-
-    // ローカルライブラリへの切り替え（既存のloadActiveLibraryの一部を分離してもよいが、今回はsetActiveLibraryのwrapperとして機能させる）
-    const switchToLocalLibrary = useCallback((lib: Library) => {
-        // setActiveLibrary(lib) は loadActiveLibrary 内で行われるが、明示的な切り替え用
-        // setActiveLibrary(lib) // これだけだとIPC上のアクティブ設定が変わらない
-        window.electronAPI.setActiveLibrary(lib.path).then(() => {
-            setActiveLibrary(lib)
-            setActiveRemoteLibrary(null)
-            loadMediaFiles() // リロード
-        })
-    }, [])
-
-    // アクティブなライブラリ読み込み (初期化時)
-    const loadActiveLibrary = useCallback(async () => {
-        try {
-            const library = await window.electronAPI.getActiveLibrary()
-            setActiveLibrary(library)
-            setActiveRemoteLibrary(null)
-        } catch (error) {
-            console.error('Failed to load active library:', error)
-        }
-    }, [])
-
-    // ライブラリ作成
-    const createLibrary = useCallback(async (name: string, parentPath: string) => {
-        try {
-            const library = await window.electronAPI.createLibrary(name, parentPath)
-            setActiveLibrary(library)
-            setActiveRemoteLibrary(null)
-            // 新しいライブラリなので、データをリロード
-            await loadLibraries() // 一覧も更新
-            await loadMediaFiles()
-            await loadTags()
-            await loadGenres()
-        } catch (error) {
-            console.error('Failed to create library:', error)
-        }
-    }, [])
-
     // メディアファイル読み込み
     const loadMediaFiles = useCallback(async () => {
         if (activeRemoteLibrary) {
@@ -670,6 +623,79 @@ export function useLibrary() {
         return { totalCount, totalSize }
     }, [mediaFiles])
 
+    // アクティブなライブラリ読み込み (初期化時)
+    const loadActiveLibrary = useCallback(async () => {
+        try {
+            const library = await window.electronAPI.getActiveLibrary()
+            setActiveLibrary(library)
+            setActiveRemoteLibrary(null)
+        } catch (error) {
+            console.error('Failed to load active library:', error)
+        }
+    }, [])
+
+    // リモートライブラリへの切り替え
+    const switchToRemoteLibrary = useCallback((lib: RemoteLibrary) => {
+        setActiveLibrary(null)
+        setActiveRemoteLibrary(lib)
+        setMediaFiles([]) // クリア
+        setTags([])
+        setGenres([])
+        // リモートライブラリの場合、activeRemoteLibraryが変わるとloadMediaFiles等はuseEffectで反応するはずだが、
+        // activeRemoteLibraryを設定するだけでは即座にrefreshされない場合があるので確認が必要。
+        // useEffect[activeRemoteLibrary] で loadMediaFiles などが呼ばれる構造になっているか？
+        // loadMediaFilesは依存配列に activeRemoteLibrary を持っているので、次回のレンダリングで新しい関数が生成される。
+        // そして useEffect で loadMediaFiles を呼んでいれば更新される。
+        // line 172: }, [activeRemoteLibrary, transformRemoteMedia]) -> これだけだと自動実行されない
+        // line 697: useEffect(..., [..., loadMediaFiles, ...]) -> loadMediaFilesが変われば実行される
+        // なので、setActiveRemoteLibraryするだけでOKなはず。
+    }, [])
+
+    // ローカルライブラリへの切り替え
+    const switchToLocalLibrary = useCallback((lib: Library) => {
+        window.electronAPI.setActiveLibrary(lib.path).then(async () => {
+            setActiveLibrary(lib)
+            setActiveRemoteLibrary(null)
+            await loadMediaFiles()
+            await loadTags()
+            await loadGenres()
+        })
+    }, [loadMediaFiles, loadTags, loadGenres])
+
+    // ライブラリ作成
+    const createLibrary = useCallback(async (name: string, parentPath: string) => {
+        try {
+            const library = await window.electronAPI.createLibrary(name, parentPath)
+            setActiveLibrary(library)
+            setActiveRemoteLibrary(null)
+            await loadLibraries()
+            await loadMediaFiles()
+            await loadTags()
+            await loadGenres()
+        } catch (error) {
+            console.error('Failed to create library:', error)
+        }
+    }, [loadLibraries, loadMediaFiles, loadTags, loadGenres])
+
+    // 既存のライブラリを開く
+    const openLibrary = useCallback(async () => {
+        try {
+            const library = await window.electronAPI.openLibrary()
+            if (library) {
+                setActiveLibrary(library)
+                setActiveRemoteLibrary(null)
+                await loadLibraries()
+                await loadMediaFiles()
+                await loadTags()
+                await loadGenres()
+                return library
+            }
+        } catch (error) {
+            console.error('Failed to open library:', error)
+        }
+        return null
+    }, [loadLibraries, loadMediaFiles, loadTags, loadGenres])
+
     // 初期読み込み
     useEffect(() => {
         loadActiveLibrary()
@@ -717,6 +743,7 @@ export function useLibrary() {
         renameGenre,
         activeRemoteLibrary,
         switchToRemoteLibrary,
-        switchToLocalLibrary
+        switchToLocalLibrary,
+        openLibrary
     }
 }
