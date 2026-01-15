@@ -7,7 +7,7 @@ import { createServer } from 'http'
 import { mediaDB, tagDB, genreDB, libraryDB } from './database'
 import { sharedUserDB, auditLogDB, Permission, serverConfigDB } from './shared-library'
 import { validateUserToken, validateAccessToken } from './crypto-utils'
-import { logError } from './error-logger'
+import { logError, logInfo, logWarning } from './error-logger'
 import fs from 'fs'
 import path from 'path'
 import multer from 'multer'
@@ -72,8 +72,8 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
             }
         }
 
-        // ヘッダー解析デバッグ
-        // console.log('[Auth] Received:', { authHeader, userTokenHeader })
+        // ヘッダー解析デバッグ - ファイルログに出力
+        // logInfo('auth', 'Auth debug', { authHeader, userTokenHeader, ip: req.ip })
 
         if (authHeader && userTokenHeader) {
             // Case-insensitive replace for Bearer
@@ -83,7 +83,7 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
             accessToken = req.query.accessToken as string
             userToken = req.query.userToken as string
         } else {
-            console.warn('[Auth] Missing tokens')
+            logWarning('auth', 'Missing tokens', { ip: req.ip, headers: req.headers })
             return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: 'トークンが不足しています' } })
         }
 
@@ -92,7 +92,12 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
         const accessTokenValidation = validateAccessToken(accessToken)
 
         if (!userTokenValidation.valid || !accessTokenValidation.valid) {
-            console.warn('[Auth] Invalid token format:', { userValid: userTokenValidation.valid, accessValid: accessTokenValidation.valid })
+            logWarning('auth', 'Invalid token format', {
+                userValid: userTokenValidation.valid,
+                accessValid: accessTokenValidation.valid,
+                userTokenPreview: userToken.substring(0, 5) + '...',
+                ip: req.ip
+            })
             return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: `トークン形式が無効です (User: ${userTokenValidation.valid}, Access: ${accessTokenValidation.valid})` } })
         }
 
@@ -100,10 +105,16 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
         const user = sharedUserDB.verifyTokenPair(userToken, accessToken)
 
         if (!user) {
-            console.warn('[Auth] Token pair mismatch or user not found')
-            // デバッグ用に、登録されているユーザーと比較（本番では削除推奨）
-            // const allUsers = sharedUserDB.getAllUsers()
-            // console.log('[Auth] Registered users:', allUsers.map(u => ({ id: u.id, ut: u.userToken.substring(0,5), at: u.accessToken.substring(0,5) })))
+            logWarning('auth', 'Token pair mismatch', {
+                userTokenPreview: userToken.substring(0, 5) + '...',
+                accessTokenPreview: accessToken.substring(0, 5) + '...',
+                ip: req.ip
+            })
+            // 詳細なデバッグ情報をログに出力 (本番でもトラブルシューティング用に一時的に許可)
+            const allUsers = sharedUserDB.getAllUsers()
+            // ユーザーリストのトークンハッシュなどを出力すべきだが、ここでは簡易的にIDのみ
+            logInfo('auth', 'Registered users for debug', { userIds: allUsers.map(u => u.id) })
+
             return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: '認証に失敗しました（トークン不一致）' } })
         }
 
