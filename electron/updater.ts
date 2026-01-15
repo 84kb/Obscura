@@ -1,5 +1,5 @@
 import { autoUpdater } from 'electron-updater'
-import { BrowserWindow, ipcMain } from 'electron'
+import { BrowserWindow, ipcMain, app } from 'electron'
 
 
 let updateWin: BrowserWindow | null = null
@@ -62,6 +62,15 @@ export function initUpdater(win: BrowserWindow) {
     ipcMain.handle('quit-and-install', () => {
         autoUpdater.quitAndInstall()
     })
+
+    // 起動時にアップデートを確認
+    // 開発環境ではスキップ、または forceDevUpdateConfig が必要
+    if (app.isPackaged) {
+        setTimeout(() => {
+            autoUpdater.checkForUpdatesAndNotify()
+                .catch(err => console.error('Failed to check for updates:', err))
+        }, 1500)
+    }
 }
 
 export function checkForUpdates() {
