@@ -139,9 +139,9 @@ try {
         onUpdateStatus: (callback) => {
             const subscription = (_event, data) => callback(data);
             ipcRenderer.on('update-status', subscription);
-            ipcRenderer.on('update-status', subscription);
             return () => ipcRenderer.off('update-status', subscription);
         },
+        getAppVersion: () => ipcRenderer.invoke('get-app-version'), // バージョン情報取得
 
         // ウィンドウ操作
         minimizeWindow: () => ipcRenderer.invoke('window-minimize'),

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { MediaFile } from '../types'
+import { MediaFile, RemoteLibrary } from '../types'
 import { usePlayer } from '../hooks/usePlayer'
 import './Player.css'
 import { toMediaUrl } from '../utils/fileUrl'

@@ -483,6 +483,8 @@ export default function App() {
 
     // ヘッダータイトルの取得
     const getHeaderTitle = () => {
+        if (activeRemoteLibrary) return activeRemoteLibrary.name || 'リモートライブラリ'
+
         if (filterOptions.filterType === 'tag_manager') return 'タグ管理'
         if (filterOptions.filterType === 'trash') return 'ゴミ箱'
         if (filterOptions.filterType === 'uncategorized') return '未分類'

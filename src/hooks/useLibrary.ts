@@ -716,15 +716,19 @@ export function useLibrary() {
         return null
     }, [loadLibraries, loadMediaFiles, loadTags, loadGenres])
 
-    // 初期読み込み
+    // 初期読み込み (ライブラリ自体のロード)
     useEffect(() => {
         loadActiveLibrary()
-        loadLibraries() // ライブラリ一覧も読み込む
+        loadLibraries()
+    }, [loadActiveLibrary, loadLibraries])
+
+    // データ読み込み (ライブラリ切り替え時などに再実行)
+    useEffect(() => {
         loadMediaFiles()
         loadTags()
         loadTagFolders()
         loadGenres()
-    }, [loadActiveLibrary, loadLibraries, loadMediaFiles, loadTags, loadTagFolders, loadGenres])
+    }, [loadMediaFiles, loadTags, loadTagFolders, loadGenres])
 
     return {
         mediaFiles: filteredMediaFiles,
