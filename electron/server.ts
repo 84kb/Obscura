@@ -1,4 +1,3 @@
-import { app } from 'electron'
 import express, { Request, Response, NextFunction } from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
@@ -8,7 +7,7 @@ import { createServer } from 'http'
 import { mediaDB, tagDB, genreDB, libraryDB } from './database'
 import { sharedUserDB, auditLogDB, Permission, serverConfigDB } from './shared-library'
 import { validateUserToken, validateAccessToken } from './crypto-utils'
-import { logError, logInfo, logWarning } from './error-logger'
+import { logError, logWarning } from './error-logger'
 import fs from 'fs'
 import path from 'path'
 import multer from 'multer'
@@ -387,10 +386,12 @@ export function startServer(port: number): Promise<void> {
                     const media = mediaDB.get(id)
 
                     if (!media || !media.thumbnail_path) {
+                        console.warn(`[Thumbnail] Media or thumbnail path missing. ID: ${id}`)
                         return res.status(404).json({ error: { code: 'RESOURCE_NOT_FOUND', message: 'サムネイルが見つかりません' } })
                     }
 
                     if (!fs.existsSync(media.thumbnail_path)) {
+                        console.warn(`[Thumbnail] Thumbnail file not found. ID: ${id}, Path: ${media.thumbnail_path}`)
                         return res.status(404).json({ error: { code: 'RESOURCE_NOT_FOUND', message: 'サムネイルファイルが見つかりません' } })
                     }
 
@@ -408,11 +409,13 @@ export function startServer(port: number): Promise<void> {
                     const media = mediaDB.get(id)
 
                     if (!media) {
+                        console.warn(`[Stream] Media not found in DB. ID: ${id}`)
                         return res.status(404).json({ error: { code: 'RESOURCE_NOT_FOUND', message: 'メディアが見つかりません' } })
                     }
 
                     const filePath = media.file_path
                     if (!fs.existsSync(filePath)) {
+                        console.warn(`[Stream] File not found on disk. ID: ${id}, Path: ${filePath}`)
                         return res.status(404).json({ error: { code: 'RESOURCE_NOT_FOUND', message: 'ファイルが見つかりません' } })
                     }
 

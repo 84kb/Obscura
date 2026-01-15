@@ -6,6 +6,11 @@
 export function toMediaUrl(filePath: string | null): string {
     if (!filePath) return ''
 
+    // HTTP(S) URLの場合はそのまま返す
+    if (filePath.startsWith('http://') || filePath.startsWith('https://')) {
+        return filePath
+    }
+
     // Windowsのバックスラッシュをスラッシュに置換
     const normalizedPath = filePath.replace(/\\/g, '/')
 

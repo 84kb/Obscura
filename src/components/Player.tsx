@@ -232,8 +232,8 @@ export const Player: React.FC<PlayerProps> = ({
     const progress = duration > 0 ? (currentTime / duration) * 100 : 0
 
     const isVideo = media.file_type === 'video'
-    // media:// プロトコルを使用
-    const fileUrl = window.electronAPI ? `media://${media.file_path.replace(/\\/g, '/')}` : media.file_path
+    // media:// プロトコルを使用 (httpの場合はそのまま)
+    const fileUrl = window.electronAPI ? toMediaUrl(media.file_path) : media.file_path
 
     return (
         <div
