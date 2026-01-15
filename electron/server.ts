@@ -72,24 +72,19 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
             }
         }
 
+        // ヘッダー解析デバッグ
+        // console.log('[Auth] Received:', { authHeader, userTokenHeader })
+
         if (authHeader && userTokenHeader) {
-            accessToken = authHeader.replace('Bearer ', '')
+            // Case-insensitive replace for Bearer
+            accessToken = authHeader.replace(/^Bearer\s+/i, '')
             userToken = userTokenHeader
         } else if (req.query.accessToken && req.query.userToken) {
             accessToken = req.query.accessToken as string
             userToken = req.query.userToken as string
         } else {
-            auditLogDB.addLog({
-                userId: 'unknown',
-                nickname: 'unknown',
-                action: 'auth_failed',
-                resourceType: 'auth',
-                resourceId: null,
-                details: { reason: 'missing_tokens' },
-                ipAddress: req.ip || 'unknown',
-                success: false,
-            })
-            return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: 'トークンが提供されていません' } })
+            console.warn('[Auth] Missing tokens')
+            return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: 'トークンが不足しています' } })
         }
 
         // トークンの形式を検証
@@ -97,34 +92,19 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
         const accessTokenValidation = validateAccessToken(accessToken)
 
         if (!userTokenValidation.valid || !accessTokenValidation.valid) {
-            auditLogDB.addLog({
-                userId: 'unknown',
-                nickname: 'unknown',
-                action: 'auth_failed',
-                resourceType: 'auth',
-                resourceId: null,
-                details: { reason: 'invalid_token_format' },
-                ipAddress: req.ip || 'unknown',
-                success: false,
-            })
-            return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: 'トークンが無効です' } })
+            console.warn('[Auth] Invalid token format:', { userValid: userTokenValidation.valid, accessValid: accessTokenValidation.valid })
+            return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: `トークン形式が無効です (User: ${userTokenValidation.valid}, Access: ${accessTokenValidation.valid})` } })
         }
 
         // トークンペアを検証
         const user = sharedUserDB.verifyTokenPair(userToken, accessToken)
 
         if (!user) {
-            auditLogDB.addLog({
-                userId: 'unknown',
-                nickname: 'unknown',
-                action: 'auth_failed',
-                resourceType: 'auth',
-                resourceId: null,
-                details: { reason: 'token_pair_mismatch' },
-                ipAddress: req.ip || 'unknown',
-                success: false,
-            })
-            return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: 'トークンペアが一致しません' } })
+            console.warn('[Auth] Token pair mismatch or user not found')
+            // デバッグ用に、登録されているユーザーと比較（本番では削除推奨）
+            // const allUsers = sharedUserDB.getAllUsers()
+            // console.log('[Auth] Registered users:', allUsers.map(u => ({ id: u.id, ut: u.userToken.substring(0,5), at: u.accessToken.substring(0,5) })))
+            return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: '認証に失敗しました（トークン不一致）' } })
         }
 
         // 最終アクセス時刻を更新
