@@ -1,6 +1,6 @@
 {
   "name": "obscura",
-  "version": "0.1.5-alpha",
+  "version": "0.1.6-alpha",
   "description": "ライブラリ型メディアプレイヤー",
   "main": "dist-electron/main.cjs",
   "scripts": {
@@ -66,6 +66,7 @@
     "directories": {
       "output": "release"
     },
+    "artifactName": "${productName}-Setup-${version}.${ext}",
     "files": [
       "dist/**/*",
       "dist-electron/**/*"
