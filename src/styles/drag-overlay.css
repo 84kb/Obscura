@@ -14,8 +14,9 @@
     backdrop-filter: blur(8px);
     animation: fadeIn 0.2s ease-out;
     padding: 40px;
-    pointer-events: none;
-    /* マウスイベントを透過させてチラつきを防ぐ */
+    pointer-events: auto;
+    /* 直接ドロップを受け取るためにautoにする */
+    z-index: 9999;
 }
 
 .drag-content {

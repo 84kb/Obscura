@@ -114,8 +114,112 @@ export default function App() {
     })
     const [showSettingsModal, setShowSettingsModal] = useState(false)
 
-    // グリッド表示設定をsettingsから取得または同期
+    // ドラッグ＆ドロップ状態のグローバル管理
+    useEffect(() => {
+        const handleGlobalDragEnter = (e: DragEvent) => {
+            e.preventDefault()
+            dragCounter.current++
+            console.log('[Global D&D] DragEnter:', dragCounter.current, e.dataTransfer?.types)
+
+            if (dragCounter.current === 1) {
+                const hasFiles = Array.from(e.dataTransfer?.types || []).some(t => t.toLowerCase() === 'files')
+                if ((hasActiveLibrary || activeRemoteLibrary) && hasFiles && !isInternalDrag.current) {
+                    console.log('[Global D&D] Showing overlay')
+                    setIsDragging(true)
+                    document.body.classList.add('dragging-file')
+                }
+            }
+        }
+
+        const handleGlobalDragOver = (e: DragEvent) => {
+            e.preventDefault()
+            if (e.dataTransfer) {
+                // ドロップ効果を設定（これがないと「禁止マーク」になる場合がある）
+                e.dataTransfer.dropEffect = 'copy'
+            }
+
+            // 万が一 enter で漏れた場合、または移動エリアからの復帰時の補完
+            if (!isDragging && !isInternalDrag.current) {
+                const hasFiles = Array.from(e.dataTransfer?.types || []).some(t => t.toLowerCase() === 'files')
+                if ((hasActiveLibrary || activeRemoteLibrary) && hasFiles) {
+                    console.log('[Global D&D] Delayed overlay trigger')
+                    setIsDragging(true)
+                    document.body.classList.add('dragging-file')
+                }
+            }
+        }
+
+        const handleGlobalDragLeave = (e: DragEvent) => {
+            e.preventDefault()
+            dragCounter.current--
+            console.log('[Global D&D] DragLeave:', dragCounter.current)
+
+            if (dragCounter.current <= 0) {
+                dragCounter.current = 0
+                console.log('[Global D&D] Hiding overlay')
+                setIsDragging(false)
+                document.body.classList.remove('dragging-file')
+                // 内部ドラッグのフラグもクリア
+                isInternalDrag.current = false
+            }
+        }
+
+        const handleGlobalDrop = async (e: DragEvent) => {
+            e.preventDefault()
+            console.log('[Global D&D] Drop detected')
+            const wasInternal = isInternalDrag.current
+
+            // 状態リセット
+            dragCounter.current = 0
+            setIsDragging(false)
+            isInternalDrag.current = false
+            document.body.classList.remove('dragging-file')
+
+            if (wasInternal) {
+                console.log('[Global D&D] Internal drop, ignoring')
+                return
+            }
+            if (!hasActiveLibrary && !activeRemoteLibrary) {
+                console.log('[Global D&D] No active library, ignoring')
+                return
+            }
+
+            const files = Array.from(e.dataTransfer?.files || [])
+            const filePaths = files.map(file => (file as any).path)
+            console.log('[Global D&D] Dropped paths:', filePaths)
+
+            if (filePaths.length > 0) {
+                await importMedia(filePaths)
+            }
+        }
+
+        const handleGlobalDragEnd = () => {
+            dragCounter.current = 0
+            setIsDragging(false)
+            isInternalDrag.current = false
+            document.body.classList.remove('dragging-file')
+        }
+
+        // Window全体にリスナーを設定（冒頭で阻害されるのを防ぐ）
+        window.addEventListener('dragenter', handleGlobalDragEnter)
+        window.addEventListener('dragover', handleGlobalDragOver)
+        window.addEventListener('dragleave', handleGlobalDragLeave)
+        window.addEventListener('drop', handleGlobalDrop)
+        window.addEventListener('dragend', handleGlobalDragEnd)
+        window.addEventListener('mouseup', handleGlobalDragEnd)
+
+        return () => {
+            window.removeEventListener('dragenter', handleGlobalDragEnter)
+            window.removeEventListener('dragover', handleGlobalDragOver)
+            window.removeEventListener('dragleave', handleGlobalDragLeave)
+            window.removeEventListener('drop', handleGlobalDrop)
+            window.removeEventListener('dragend', handleGlobalDragEnd)
+            window.removeEventListener('mouseup', handleGlobalDragEnd)
+        }
+    }, [hasActiveLibrary, activeRemoteLibrary, importMedia])
+
     const [gridSize, setGridSize] = useState<number>(settings.gridSize)
+    const dragCounter = useRef(0)
     const [viewMode, setViewMode] = useState<'grid' | 'list'>(settings.viewMode)
 
     // 表示設定
@@ -432,50 +536,6 @@ export default function App() {
 
 
 
-    // ドラッグ＆ドロップハンドリング
-    // ドラッグ＆ドロップハンドリング
-    const handleDragOver = (e: React.DragEvent) => {
-        e.preventDefault()
-        // 内部ドラッグ中はオーバーレイを表示しない
-        if (isInternalDrag.current) return
-
-        // 外部からのファイルドラッグのみオーバーレイを表示（内部ドラッグは無視）
-        // dataTransfer.typesに'Files'が含まれ、かつファイルがある場合は外部ドラッグ
-        const hasExternalFiles = e.dataTransfer.types.includes('Files') &&
-            e.dataTransfer.items.length > 0 &&
-            Array.from(e.dataTransfer.items).some(item => item.kind === 'file')
-
-        if (hasActiveLibrary && hasExternalFiles) {
-            setIsDragging(true)
-        }
-    }
-
-    const handleDragLeave = (e: React.DragEvent) => {
-        e.preventDefault()
-        // 関連ターゲット(移動先)が現在の要素内の場合はドラッグ継続とみなす
-        if (e.currentTarget.contains(e.relatedTarget as Node)) {
-            return
-        }
-        setIsDragging(false)
-    }
-
-    const handleDrop = async (e: React.DragEvent) => {
-        e.preventDefault()
-        setIsDragging(false)
-
-        // 内部ドラッグの場合はインポートしない
-        if (isInternalDrag.current) return
-
-        if (!hasActiveLibrary) return
-
-        const files = Array.from(e.dataTransfer.files)
-        const filePaths = files.map(file => (file as any).path) // Electron環境では path プロパティがある
-
-        if (filePaths.length > 0) {
-            await importMedia(filePaths)
-        }
-    }
-
     const updateDescription = async (id: number, description: string | null) => {
         await window.electronAPI.updateDescription(id, description)
         refreshLibrary()
@@ -571,9 +631,6 @@ export default function App() {
         return (
             <div
                 className={`content-container ${isDragging ? 'dragging' : ''}`}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
                 onClick={(e) => {
                     if (e.target === e.currentTarget) {
                         setSelectedMediaIds([])
@@ -639,9 +696,8 @@ export default function App() {
                         isInternalDrag.current = true
                     }}
                     onInternalDragEnd={() => {
-                        setTimeout(() => {
-                            isInternalDrag.current = false
-                        }, 100)
+                        // Global dragend でケアするため、ここでは何もしないか、
+                        // 脱落防止に短いタイマーを置く程度にする
                     }}
                     renamingMediaId={renamingMediaId}
                     onRenameSubmit={async (id, newName) => {
@@ -652,21 +708,6 @@ export default function App() {
                     }}
                     onRenameCancel={() => setRenamingMediaId(null)}
                 />
-                {isDragging && (
-                    <div className="app-drag-overlay">
-                        <div className="drag-content">
-                            <div className="drag-icon">
-                                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                                    <polyline points="17 8 12 3 7 8"></polyline>
-                                    <line x1="12" y1="3" x2="12" y2="15"></line>
-                                </svg>
-                            </div>
-                            <h2>ファイルをドロップして追加</h2>
-                            <p>ライブラリにインポートされます</p>
-                        </div>
-                    </div>
-                )}
             </div>
         )
     }
@@ -687,9 +728,7 @@ export default function App() {
     }, [activeLibrary, refreshLibrary])
 
     return (
-        <div
-            className="app"
-        >
+        <div className="app">
 
             <Sidebar
                 filterOptions={filterOptions}
@@ -710,6 +749,13 @@ export default function App() {
                 hasActiveLibrary={hasActiveLibrary}
                 onRefreshGenres={loadGenres}
                 onDropFileOnGenre={handleDropOnGenre}
+                // 内部ドラッグの通知を追加
+                onInternalDragStart={() => {
+                    isInternalDrag.current = true
+                }}
+                onInternalDragEnd={() => {
+                    // 同上
+                }}
             />
 
             <main className={`main-content ${playingMedia ? 'is-playing' : ''}`} onClick={(e) => {
@@ -846,6 +892,22 @@ export default function App() {
                 onSave={handleSaveProfile}
                 onClose={() => setShowProfileSetup(false)}
             />
+
+            {isDragging && (
+                <div className="app-drag-overlay">
+                    <div className="drag-content">
+                        <div className="drag-icon">
+                            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="17 8 12 3 7 8"></polyline>
+                                <line x1="12" y1="3" x2="12" y2="15"></line>
+                            </svg>
+                        </div>
+                        <h2>ファイルをドロップして追加</h2>
+                        <p>ライブラリにインポートされます</p>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

@@ -12,6 +12,11 @@
     -webkit-app-region: drag;
 }
 
+body.dragging-file .main-header,
+body.dragging-file .app-drag-overlay {
+    -webkit-app-region: no-drag !important;
+}
+
 .header-left,
 .header-center,
 .header-right {

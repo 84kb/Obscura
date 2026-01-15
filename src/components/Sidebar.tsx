@@ -23,6 +23,8 @@ interface SidebarProps {
     hasActiveLibrary: boolean
     onRefreshGenres?: () => void
     onDropFileOnGenre?: (genreId: number, files: FileList) => void
+    onInternalDragStart?: () => void
+    onInternalDragEnd?: () => void
 }
 
 // サブフォルダー対応のためのヘルパー型と関数
@@ -95,7 +97,9 @@ export function Sidebar({
     onOpenSettings,
     hasActiveLibrary,
     onRefreshGenres,
-    onDropFileOnGenre
+    onDropFileOnGenre,
+    onInternalDragStart,
+    onInternalDragEnd
 }: SidebarProps) {
     const [renamingGenreId, setRenamingGenreId] = useState<number | null>(null)
     const [isLibraryMenuOpen, setIsLibraryMenuOpen] = useState(false)
@@ -215,17 +219,27 @@ export function Sidebar({
 
     // D&D ハンドラー
     const handleDragStart = (e: React.DragEvent, genreId: number) => {
+        onInternalDragStart?.()
         e.stopPropagation()
         setDraggedGenreId(genreId)
         e.dataTransfer.effectAllowed = 'move'
         e.dataTransfer.setData('application/json', JSON.stringify({ type: 'genre', id: genreId }))
     }
 
+    const handleDragEnd = () => {
+        setDraggedGenreId(null)
+        setDropTarget(null)
+        onInternalDragEnd?.()
+    }
+
     const handleDragOver = (e: React.DragEvent, targetId: number) => {
         e.preventDefault()
-        e.stopPropagation()
-
         const isFileDrag = e.dataTransfer.types.includes('Files')
+
+        // ファイルドラッグでない場合のみバブリングを止める（グローバルなインポート表示を優先するため）
+        if (!isFileDrag) {
+            e.stopPropagation()
+        }
 
         if (draggedGenreId === null && !isFileDrag) return
         if (draggedGenreId === targetId) return
@@ -360,6 +374,7 @@ export function Sidebar({
                     onContextMenu={(e) => handleContextMenu(e, node.id)}
                     draggable={!isRenaming}
                     onDragStart={(e) => handleDragStart(e, node.id)}
+                    onDragEnd={handleDragEnd}
                     onDragOver={(e) => handleDragOver(e, node.id)}
                     onDragLeave={handleDragLeave}
                     onDrop={(e) => handleDrop(e, node.id)}
