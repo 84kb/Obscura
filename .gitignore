@@ -3,8 +3,56 @@ dist
 dist-electron
 release
 .vscode
+
+# Logs
+logs
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Diagnostic reports (https://nodejs.org/api/report.html)
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage
+*.lcov
+
+# Dependency directories
+.npm
+.yarn/
+.pnpm-store
+
+# Environment variables
+.env
+.env.test
+.env.production
+.env.local
+
+# IDEs and Editors
+.idea
+.rimraf
+.nova
+.zed
+
+# OS generated files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific
 .thumbnails
 *.db
 *.db-shm

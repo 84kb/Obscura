@@ -16,11 +16,11 @@
     "library",
     "electron"
   ],
-  "author": "",
+  "author": "84kb",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/user/repo"
+    "url": "https://github.com/84kb/Obscura.git"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
@@ -82,8 +82,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "user",
-        "repo": "repo"
+        "owner": "84kb",
+        "repo": "Obscura"
       }
     ]
   }

@@ -2,7 +2,8 @@
 
 Eagleライクなライブラリ型メディアプレイヤーWindowsアプリケーション
 
-![Obscura](https://img.shields.io/badge/Electron-28.1-blue)
+![License](https://img.shields.io/badge/License-MIT-green.svg)
+![Electron](https://img.shields.io/badge/Electron-28.1-blue)
 ![React](https://img.shields.io/badge/React-18.2-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue)
 
@@ -21,7 +22,8 @@ Obscuraは、動画・音声ファイルを美しく管理・再生できるデ�
 
 ## スクリーンショット
 
-![アプリケーション画面](./docs/screenshot.png)
+<!-- ![アプリケーション画面](./docs/screenshot.png) -->
+<!-- スクリーンショットを追加するには、./docs/screenshot.png に画像を配置し、上の行のコメントアウトを外してください -->
 
 ## 必要な環境
 
@@ -33,8 +35,8 @@ Obscuraは、動画・音声ファイルを美しく管理・再生できるデ�
 
 ```bash
 # リポジトリをクローン
-git clone https://github.com/yourusername/obscura.git
-cd obscura
+git clone https://github.com/84kb/Obscura.git
+cd Obscura
 
 # 依存関係をインストール
 npm install
@@ -117,7 +119,8 @@ MIT
 
 ## 作者
 
-Your Name
+84kb
+(Built with the help of Google Antigravity)
 
 ## 貢献
 
