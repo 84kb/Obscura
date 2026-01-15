@@ -1,5 +1,6 @@
 import path from 'path'
 import { app } from 'electron'
+import crypto from 'crypto'
 const fs = require('fs-extra')
 
 // エラーログのパス

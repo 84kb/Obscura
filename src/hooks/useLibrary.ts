@@ -31,11 +31,29 @@ export function useLibrary() {
         excludedArtists: []
     })
 
+    const [myUserToken, setMyUserToken] = useState<string>('')
+
+    // クライアント設定（UserToken）読み込み
+    useEffect(() => {
+        const loadConfig = async () => {
+            try {
+                const config = await window.electronAPI.getClientConfig()
+                if (config && config.myUserToken) {
+                    setMyUserToken(config.myUserToken)
+                }
+            } catch (e) {
+                console.error('Failed to load client config in useLibrary', e)
+            }
+        }
+        loadConfig()
+    }, [])
+
     // メディアファイルのパスをリモート用に変換するヘルパー
     const transformRemoteMedia = useCallback((mediaList: MediaFile[], remoteLib: RemoteLibrary): MediaFile[] => {
         // トークンのパース
-        let userToken = remoteLib.token
+        let userToken = myUserToken
         let accessToken = remoteLib.token
+
         if (remoteLib.token.includes(':')) {
             const parts = remoteLib.token.split(':')
             userToken = parts[0]
@@ -51,9 +69,8 @@ export function useLibrary() {
             thumbnail_path: m.thumbnail_path ? `${baseUrl}/api/thumbnails/${m.id}?userToken=${userToken}&accessToken=${accessToken}` : '',
             file_path: `${baseUrl}/api/stream/${m.id}?userToken=${userToken}&accessToken=${accessToken}`,
             // webViewLinkなどがもしあればそれも変換検討だが、現在は file_path が重要
-            // is_remote フラグなどを追加してもいいが、型定義変更が必要になるので一旦既存フィールドを活用
         }))
-    }, [])
+    }, [myUserToken])
 
     // メディアファイル読み込み
     const loadMediaFiles = useCallback(async () => {
@@ -62,8 +79,9 @@ export function useLibrary() {
             try {
                 setLoading(true)
                 // トークンヘッダー準備
-                let userToken = activeRemoteLibrary.token
+                let userToken = myUserToken
                 let accessToken = activeRemoteLibrary.token
+
                 if (activeRemoteLibrary.token.includes(':')) {
                     const parts = activeRemoteLibrary.token.split(':')
                     userToken = parts[0]
@@ -100,14 +118,15 @@ export function useLibrary() {
                 console.error('Failed to load media files:', error)
             }
         }
-    }, [activeRemoteLibrary, transformRemoteMedia])
+    }, [activeRemoteLibrary, transformRemoteMedia, myUserToken])
 
     // タグ読み込み
     const loadTags = useCallback(async () => {
         if (activeRemoteLibrary) {
             try {
-                let userToken = activeRemoteLibrary.token
+                let userToken = myUserToken
                 let accessToken = activeRemoteLibrary.token
+
                 if (activeRemoteLibrary.token.includes(':')) {
                     const parts = activeRemoteLibrary.token.split(':')
                     userToken = parts[0]
@@ -136,7 +155,7 @@ export function useLibrary() {
                 console.error('Failed to load tags:', error)
             }
         }
-    }, [activeRemoteLibrary])
+    }, [activeRemoteLibrary, myUserToken])
 
     // タグフォルダー読み込み (現在リモートAPI未実装のためスキップまたは実装が必要。一旦スキップ)
     const loadTagFolders = useCallback(async () => {
@@ -156,8 +175,9 @@ export function useLibrary() {
     const loadGenres = useCallback(async () => {
         if (activeRemoteLibrary) {
             try {
-                let userToken = activeRemoteLibrary.token
+                let userToken = myUserToken
                 let accessToken = activeRemoteLibrary.token
+
                 if (activeRemoteLibrary.token.includes(':')) {
                     const parts = activeRemoteLibrary.token.split(':')
                     userToken = parts[0]
@@ -186,7 +206,7 @@ export function useLibrary() {
                 console.error('Failed to load genres:', error)
             }
         }
-    }, [activeRemoteLibrary])
+    }, [activeRemoteLibrary, myUserToken])
 
 
     // フォルダー選択とスキャン
@@ -744,6 +764,7 @@ export function useLibrary() {
         activeRemoteLibrary,
         switchToRemoteLibrary,
         switchToLocalLibrary,
-        openLibrary
+        openLibrary,
+        myUserToken
     }
 }

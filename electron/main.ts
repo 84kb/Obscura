@@ -1041,14 +1041,23 @@ ipcMain.handle('test-connection', async (_, { url, token }: { url: string; token
         const baseUrl = url.replace(/\/$/, '')
         const apiUrl = `${baseUrl}/api/media?limit=1`
 
-        // トークンの解析 (UserToken:AccessToken 形式をサポート)
-        let userToken = token
+        // トークンの解析 (UserToken:AccessToken 形式をサポート、またはAccessTokenのみ)
+        const config = getClientConfig()
+        let userToken = config.myUserToken || ''
         let accessToken = token
 
         if (token.includes(':')) {
             const parts = token.split(':')
             userToken = parts[0]
             accessToken = parts[1]
+        } else {
+            // コロンがない場合はAccessTokenのみとみなす
+            // userTokenは既定のものを使用 (空の場合はそのまま空)
+            if (!userToken) {
+                // 念のため、myUserTokenがない場合はtokenをuserTokenとしても扱ってみる（旧仕様互換）
+                // だが基本的にはmyUserTokenが必要
+                console.warn('[Connection Test] No local UserToken found.')
+            }
         }
 
         const response = await fetch(apiUrl, {

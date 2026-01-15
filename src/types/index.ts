@@ -234,6 +234,7 @@ export interface ClientConfig {
     theme: 'dark' | 'light' | 'system'
     language: 'ja' | 'en'
     remoteLibraries: RemoteLibrary[]
+    myUserToken?: string
 }
 
 export interface AppSettings {

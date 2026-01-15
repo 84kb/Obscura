@@ -61,7 +61,8 @@ export default function App() {
         activeRemoteLibrary,
         switchToRemoteLibrary,
         switchToLocalLibrary,
-        openLibrary
+        openLibrary,
+        myUserToken
     } = useLibrary()
 
 
@@ -69,7 +70,7 @@ export default function App() {
     const { isConnected: isSocketConnected, subscribe } = useSocket({
         enabled: !!activeRemoteLibrary,
         url: activeRemoteLibrary?.url,
-        userToken: activeRemoteLibrary?.token,
+        userToken: myUserToken,
         accessToken: activeRemoteLibrary?.token
     })
 
@@ -170,7 +171,7 @@ export default function App() {
                 const response = await fetch(`${activeRemoteLibrary.url}/api/profile`, {
                     headers: {
                         'Authorization': `Bearer ${activeRemoteLibrary.token}`,
-                        'X-User-Token': activeRemoteLibrary.token
+                        'X-User-Token': myUserToken
                     }
                 })
 
@@ -188,7 +189,7 @@ export default function App() {
         }
 
         checkProfile()
-    }, [activeRemoteLibrary])
+    }, [activeRemoteLibrary, myUserToken])
 
     // プロファイル保存ハンドラー
     const handleSaveProfile = async (profile: { nickname: string; iconUrl?: string }) => {
@@ -199,7 +200,7 @@ export default function App() {
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${activeRemoteLibrary.token}`,
-                'X-User-Token': activeRemoteLibrary.token
+                'X-User-Token': myUserToken
             },
             body: JSON.stringify(profile)
         })

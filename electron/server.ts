@@ -103,20 +103,34 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
         }
 
         // トークンペアを検証
-        const user = sharedUserDB.verifyTokenPair(userToken, accessToken)
+        const user = sharedUserDB.getUserByToken(userToken)
 
         if (!user) {
-            logWarning('auth', 'Token pair mismatch', {
+            logWarning('auth', 'User not found for provided userToken', {
                 userTokenPreview: userToken.substring(0, 5) + '...',
-                accessTokenPreview: accessToken.substring(0, 5) + '...',
                 ip: req.ip
             })
-            // 詳細なデバッグ情報をログに出力 (本番でもトラブルシューティング用に一時的に許可)
-            const allUsers = sharedUserDB.getAllUsers()
-            // ユーザーリストのトークンハッシュなどを出力すべきだが、ここでは簡易的にIDのみ
-            logInfo('auth', 'Registered users for debug', { userIds: allUsers.map(u => u.id) })
+            // console.warn('[Auth] User not found for provided userToken')
+            return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: 'ユーザーが見つかりません (UserToken不一致)' } })
+        }
 
-            return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: '認証に失敗しました（トークン不一致）' } })
+        if (user.accessToken !== accessToken) {
+            logWarning('auth', 'Access token mismatch', {
+                user: user.nickname,
+                storedHash: user.accessToken.substring(0, 5) + '...',
+                receivedHash: accessToken.substring(0, 5) + '...',
+                ip: req.ip
+            })
+            // console.warn(`[Auth] Access token mismatch for user: ${user.nickname}`)
+            return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: 'アクセストークンが一致しません' } })
+        }
+
+        if (!user.isActive) {
+            logWarning('auth', 'User is inactive', {
+                user: user.nickname,
+                ip: req.ip
+            })
+            return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: 'このユーザーは無効化されています' } })
         }
 
         // 最終アクセス時刻を更新

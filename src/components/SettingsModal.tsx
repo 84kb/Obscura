@@ -837,10 +837,10 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                         />
                                     </div>
                                     <div style={{ width: '100%' }}>
-                                        <label className="settings-label" style={{ marginBottom: '8px', display: 'block' }}>接続キー (Token)</label>
+                                        <label className="settings-label" style={{ marginBottom: '8px', display: 'block' }}>アクセストークン (Access Token)</label>
                                         <input
                                             type="password"
-                                            placeholder="Paste connection key here"
+                                            placeholder="Paste access token here"
                                             value={remoteKey}
                                             onChange={e => setRemoteKey(e.target.value)}
                                             className="settings-input"
