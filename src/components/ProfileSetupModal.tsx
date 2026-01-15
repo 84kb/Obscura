@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import './ProfileSetupModal.css'
 
 interface ProfileSetupModalProps {
@@ -19,6 +19,18 @@ export function ProfileSetupModal({ isOpen, libraryName, onSave, onClose }: Prof
     const [selectedIcon, setSelectedIcon] = useState(DEFAULT_ICONS[0])
     const [isSaving, setIsSaving] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const inputRef = useRef<HTMLInputElement>(null)
+
+    // モーダルが開いたときに入力フィールドにフォーカスを当てる
+    useEffect(() => {
+        if (isOpen) {
+            // アニメーションなどの影響を考慮し、わずかな遅延を入れる
+            const timer = setTimeout(() => {
+                inputRef.current?.focus()
+            }, 100)
+            return () => clearTimeout(timer)
+        }
+    }, [isOpen])
 
     if (!isOpen) return null
 
@@ -65,13 +77,13 @@ export function ProfileSetupModal({ isOpen, libraryName, onSave, onClose }: Prof
                 <div className="profile-setup-form">
                     <label className="profile-setup-label">ニックネーム</label>
                     <input
+                        ref={inputRef}
                         type="text"
                         className="profile-setup-input"
                         placeholder="あなたの表示名"
                         value={nickname}
                         onChange={e => setNickname(e.target.value)}
                         maxLength={50}
-                        autoFocus
                     />
 
                     <label className="profile-setup-label">アイコン</label>

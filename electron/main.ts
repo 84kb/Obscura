@@ -705,6 +705,8 @@ ipcMain.handle('window-close', () => {
     mainWindow?.close()
 })
 
+ipcMain.handle('get-app-version', () => app.getVersion())
+
 // コメント
 ipcMain.handle('add-comment', (_, mediaId, text, time) => commentDB.addComment(mediaId, text, time))
 ipcMain.handle('get-comments', (_event, mediaId) => {
@@ -1039,7 +1041,7 @@ ipcMain.handle('update-shared-user', async (_, userId: string, updates: Partial<
 ipcMain.handle('test-connection', async (_, { url, token }: { url: string; token: string }) => {
     try {
         const baseUrl = url.replace(/\/$/, '')
-        const apiUrl = `${baseUrl}/api/media?limit=1`
+        const apiUrl = `${baseUrl}/api/health`
 
         // トークンの解析 (UserToken:AccessToken 形式をサポート、またはAccessTokenのみ)
         const config = getClientConfig()
@@ -1050,14 +1052,6 @@ ipcMain.handle('test-connection', async (_, { url, token }: { url: string; token
             const parts = token.split(':')
             userToken = parts[0]
             accessToken = parts[1]
-        } else {
-            // コロンがない場合はAccessTokenのみとみなす
-            // userTokenは既定のものを使用 (空の場合はそのまま空)
-            if (!userToken) {
-                // 念のため、myUserTokenがない場合はtokenをuserTokenとしても扱ってみる（旧仕様互換）
-                // だが基本的にはmyUserTokenが必要
-                console.warn('[Connection Test] No local UserToken found.')
-            }
         }
 
         const response = await fetch(apiUrl, {
@@ -1069,7 +1063,11 @@ ipcMain.handle('test-connection', async (_, { url, token }: { url: string; token
         })
 
         if (response.ok) {
-            return { success: true }
+            const data: any = await response.json()
+            return {
+                success: true,
+                libraryName: data.libraryName || 'Remote Library'
+            }
         } else {
             return { success: false, message: `Status: ${response.status} ${response.statusText}` }
         }

@@ -26,6 +26,7 @@ export interface MediaComment {
     mediaId: number
     text: string
     time: number // 再生位置（秒）
+    nickname?: string
     createdAt: string
 }
 
@@ -219,6 +220,9 @@ export interface ElectronAPI {
     minimizeWindow: () => Promise<void>
     maximizeWindow: () => Promise<void>
     closeWindow: () => Promise<void>
+
+    // アプリケーション情報
+    getAppVersion: () => Promise<string>
 }
 
 export interface RemoteLibrary {

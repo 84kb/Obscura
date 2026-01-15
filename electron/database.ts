@@ -276,6 +276,10 @@ export const libraryDB = {
     if (!activeLibraryPath) return null
     return librariesConfig.libraries.find(lib => lib.path === activeLibraryPath) || null
   },
+  getLibraryName() {
+    const lib = this.getActiveLibrary()
+    return lib ? lib.name : 'Unknown Library'
+  },
 }
 
 
@@ -767,13 +771,14 @@ export const genreDB = {
 
 // コメント操作
 export const commentDB = {
-  addComment(mediaId: number, text: string, time: number) {
+  addComment(mediaId: number, text: string, time: number, nickname?: string) {
     const id = db.nextCommentId++
     const comment = {
       id,
       mediaId,
       text,
       time,
+      nickname,
       createdAt: new Date().toISOString(),
     }
     db.comments.push(comment)

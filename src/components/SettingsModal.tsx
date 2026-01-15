@@ -127,8 +127,23 @@ const API_ENDPOINTS: ApiEndpoint[] = [
     },
 ]
 
+const PERMISSION_LABELS: Record<string, string> = {
+    'READ_ONLY': '閲覧',
+    'DOWNLOAD': 'DL',
+    'UPLOAD': 'UP',
+    'EDIT': '編集',
+    'FULL': 'フル'
+}
+
 export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsModalProps) {
     const [activeCategory, setActiveCategory] = useState<Category>('viewer')
+    const [appVersion, setAppVersion] = useState<string>('Unknown')
+
+    useEffect(() => {
+        if (window.electronAPI) {
+            window.electronAPI.getAppVersion().then(setAppVersion)
+        }
+    }, [])
 
     const categories: { id: Category; label: string; icon: JSX.Element }[] = [
         { id: 'general', label: 'よく使う', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg> },
@@ -398,6 +413,28 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
         }
     }
 
+    const handleTogglePermission = async (userId: string, permission: any) => {
+        const user = sharedUsers.find(u => u.id === userId)
+        if (!user || !window.electronAPI) return
+
+        let newPermissions: any[]
+        const currentPermissions = user.permissions || []
+        if (currentPermissions.includes(permission)) {
+            newPermissions = currentPermissions.filter(p => p !== permission)
+        } else {
+            newPermissions = [...currentPermissions, permission]
+        }
+
+        try {
+            await (window.electronAPI as any).updateSharedUser(userId, { permissions: newPermissions })
+            setSharedUsers(sharedUsers.map(u =>
+                u.id === userId ? { ...u, permissions: newPermissions } : u
+            ))
+        } catch (e) {
+            console.error('Failed to update permissions:', e)
+        }
+    }
+
     const renderUserManagement = () => {
         // アクティブユーザー判定 (5分以内)
         const activeUsers = sharedUsers.filter(u => {
@@ -533,6 +570,33 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     <div style={{ fontSize: '10px', color: '#555', marginTop: '4px' }}>
                                         ※ 接続時は「ユーザートークン:アクセストークン」形式で入力
                                     </div>
+
+                                    {/* 権限管理 */}
+                                    <div style={{ marginTop: '12px', borderTop: '1px solid #2a2a2c', paddingTop: '10px' }}>
+                                        <span style={{ fontSize: '11px', color: '#666', marginBottom: '6px', display: 'block' }}>権限設定:</span>
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                            {(['READ_ONLY', 'DOWNLOAD', 'UPLOAD', 'EDIT', 'FULL'] as any[]).map(p => (
+                                                <button
+                                                    key={p}
+                                                    onClick={() => handleTogglePermission(u.id, p)}
+                                                    style={{
+                                                        fontSize: '10px',
+                                                        padding: '3px 8px',
+                                                        borderRadius: '4px',
+                                                        border: '1px solid #333',
+                                                        backgroundColor: (u.permissions || []).includes(p) ? '#0ea5e9' : 'transparent',
+                                                        color: (u.permissions || []).includes(p) ? '#fff' : '#888',
+                                                        cursor: 'pointer',
+                                                        transition: 'all 0.2s',
+                                                        fontWeight: (u.permissions || []).includes(p) ? 'bold' : 'normal'
+                                                    }}
+                                                    title={p}
+                                                >
+                                                    {PERMISSION_LABELS[p] || p}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         ))}
@@ -550,6 +614,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     // === リモート接続 State ===
     const [remoteUrl, setRemoteUrl] = useState('')
     const [remoteKey, setRemoteKey] = useState('')
+    const [remoteName, setRemoteName] = useState('')
     const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle')
     const [connectionMsg, setConnectionMsg] = useState('')
 
@@ -562,6 +627,10 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
             if (result.success) {
                 setConnectionStatus('success')
                 setConnectionMsg('接続成功！')
+                // ホスト側のライブラリ名を自動反映
+                if (result.libraryName && !remoteName) {
+                    setRemoteName(result.libraryName)
+                }
             } else {
                 setConnectionStatus('error')
                 setConnectionMsg(`接続失敗: ${result.message}`)
@@ -575,13 +644,15 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     const handleAddRemoteLibrary = async () => {
         if (connectionStatus !== 'success' || !window.electronAPI) return
         try {
-            await (window.electronAPI as any).addRemoteLibrary('Remote Library', remoteUrl, remoteKey)
+            const name = remoteName.trim() || 'Remote Library'
+            await (window.electronAPI as any).addRemoteLibrary(name, remoteUrl, remoteKey)
             // 設定を再読み込み
             const cConfig = await (window.electronAPI as any).getClientConfig()
             setClientConfig(cConfig)
             // フォームリセット
             setRemoteUrl('')
             setRemoteKey('')
+            setRemoteName('')
             setConnectionStatus('idle')
             setConnectionMsg('')
             alert('リモートライブラリを追加しました。')
@@ -843,6 +914,17 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                             placeholder="Paste access token here"
                                             value={remoteKey}
                                             onChange={e => setRemoteKey(e.target.value)}
+                                            className="settings-input"
+                                            style={{ width: '100%' }}
+                                        />
+                                    </div>
+                                    <div style={{ width: '100%' }}>
+                                        <label className="settings-label" style={{ marginBottom: '8px', display: 'block' }}>ライブラリ名</label>
+                                        <input
+                                            type="text"
+                                            placeholder="例: 私のライブラリ (接続成功時に自動入力されます)"
+                                            value={remoteName}
+                                            onChange={e => setRemoteName(e.target.value)}
                                             className="settings-input"
                                             style={{ width: '100%' }}
                                         />
@@ -1124,7 +1206,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         <div className="settings-info">
                             <span className="settings-label">バージョン情報</span>
                             <span className="settings-description">
-                                現在のバージョン: v{window.electronAPI ? '0.1.0-alpha' : 'Unknown'}
+                                現在のバージョン: v{appVersion}
                                 {updateInfo?.version && (
                                     <span style={{ marginLeft: '10px' }}>
                                         (最新: v{updateInfo.version})

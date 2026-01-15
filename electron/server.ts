@@ -1,10 +1,11 @@
 import express, { Request, Response, NextFunction } from 'express'
+import { app } from 'electron'
 import cors from 'cors'
 import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
 import { Server as SocketIOServer } from 'socket.io'
 import { createServer } from 'http'
-import { mediaDB, tagDB, genreDB, libraryDB } from './database'
+import { mediaDB, tagDB, genreDB, libraryDB, commentDB } from './database'
 import { sharedUserDB, auditLogDB, Permission, serverConfigDB } from './shared-library'
 import { validateUserToken, validateAccessToken } from './crypto-utils'
 import { logError, logWarning } from './error-logger'
@@ -211,8 +212,9 @@ export function startServer(port: number): Promise<void> {
 
             // セキュリティヘッダー
             expressApp.use(helmet({
-                contentSecurityPolicy: false, // 開発中は無効化するか、調整が必要
+                contentSecurityPolicy: false,
                 crossOriginEmbedderPolicy: false,
+                crossOriginResourcePolicy: { policy: 'cross-origin' },
             }))
 
             // CORS設定
@@ -240,12 +242,15 @@ export function startServer(port: number): Promise<void> {
             // 注意: 認証が必要なため、単なるstaticミドルウェアではなく、認証付きルートとして実装を推奨
             // expressApp.use('/static', express.static(path.join(libraryDB.getActiveLibrary()?.path || '', 'thumbnails')))
 
-            // ヘルスチェック
-            expressApp.get('/api/health', (_req, res) => {
-                res.json({ status: 'ok', version: '1.0.0', serverTime: new Date().toISOString() })
+            // ヘルスチェック & 接続テスト用
+            expressApp.get('/api/health', (_req: Request, res: Response) => {
+                res.json({
+                    status: 'ok',
+                    libraryName: libraryDB.getLibraryName(),
+                    version: app.getVersion(),
+                    serverTime: new Date().toISOString()
+                })
             })
-
-            // --- API Endpoints ---
 
             // メディア一覧取得
             expressApp.get('/api/media', authMiddleware, requirePermission('READ_ONLY'), (req: AuthenticatedRequest, res: Response) => {
@@ -297,6 +302,29 @@ export function startServer(port: number): Promise<void> {
                 } catch (error) {
                     logError('api', 'Failed to get media details', error)
                     res.status(500).json({ error: { code: 'SERVER_ERROR', message: 'メディア詳細の取得に失敗しました' } })
+                }
+            })
+
+            // コメント追加
+            expressApp.post('/api/media/:id/comments', authMiddleware, requirePermission('READ_ONLY'), (req: AuthenticatedRequest, res: Response) => {
+                try {
+                    const id = parseInt(String(req.params.id))
+                    const { text, time } = req.body
+
+                    if (!text || typeof text !== 'string') {
+                        return res.status(400).json({ error: { code: 'INVALID_INPUT', message: 'コメント内容を入力してください' } })
+                    }
+
+                    const comment = commentDB.addComment(id, text, time, req.user?.nickname)
+
+                    res.status(201).json(comment)
+                    // Socket.IOでブロードキャスト
+                    if (io) {
+                        io.emit(`media:comment:${id}`, comment)
+                    }
+                } catch (error) {
+                    logError('api', 'Failed to add comment', error)
+                    res.status(500).json({ error: { code: 'SERVER_ERROR', message: 'コメントの追加に失敗しました' } })
                 }
             })
 

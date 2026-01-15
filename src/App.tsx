@@ -550,6 +550,8 @@ export default function App() {
                     autoPlayEnabled={settings.autoPlay}
                     onToggleAutoPlay={toggleAutoPlay}
                     onPlayFirst={handlePlayFirstMedia}
+                    activeRemoteLibrary={activeRemoteLibrary}
+                    myUserToken={myUserToken}
                 />
             )
         }

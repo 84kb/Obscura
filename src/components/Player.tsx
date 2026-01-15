@@ -14,6 +14,8 @@ interface PlayerProps {
     autoPlayEnabled?: boolean
     onToggleAutoPlay?: () => void
     onPlayFirst?: () => void
+    activeRemoteLibrary?: RemoteLibrary | null
+    myUserToken?: string
 }
 
 export const Player: React.FC<PlayerProps> = ({
@@ -25,7 +27,9 @@ export const Player: React.FC<PlayerProps> = ({
     hasPrev = false,
     autoPlayEnabled = false,
     onToggleAutoPlay,
-    onPlayFirst
+    onPlayFirst,
+    activeRemoteLibrary,
+    myUserToken
 }) => {
     const {
         containerRef,
@@ -162,7 +166,29 @@ export const Player: React.FC<PlayerProps> = ({
     const handleSendComment = async () => {
         if (!media || !commentText.trim()) return
         try {
-            await window.electronAPI.addComment(media.id, commentText, currentTime)
+            if (activeRemoteLibrary) {
+                // リモート
+                const response = await fetch(`${activeRemoteLibrary.url}/api/media/${media.id}/comments`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${activeRemoteLibrary.token}`,
+                        'X-User-Token': myUserToken || ''
+                    },
+                    body: JSON.stringify({
+                        text: commentText,
+                        time: currentTime
+                    })
+                })
+
+                if (!response.ok) {
+                    throw new Error('Failed to post remote comment')
+                }
+            } else {
+                // ローカル
+                await (window.electronAPI as any).addComment(media.id, commentText, currentTime)
+            }
+
             setCommentText('')
             setShowCommentInput(false)
             console.log('Comment added')
@@ -241,6 +267,16 @@ export const Player: React.FC<PlayerProps> = ({
             ref={containerRef}
         /* 常時表示のためマウス制御は削除 */
         >
+            {/* コメント表示 (オーバーレイ) */}
+            <div className="player-comment-overlay">
+                {(media.comments || []).filter(c => Math.abs(c.time - currentTime) < 3).map(c => (
+                    <div key={c.id} className="comment-bubble">
+                        {c.nickname && <span className="comment-nickname">{c.nickname}: </span>}
+                        <span className="comment-text">{c.text}</span>
+                    </div>
+                ))}
+            </div>
+
             {/* ヘッダーバー (上部固定) */}
             <div className="player-header-bar">
                 <div className="header-left">
