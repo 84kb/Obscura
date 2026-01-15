@@ -86,8 +86,10 @@ export function validateUserToken(token: string): { valid: boolean; timestamp?: 
         const [timestampStr, _salt, _tokenHash] = parts
         const timestamp = parseInt(timestampStr, 10)
 
-        // タイムスタンプの妥当性チェック（未来の日付でないか）
-        if (timestamp > Date.now()) {
+        // タイムスタンプの妥当性チェック（未来の日付でないか - 時刻ズレを考慮して5分猶予）
+        // クライアントとサーバーの時刻がずれている可能性があるため
+        const allowSkew = 5 * 60 * 1000
+        if (timestamp > Date.now() + allowSkew) {
             return { valid: false }
         }
 
@@ -129,8 +131,9 @@ export function validateAccessToken(token: string): { valid: boolean; userId?: s
         const [userId, timestampStr, _tokenHash] = parts
         const timestamp = parseInt(timestampStr, 10)
 
-        // タイムスタンプの妥当性チェック
-        if (timestamp > Date.now()) {
+        // タイムスタンプの妥当性チェック（時刻ズレを考慮して5分猶予）
+        const allowSkew = 5 * 60 * 1000
+        if (timestamp > Date.now() + allowSkew) {
             return { valid: false }
         }
 

@@ -600,14 +600,14 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                             {isServerRunning ? '起動中 - 外部からの接続を受け付けています' : '停止中 - 外部からの接続は拒否されます'}
                                         </span>
                                     </div>
-                                    <div className="toggle-switch">
+                                    <label className="toggle-switch">
                                         <input
                                             type="checkbox"
                                             checked={isServerRunning}
                                             onChange={handleToggleServer}
                                         />
                                         <span className="slider"></span>
-                                    </div>
+                                    </label>
                                 </div>
 
                                 <div className="settings-row">
@@ -690,7 +690,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                             通信を暗号化します。有効にするには証明書ファイルが必要です。
                                         </span>
                                     </div>
-                                    <div className="toggle-switch">
+                                    <label className="toggle-switch">
                                         <input
                                             type="checkbox"
                                             checked={serverConfig.requireHttps || false}
@@ -701,7 +701,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                             }}
                                         />
                                         <span className="slider"></span>
-                                    </div>
+                                    </label>
                                 </div>
 
                                 {serverConfig.requireHttps && (
