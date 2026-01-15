@@ -1,0 +1,69 @@
+.subfolder-section {
+    padding: 0 16px 16px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+}
+
+.subfolder-section-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin: 0 0 12px 0;
+}
+
+.subfolder-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.subfolder-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    min-width: 100px;
+    max-width: 140px;
+}
+
+.subfolder-card:hover {
+    background: var(--bg-tertiary);
+    transform: translateY(-2px);
+}
+
+.subfolder-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 64px;
+    height: 64px;
+    color: var(--accent);
+    margin-bottom: 8px;
+}
+
+.subfolder-info {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    text-align: center;
+}
+
+.subfolder-name {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 120px;
+}
+
+.subfolder-count {
+    font-size: 11px;
+    color: var(--text-secondary);
+}

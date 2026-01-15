@@ -1,0 +1,642 @@
+﻿.inspector {
+    width: var(--right-sidebar-width);
+    height: 100%;
+    background-color: var(--bg-sidebar);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex-shrink: 0;
+    transition: transform 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.inspector-header {
+    padding: var(--spacing-md);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.inspector-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.inspector-content {
+    flex: 1;
+    overflow-y: auto;
+    padding-bottom: 32px;
+}
+
+/* サムネイルプレビュー */
+.inspector-preview {
+    width: 100%;
+    padding: var(--spacing-md);
+}
+
+.preview-container {
+    width: 100%;
+    height: auto;
+    background-color: #000;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    position: relative;
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.preview-container img {
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+    display: block;
+}
+
+.preview-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+}
+
+.preview-info-header {
+    padding: 0 var(--spacing-md) var(--spacing-sm);
+}
+
+.preview-filename-input {
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: var(--text-main);
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.4;
+    resize: none;
+    outline: none;
+    padding: 4px;
+    border-radius: 4px;
+    overflow: hidden;
+    display: block;
+}
+
+.preview-filename-input:focus {
+    background: var(--bg-hover);
+}
+
+/* セクション */
+.inspector-section {
+    border-bottom: 1px solid var(--border);
+}
+
+.section-header {
+    padding: var(--spacing-sm) var(--spacing-md);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.section-header:hover {
+    background-color: var(--bg-hover);
+}
+
+.section-header h3 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.section-content {
+    padding: var(--spacing-sm) var(--spacing-md);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+/* タグ/ジャンル共通 */
+.tags-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 0;
+}
+
+.detail-tag,
+.detail-genre {
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-main);
+}
+
+.detail-tag button,
+.detail-genre button {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 14px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0 2px;
+}
+
+.detail-tag button:hover,
+.detail-genre button:hover {
+    color: var(--primary);
+}
+
+.add-tag-chip {
+    background: transparent;
+    border: 1.5px dashed var(--border);
+    border-radius: 6px;
+    padding: 2px 8px;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.add-tag-chip:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+    background: rgba(255, 140, 66, 0.05);
+}
+
+/* インフォメーション行 */
+.info-section {
+    padding-top: var(--spacing-sm);
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    font-size: 13px;
+}
+
+.info-label {
+    color: var(--text-muted);
+}
+
+.info-value-inline {
+    color: var(--text-main);
+    font-weight: 500;
+    text-align: right;
+}
+
+/* 星評価 */
+.inspector-rating-stars {
+    display: flex;
+    gap: 1px;
+    margin-left: auto;
+    /* 右寄りに */
+    justify-content: flex-end;
+}
+
+.star {
+    font-size: 16px;
+    /* 少しコンパクトに */
+    color: var(--border);
+    cursor: pointer;
+    transition: all 0.1s;
+}
+
+.star.filled {
+    color: #ffd700;
+}
+
+.star:hover {
+    transform: scale(1.1);
+    /* スケールも少し控えめに */
+}
+
+/* コメントリスト */
+.comments-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.comment-item {
+    background: var(--bg-hover);
+    padding: var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+}
+
+.comment-time {
+    color: var(--primary);
+    font-weight: 600;
+    font-size: 11px;
+    margin-bottom: 2px;
+}
+
+.comment-text {
+    word-break: break-all;
+    color: var(--text-main);
+}
+
+.no-comments {
+    text-align: center;
+    color: var(--text-muted);
+    padding: var(--spacing-md);
+    font-size: 12px;
+}
+
+/* ポップオーバー（タグ・ジャンル選択） */
+.picker-popover-fixed {
+    position: fixed;
+    width: 280px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-xl);
+    z-index: 2000;
+    display: flex;
+    flex-direction: column;
+    max-height: 400px;
+    overflow: hidden;
+}
+
+.picker-popover-header {
+    padding: 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.picker-popover-search {
+    width: 100%;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-main);
+    padding: 6px 12px;
+    font-size: 13px;
+    outline: none;
+}
+
+.picker-popover-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+
+.picker-popover-item {
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    transition: background 0.2s;
+    font-size: 13px;
+}
+
+.picker-popover-item:hover {
+    background: var(--bg-hover);
+}
+
+.picker-checkbox {
+    width: 16px;
+    height: 16px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--primary);
+}
+
+.picker-popover-item.added .picker-checkbox {
+    border-color: var(--primary);
+    background: rgba(255, 140, 66, 0.1);
+}
+
+.picker-popover-create-btn {
+    width: calc(100% - 16px);
+    margin: 8px;
+    padding: 10px;
+    background: transparent;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.create-plus {
+    width: 18px;
+    height: 18px;
+    background: var(--primary);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+}
+
+.picker-popover-footer {
+    padding: 8px;
+    border-top: 1px solid var(--border);
+    background: rgba(0, 0, 0, 0.1);
+}
+
+.picker-close-btn {
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 11px;
+    cursor: pointer;
+    padding: 4px;
+}
+
+/* 投稿者入力 */
+.artist-input {
+    width: 100%;
+    background: var(--bg-secondary);
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 12px;
+    color: var(--text-main);
+    font-size: 13px;
+    outline: none;
+    transition: all 0.2s;
+}
+
+.artist-input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(255, 140, 66, 0.1);
+}
+
+/* ゴミ箱アクション */
+.actions-section {
+    padding: var(--spacing-md);
+    border-top: 1px solid var(--border);
+}
+
+.trash-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.trash-note {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.trash-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-restore,
+.btn-delete-permanent {
+    flex: 1;
+    padding: 8px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--bg-hover);
+    color: var(--text-main);
+    transition: all 0.2s;
+}
+
+.btn-restore:hover {
+    background: var(--bg-secondary);
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.btn-delete-permanent:hover {
+    background: rgba(255, 66, 66, 0.1);
+    border-color: #ff4242;
+    color: #ff4242;
+}
+
+/* 統計コンテナ */
+.stats-container {
+    padding: var(--spacing-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+/* マルチ選択プレビュー */
+.multi-select-preview {
+    padding: var(--spacing-xl) 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-lg);
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--spacing-md);
+}
+
+.multi-select-stack {
+    position: relative;
+    width: 60px;
+    height: 60px;
+}
+
+.stack-card {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.card-1 {
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    background: var(--bg-hover);
+}
+
+.card-2 {
+    z-index: 2;
+    transform: rotate(5deg) translate(4px, 2px);
+    opacity: 0.8;
+}
+
+.card-3 {
+    z-index: 1;
+    transform: rotate(10deg) translate(8px, 4px);
+    opacity: 0.6;
+}
+
+.multi-select-count {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-main);
+}
+
+.picker-popover-item.partial .picker-checkbox {
+    background: rgba(255, 140, 66, 0.2);
+    border-color: var(--primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.partial-mark {
+    width: 8px;
+    height: 2px;
+    background: var(--primary);
+    border-radius: 1px;
+}
+
+/* Playlist Section */
+.playlist-section {
+    padding: 0 !important;
+}
+
+.playlist-container {
+    display: flex;
+    flex-direction: column;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.playlist-item {
+    display: flex;
+    gap: 12px;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.playlist-item:hover {
+    background-color: var(--hover-bg);
+}
+
+.playlist-item.active {
+    background-color: var(--active-bg);
+    border-left: 3px solid var(--primary);
+}
+
+.playlist-thumbnail {
+    position: relative;
+    width: 80px;
+    height: 45px;
+    background: #000;
+    flex-shrink: 0;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.playlist-thumbnail img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.playlist-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #666;
+}
+
+.playlist-duration {
+    position: absolute;
+    bottom: 2px;
+    right: 2px;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 2px;
+}
+
+.playlist-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.playlist-title {
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 4px;
+}
+
+.playlist-meta {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+
+.preview-filename-input {
+    width: 100%;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    color: var(--text-main);
+    font-size: 16px;
+    font-weight: 600;
+    font-family: 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
+    line-height: 1.4;
+    padding: 8px;
+    resize: none;
+    outline: none;
+    transition: all 0.2s ease;
+    margin-top: 8px;
+}
+
+.preview-filename-input:focus {
+    background: var(--bg-hover);
+    border-color: var(--primary);
+}
+
+.preview-filename-input:hover {
+    background: var(--bg-hover);
+}
+
+
+/* Spacing Overrides */
+.inspector-header {
+    padding: var(--spacing-sm) !important;
+}
+
+.section-header {
+    padding: 6px var(--spacing-md) !important;
+}

@@ -1,0 +1,299 @@
+/* タグマネージャーコンテナ（フォルダーサイドバー + タグ一覧） */
+.tag-manager-container {
+    display: flex;
+    gap: var(--spacing-lg);
+    padding: var(--spacing-xl);
+    max-width: 1200px;
+    margin: 0 auto;
+    min-height: calc(100vh - 120px);
+}
+
+/* フォルダーサイドバー */
+.tag-folder-sidebar {
+    width: 200px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.tag-folder-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.15s;
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
+.tag-folder-item:hover {
+    background: var(--bg-hover);
+    color: var(--text-main);
+}
+
+.tag-folder-item.active {
+    background: rgba(255, 140, 66, 0.15);
+    color: var(--primary);
+}
+
+.tag-folder-item.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.tag-folder-item svg {
+    flex-shrink: 0;
+    opacity: 0.7;
+}
+
+.folder-name {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tag-count {
+    font-size: 12px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    min-width: 24px;
+    text-align: right;
+}
+
+/* タグ グループ ヘッダー */
+.tag-group-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 12px 6px 12px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.add-folder-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    transition: all 0.15s;
+    line-height: 1;
+}
+
+.add-folder-btn:hover {
+    background: var(--bg-hover);
+    color: var(--primary);
+}
+
+.new-folder-form {
+    display: flex;
+    gap: 6px;
+    padding: 4px 12px;
+    margin-bottom: 4px;
+}
+
+.new-folder-form input {
+    flex: 1;
+    padding: 6px 10px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-main);
+    font-size: 12px;
+    outline: none;
+}
+
+.new-folder-form input:focus {
+    border-color: var(--primary);
+}
+
+.new-folder-form button {
+    padding: 6px 10px;
+    background: var(--primary);
+    border: none;
+    border-radius: var(--radius-sm);
+    color: white;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.tag-folder-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.folder-rename-input {
+    flex: 1;
+    padding: 2px 6px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--primary);
+    border-radius: 3px;
+    color: var(--text-main);
+    font-size: 13px;
+    outline: none;
+}
+
+/* タグ一覧エリア */
+.tag-manager {
+    flex: 1;
+    min-width: 0;
+}
+
+.tag-manager-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-xl);
+    gap: var(--spacing-lg);
+}
+
+.tag-manager-title {
+    font-size: 20px;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.tag-manager-form {
+    display: flex;
+    gap: var(--spacing-sm);
+    flex: 1;
+    max-width: 400px;
+}
+
+.tag-manager-input {
+    flex: 1;
+    padding: 10px 14px;
+    background: var(--bg-card);
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--text-main);
+    outline: none;
+    transition: all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.tag-manager-input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(255, 140, 66, 0.1);
+}
+
+.tag-manager-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: var(--spacing-md);
+}
+
+.tag-manager-item {
+    background: var(--bg-card);
+    padding: 12px 16px;
+    border-radius: var(--radius-md);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border: 1.5px solid var(--border);
+    transition: all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+    box-shadow: var(--shadow-sm);
+    cursor: grab;
+}
+
+.tag-manager-item:hover {
+    border-color: var(--primary);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.tag-manager-item:active {
+    cursor: grabbing;
+}
+
+.tag-manager-name {
+    font-size: 14px;
+    color: var(--text-main);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 500;
+}
+
+.tag-manager-delete {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 20px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0 6px;
+    transition: all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+    border-radius: var(--radius-sm);
+}
+
+.tag-manager-delete:hover {
+    color: #ff4d4f;
+    background: rgba(255, 77, 79, 0.1);
+}
+
+.tag-manager-empty {
+    grid-column: 1 / -1;
+    text-align: center;
+    color: var(--text-muted);
+    padding: var(--spacing-xl);
+    font-size: 16px;
+}
+
+.drag-hint {
+    margin-top: var(--spacing-lg);
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+/* コンテキストメニュー */
+.folder-context-menu {
+    position: fixed;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    padding: 4px;
+    z-index: 1000;
+    min-width: 140px;
+}
+
+.folder-context-menu button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 12px;
+    background: transparent;
+    border: none;
+    color: var(--text-main);
+    font-size: 13px;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    text-align: left;
+}
+
+.folder-context-menu button:hover {
+    background: var(--bg-hover);
+}
+
+.folder-context-menu button.danger {
+    color: #ff4d4f;
+}
+
+.folder-context-menu button.danger:hover {
+    background: rgba(255, 77, 79, 0.1);
+}

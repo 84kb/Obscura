@@ -1,0 +1,68 @@
+/* ドラッグ＆ドロップ オーバーレイ */
+.app-drag-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(26, 20, 18, 0.85);
+    /* 濃い背景 */
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(8px);
+    animation: fadeIn 0.2s ease-out;
+    padding: 40px;
+    pointer-events: none;
+    /* マウスイベントを透過させてチラつきを防ぐ */
+}
+
+.drag-content {
+    width: 100%;
+    height: 100%;
+    border: 4px dashed var(--primary);
+    border-radius: var(--radius-xl);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--primary);
+    background: rgba(255, 140, 66, 0.05);
+}
+
+.drag-icon {
+    width: 120px;
+    height: 120px;
+    background: rgba(255, 140, 66, 0.1);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 24px;
+    animation: bounce 1s infinite;
+}
+
+.app-drag-overlay h2 {
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: var(--text-main);
+}
+
+.app-drag-overlay p {
+    font-size: 16px;
+    color: var(--text-muted);
+}
+
+@keyframes bounce {
+
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(-10px);
+    }
+}

@@ -1,0 +1,77 @@
+.rating-filter-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 4px;
+    width: 200px;
+    background-color: var(--bg-dark);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    z-index: 1000;
+    padding: 8px 0;
+    overflow: hidden;
+}
+
+.rating-filter-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.rating-filter-item {
+    display: flex;
+    align-items: center;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: all 0.15s ease-in-out;
+}
+
+.rating-filter-item:hover {
+    background-color: var(--bg-hover);
+}
+
+.rating-filter-item.selected {
+    background-color: rgba(255, 140, 66, 0.1);
+}
+
+.rating-checkbox {
+    margin-right: 12px;
+    display: flex;
+    align-items: center;
+}
+
+.rating-checkbox input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: var(--primary);
+    cursor: pointer;
+}
+
+.rating-stars {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.no-rating-text {
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.rating-count {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-left: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.star-icon {
+    flex-shrink: 0;
+    transition: transform 0.1s ease;
+}
+
+.rating-filter-item:hover .star-icon {
+    transform: scale(1.1);
+}

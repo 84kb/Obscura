@@ -1,0 +1,11 @@
+node_modules
+dist
+dist-electron
+release
+.vscode
+*.log
+.DS_Store
+.thumbnails
+*.db
+*.db-shm
+*.db-wal

@@ -1,0 +1,558 @@
+.sidebar {
+    width: var(--sidebar-width);
+    background: linear-gradient(180deg, var(--bg-sidebar) 0%, #1a1614 100%);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: var(--spacing-lg);
+    gap: var(--spacing-lg);
+}
+
+.sidebar-header {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.sidebar-title {
+    font-size: 16px;
+    font-weight: 800;
+    background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: 1px;
+}
+
+.sidebar-create-library-btn {
+    padding: 8px 12px;
+    background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+    box-shadow: var(--shadow-sm);
+}
+
+.sidebar-create-library-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+    filter: brightness(1.1);
+}
+
+.sidebar-create-library-btn:active {
+    transform: translateY(0);
+}
+
+.sidebar-create-library-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* ライブラリ新規作成ボタン */
+.sidebar-create-library-btn {
+    width: 100%;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+    border: none;
+    border-radius: var(--radius-md);
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 8px;
+}
+
+.sidebar-create-library-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+    filter: brightness(1.1);
+}
+
+.sidebar-create-library-btn:active {
+    transform: translateY(0);
+}
+
+.sidebar-create-library-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* ライブラリメニューコンテナ */
+.library-menu-container {
+    position: relative;
+    width: 100%;
+    margin-bottom: 8px;
+}
+
+/* 現在のライブラリボタン */
+.current-library-btn {
+    width: 100%;
+    padding: 12px 16px;
+    background: var(--bg-card);
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--text-main);
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: all 0.2s ease;
+}
+
+.current-library-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--primary);
+}
+
+.current-library-btn .library-icon {
+    display: flex;
+    align-items: center;
+    color: var(--primary);
+}
+
+.current-library-btn .library-name {
+    flex: 1;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 14px;
+}
+
+.current-library-btn .chevron {
+    color: var(--text-muted);
+    transition: transform 0.2s ease;
+}
+
+.current-library-btn .chevron.open {
+    transform: rotate(180deg);
+}
+
+/* ドロップダウンメニュー */
+.library-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    width: 100%;
+    min-width: 260px;
+    background: var(--bg-card);
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    z-index: 1000;
+    padding: 8px;
+    animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* メニュー内の検索バー */
+.library-search-container {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    background: var(--bg-hover);
+    border-radius: var(--radius-sm);
+    margin-bottom: 8px;
+}
+
+.library-search-container svg {
+    color: var(--text-muted);
+    margin-right: 8px;
+}
+
+.library-menu-search {
+    background: transparent;
+    border: none;
+    color: var(--text-main);
+    width: 100%;
+    font-size: 13px;
+    outline: none;
+}
+
+.close-menu-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.close-menu-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-main);
+}
+
+.library-menu-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 8px 0;
+    opacity: 0.5;
+}
+
+/* メニューアイテム */
+.library-menu-item {
+    width: 100%;
+    padding: 10px 12px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.1s ease;
+    text-align: left;
+}
+
+.library-menu-item:hover {
+    background: var(--bg-hover);
+    color: var(--primary);
+}
+
+.library-menu-item svg {
+    color: var(--text-muted);
+}
+
+.library-menu-item:hover svg {
+    color: var(--primary);
+}
+
+.library-menu-item-header {
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 8px 12px 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.library-option {
+    justify-content: flex-start;
+}
+
+.library-option span {
+    flex: 1;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.library-option.active {
+    background: linear-gradient(135deg, rgba(255, 140, 66, 0.15) 0%, rgba(255, 167, 38, 0.15) 100%);
+    color: var(--primary);
+}
+
+.library-option.active svg:first-child {
+    color: var(--primary);
+}
+
+.check-icon {
+    color: var(--primary) !important;
+}
+
+
+.sidebar-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.sidebar-section-title {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 0 var(--spacing-sm);
+}
+
+.sidebar-search {
+    width: 100%;
+    padding: 10px 14px;
+    background-color: var(--bg-card);
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--text-main);
+    font-size: 14px;
+    outline: none;
+    transition: all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.sidebar-search:focus {
+    border-color: var(--primary);
+    background-color: var(--bg-hover);
+    box-shadow: 0 0 0 3px rgba(255, 140, 66, 0.1);
+}
+
+.sidebar-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.sidebar-nav-item {
+    padding: 10px 14px;
+    background: var(--bg-card);
+    border: 1.5px solid transparent;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    color: var(--text-main);
+    transition: all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1), border 0.1s linear;
+    font-weight: 500;
+    font-size: 14px;
+    box-shadow: var(--shadow-sm);
+}
+
+.sidebar-nav-item:hover {
+    background: var(--bg-hover);
+    border-color: var(--primary);
+    transform: translateX(4px);
+    box-shadow: var(--shadow-md);
+}
+
+.sidebar-nav-item.active {
+    background: linear-gradient(135deg, rgba(255, 140, 66, 0.15) 0%, rgba(255, 167, 38, 0.15) 100%);
+    border-color: var(--primary);
+    color: var(--primary);
+    font-weight: 600;
+    box-shadow: var(--shadow-md);
+}
+
+.sidebar-nav-item.drop-top {
+    box-shadow: 0 -2px 0 0 var(--primary);
+    z-index: 10;
+}
+
+.sidebar-nav-item.drop-bottom {
+    box-shadow: 0 2px 0 0 var(--primary);
+    z-index: 10;
+}
+
+.sidebar-nav-item.drop-middle {
+    background: rgba(255, 140, 66, 0.2);
+    border-color: var(--primary);
+}
+
+.sidebar-genre-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.sidebar-sub-genres {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    /* 線を繋げるためgapはなし */
+    margin-top: 0;
+    position: relative;
+    padding-left: 20px;
+    /* インデント量 */
+}
+
+.folder-tree-container {
+    position: relative;
+}
+
+/* 縦線（兄弟間） - サブフォルダー内のみ */
+.sidebar-sub-genres>.folder-tree-container::before {
+    content: '';
+    position: absolute;
+    left: -11px;
+    /* 位置調整 */
+    top: 0;
+    bottom: 0;
+    /* gapがないので下まで */
+    width: 1px;
+    background-color: var(--border);
+}
+
+/* 最後の要素は線を中心で止める（L字） */
+.sidebar-sub-genres>.folder-tree-container:last-child::before {
+    height: 22px;
+    /* folder-tree-nodeの中心（高さ約44pxの半分） */
+    bottom: auto;
+}
+
+.folder-tree-node {
+    position: relative;
+    display: flex;
+    align-items: center;
+    margin-bottom: 2px;
+    /* gapの代わり */
+}
+
+/* 横線（分岐） - サブフォルダー内のみ */
+.sidebar-sub-genres>.folder-tree-container>.folder-tree-node::after {
+    content: '';
+    position: absolute;
+    left: -11px;
+    /* 縦線から開始 */
+    top: 50%;
+    width: 11px;
+    /* 縦線からアイコンまで */
+    height: 1px;
+    background-color: var(--border);
+}
+
+/* トップレベルの下線（drop-bottom用）などが被らないように調整 */
+
+.folder-icon {
+    color: var(--text-muted);
+    margin-right: 6px;
+    display: flex;
+    align-items: center;
+}
+
+.sidebar-nav-item.active .folder-icon {
+    color: var(--primary);
+}
+
+.folder-toggle-btn {
+    opacity: 0.7;
+    transition: opacity 0.2s;
+    z-index: 2;
+    /* 線の上に表示 */
+}
+
+.folder-toggle-btn:hover {
+    opacity: 1;
+    color: var(--primary);
+}
+
+.btn-icon-tiny {
+    background: var(--bg-hover);
+    border: 1.5px solid var(--border);
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px;
+    border-radius: var(--radius-sm);
+    transition: all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.btn-icon-tiny:hover {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: white;
+    transform: scale(1.1);
+}
+
+.sidebar-input-tiny {
+    width: 100%;
+    padding: 8px 12px;
+    background: var(--bg-card);
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--text-main);
+    font-size: 13px;
+    outline: none;
+    transition: all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.sidebar-input-tiny:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(255, 140, 66, 0.1);
+}
+
+.sidebar-create-form {
+    padding: 0;
+}
+
+.flex {
+    display: flex;
+}
+
+.justify-between {
+    justify-content: space-between;
+}
+
+.items-center {
+    align-items: center;
+}
+
+.px-2 {
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+.mb-1 {
+    margin-bottom: 4px;
+}
+
+/* サイドバーフッター */
+.sidebar-footer {
+    margin-top: auto;
+    padding-top: var(--spacing-md);
+    border-top: 1px solid var(--border);
+}
+
+.sidebar-settings-btn {
+    width: 100%;
+    padding: 10px 14px;
+    background: transparent;
+    border: 1.5px solid transparent;
+    border-radius: var(--radius-md);
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.sidebar-settings-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-main);
+    border-color: var(--border);
+}
+
+.sidebar-settings-btn span {
+    flex: 1;
+    text-align: left;
+}
+
+.sidebar-settings-btn svg {
+    flex-shrink: 0;
+}

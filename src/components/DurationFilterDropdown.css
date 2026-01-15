@@ -1,0 +1,122 @@
+.duration-filter-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    width: 260px;
+    background-color: var(--bg-dark);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-xl);
+    padding: 16px;
+    z-index: 1000;
+    animation: fadeIn 0.15s ease-out;
+}
+
+.duration-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.duration-input-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px 8px;
+}
+
+.duration-input {
+    width: 60px;
+    padding: 6px;
+    border: none;
+    background: transparent;
+    color: var(--text-main);
+    font-size: 13px;
+    text-align: center;
+    outline: none;
+}
+
+/* Remove spin buttons */
+.duration-input::-webkit-outer-spin-button,
+.duration-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.duration-input:focus {
+    color: var(--primary);
+}
+
+.duration-separator {
+    color: var(--text-muted);
+}
+
+.unit-select-container {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 2px;
+}
+
+.unit-select {
+    padding: 6px 12px;
+    border: none;
+    background: transparent;
+    color: var(--text-main);
+    font-size: 13px;
+    cursor: pointer;
+    border-radius: 6px;
+    outline: none;
+}
+
+.unit-select:hover {
+    background-color: var(--bg-hover);
+}
+
+.unit-select option {
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+}
+
+.duration-filter-footer {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+.clear-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 12px;
+    cursor: pointer;
+    padding: 6px 12px;
+    border-radius: 4px;
+    transition: color 0.15s;
+}
+
+.clear-btn:hover {
+    color: var(--text-main);
+    background-color: var(--bg-hover);
+    text-decoration: none;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}

@@ -1,0 +1,722 @@
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { MediaFile, Tag, TagFolder, Genre, FilterOptions, Library, RemoteLibrary } from '../types'
+
+export function useLibrary() {
+    const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([])
+    const [tags, setTags] = useState<Tag[]>([])
+    const [tagFolders, setTagFolders] = useState<TagFolder[]>([])
+    const [genres, setGenres] = useState<Genre[]>([])
+    const [libraries, setLibraries] = useState<Library[]>([])
+    const [loading, setLoading] = useState(false)
+    const [activeLibrary, setActiveLibrary] = useState<Library | null>(null)
+    const [activeRemoteLibrary, setActiveRemoteLibrary] = useState<RemoteLibrary | null>(null)
+    const [randomSeed, setRandomSeed] = useState<number>(Date.now())
+    const [filterOptions, setFilterOptions] = useState<FilterOptions>({
+        searchQuery: '',
+        selectedTags: [],
+        excludedTags: [],
+        selectedGenres: [],
+        tagFilterMode: 'or',
+        selectedFolders: [],
+        excludedFolders: [],
+        folderFilterMode: 'or',
+        filterType: 'all',
+        fileType: 'all',
+        sortOrder: 'name',
+        sortDirection: 'desc',
+        selectedRatings: [],
+        selectedExtensions: [],
+        excludedExtensions: [],
+        selectedArtists: [],
+        excludedArtists: []
+    })
+
+    // メディアファイルのパスをリモート用に変換するヘルパー
+    const transformRemoteMedia = useCallback((mediaList: MediaFile[], remoteLib: RemoteLibrary): MediaFile[] => {
+        // トークンのパース
+        let userToken = remoteLib.token
+        let accessToken = remoteLib.token
+        if (remoteLib.token.includes(':')) {
+            const parts = remoteLib.token.split(':')
+            userToken = parts[0]
+            accessToken = parts[1]
+        }
+
+        const baseUrl = remoteLib.url.replace(/\/$/, '')
+
+        return mediaList.map(m => ({
+            ...m,
+            // サムネイルとファイルパスをリモートURLに置換
+            // クエリパラメータでトークンを渡す (imgタグなどで読み込むため)
+            thumbnail_path: m.thumbnail_path ? `${baseUrl}/api/thumbnails/${m.id}?userToken=${userToken}&accessToken=${accessToken}` : '',
+            file_path: `${baseUrl}/api/stream/${m.id}?userToken=${userToken}&accessToken=${accessToken}`,
+            // webViewLinkなどがもしあればそれも変換検討だが、現在は file_path が重要
+            // is_remote フラグなどを追加してもいいが、型定義変更が必要になるので一旦既存フィールドを活用
+        }))
+    }, [])
+
+    // リモートライブラリへの切り替え
+    const switchToRemoteLibrary = useCallback((lib: RemoteLibrary) => {
+        setActiveLibrary(null)
+        setActiveRemoteLibrary(lib)
+        setMediaFiles([]) // クリア
+        setTags([])
+        setGenres([])
+    }, [])
+
+    // ローカルライブラリへの切り替え（既存のloadActiveLibraryの一部を分離してもよいが、今回はsetActiveLibraryのwrapperとして機能させる）
+    const switchToLocalLibrary = useCallback((lib: Library) => {
+        // setActiveLibrary(lib) は loadActiveLibrary 内で行われるが、明示的な切り替え用
+        // setActiveLibrary(lib) // これだけだとIPC上のアクティブ設定が変わらない
+        window.electronAPI.setActiveLibrary(lib.path).then(() => {
+            setActiveLibrary(lib)
+            setActiveRemoteLibrary(null)
+            loadMediaFiles() // リロード
+        })
+    }, [])
+
+    // アクティブなライブラリ読み込み (初期化時)
+    const loadActiveLibrary = useCallback(async () => {
+        try {
+            const library = await window.electronAPI.getActiveLibrary()
+            setActiveLibrary(library)
+            setActiveRemoteLibrary(null)
+        } catch (error) {
+            console.error('Failed to load active library:', error)
+        }
+    }, [])
+
+    // ライブラリ作成
+    const createLibrary = useCallback(async (name: string, parentPath: string) => {
+        try {
+            const library = await window.electronAPI.createLibrary(name, parentPath)
+            setActiveLibrary(library)
+            setActiveRemoteLibrary(null)
+            // 新しいライブラリなので、データをリロード
+            await loadLibraries() // 一覧も更新
+            await loadMediaFiles()
+            await loadTags()
+            await loadGenres()
+        } catch (error) {
+            console.error('Failed to create library:', error)
+        }
+    }, [])
+
+    // メディアファイル読み込み
+    const loadMediaFiles = useCallback(async () => {
+        if (activeRemoteLibrary) {
+            // リモートから取得
+            try {
+                setLoading(true)
+                // トークンヘッダー準備
+                let userToken = activeRemoteLibrary.token
+                let accessToken = activeRemoteLibrary.token
+                if (activeRemoteLibrary.token.includes(':')) {
+                    const parts = activeRemoteLibrary.token.split(':')
+                    userToken = parts[0]
+                    accessToken = parts[1]
+                }
+
+                const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
+                // 全件取得するために limit を大きく設定
+                const response = await fetch(`${baseUrl}/api/media?limit=10000`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'X-User-Token': userToken
+                    }
+                })
+
+                if (!response.ok) throw new Error('Failed to fetch remote media')
+
+                const data = await response.json()
+                // パス変換してセット
+                const transformed = transformRemoteMedia(data.media, activeRemoteLibrary)
+                setMediaFiles(transformed)
+            } catch (error) {
+                console.error('Failed to load remote media files:', error)
+                // エラー通知などを入れたいが、一旦コンソールのみ
+            } finally {
+                setLoading(false)
+            }
+        } else {
+            // ローカル (IPC)
+            try {
+                const files = await window.electronAPI.getMediaFiles()
+                setMediaFiles(files as MediaFile[])
+            } catch (error) {
+                console.error('Failed to load media files:', error)
+            }
+        }
+    }, [activeRemoteLibrary, transformRemoteMedia])
+
+    // タグ読み込み
+    const loadTags = useCallback(async () => {
+        if (activeRemoteLibrary) {
+            try {
+                let userToken = activeRemoteLibrary.token
+                let accessToken = activeRemoteLibrary.token
+                if (activeRemoteLibrary.token.includes(':')) {
+                    const parts = activeRemoteLibrary.token.split(':')
+                    userToken = parts[0]
+                    accessToken = parts[1]
+                }
+                const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
+
+                const response = await fetch(`${baseUrl}/api/tags`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'X-User-Token': userToken
+                    }
+                })
+                if (response.ok) {
+                    const data = await response.json()
+                    setTags(data)
+                }
+            } catch (e) {
+                console.error('Failed to load remote tags', e)
+            }
+        } else {
+            try {
+                const loadedTags = await window.electronAPI.getTags()
+                setTags(loadedTags as Tag[])
+            } catch (error) {
+                console.error('Failed to load tags:', error)
+            }
+        }
+    }, [activeRemoteLibrary])
+
+    // タグフォルダー読み込み (現在リモートAPI未実装のためスキップまたは実装が必要。一旦スキップ)
+    const loadTagFolders = useCallback(async () => {
+        if (activeRemoteLibrary) {
+            setTagFolders([]) // リモートは未対応とする
+            return
+        }
+        try {
+            const loadedFolders = await window.electronAPI.getTagFolders()
+            setTagFolders(loadedFolders as TagFolder[])
+        } catch (error) {
+            console.error('Failed to load tag folders:', error)
+        }
+    }, [activeRemoteLibrary])
+
+    // ジャンル読み込み
+    const loadGenres = useCallback(async () => {
+        if (activeRemoteLibrary) {
+            try {
+                let userToken = activeRemoteLibrary.token
+                let accessToken = activeRemoteLibrary.token
+                if (activeRemoteLibrary.token.includes(':')) {
+                    const parts = activeRemoteLibrary.token.split(':')
+                    userToken = parts[0]
+                    accessToken = parts[1]
+                }
+                const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
+
+                const response = await fetch(`${baseUrl}/api/genres`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'X-User-Token': userToken
+                    }
+                })
+                if (response.ok) {
+                    const data = await response.json()
+                    setGenres(data)
+                }
+            } catch (e) {
+                console.error('Failed to load remote genres', e)
+            }
+        } else {
+            try {
+                const loadedGenres = await window.electronAPI.getGenres()
+                setGenres(loadedGenres as Genre[])
+            } catch (error) {
+                console.error('Failed to load genres:', error)
+            }
+        }
+    }, [activeRemoteLibrary])
+
+
+    // フォルダー選択とスキャン
+    const selectAndScanFolder = useCallback(async () => {
+        setLoading(true)
+        try {
+            const folderPath = await window.electronAPI.selectFolder()
+            if (folderPath) {
+                await window.electronAPI.scanFolder(folderPath)
+                await loadMediaFiles()
+            }
+        } catch (error) {
+            console.error('Failed to scan folder:', error)
+        } finally {
+            setLoading(false)
+        }
+    }, [loadMediaFiles])
+
+    // タグ作成
+    const createTag = useCallback(async (name: string) => {
+        try {
+            const result = await window.electronAPI.createTag(name)
+            await loadTags()
+            return result
+        } catch (error) {
+            console.error('Failed to create tag:', error)
+            return null
+        }
+    }, [loadTags])
+
+    // タグ削除
+    const deleteTag = useCallback(async (id: number) => {
+        try {
+            await window.electronAPI.deleteTag(id)
+            await loadTags()
+        } catch (error) {
+            console.error('Failed to delete tag:', error)
+        }
+    }, [loadTags])
+
+    // ジャンル作成
+    const createGenre = useCallback(async (name: string, parentId?: number | null) => {
+        try {
+            const result = await window.electronAPI.createGenre(name, parentId)
+            await loadGenres()
+            return result
+        } catch (error) {
+            console.error('Failed to create genre:', error)
+            return null
+        }
+    }, [loadGenres])
+
+    // ジャンル削除
+    const deleteGenre = useCallback(async (id: number) => {
+        try {
+            await window.electronAPI.deleteGenre(id)
+            await loadGenres()
+        } catch (error) {
+            console.error('Failed to delete genre:', error)
+        }
+    }, [loadGenres])
+
+    // ジャンル名変更
+    const renameGenre = useCallback(async (id: number, newName: string) => {
+        try {
+            await window.electronAPI.renameGenre(id, newName)
+            await loadGenres()
+        } catch (error) {
+            console.error('Failed to rename genre:', error)
+        }
+    }, [loadGenres])
+
+    // メディアにタグ追加
+    const addTagToMedia = useCallback(async (mediaId: number, tagId: number) => {
+        try {
+            await window.electronAPI.addTagToMedia(mediaId, tagId)
+            await loadMediaFiles()
+        } catch (error) {
+            console.error('Failed to add tag to media:', error)
+        }
+    }, [loadMediaFiles])
+
+    // メディアからタグ削除
+    const removeTagFromMedia = useCallback(async (mediaId: number, tagId: number) => {
+        try {
+            await window.electronAPI.removeTagFromMedia(mediaId, tagId)
+            await loadMediaFiles()
+        } catch (error) {
+            console.error('Failed to remove tag from media:', error)
+        }
+    }, [loadMediaFiles])
+
+    // メディアにジャンル追加
+    const addGenreToMedia = useCallback(async (mediaId: number, genreId: number) => {
+        try {
+            await window.electronAPI.addGenreToMedia(mediaId, genreId)
+            await loadMediaFiles()
+        } catch (error) {
+            console.error('Failed to add genre to media:', error)
+        }
+    }, [loadMediaFiles])
+
+    // メディアからジャンル削除
+    const removeGenreFromMedia = useCallback(async (mediaId: number, genreId: number) => {
+        try {
+            await window.electronAPI.removeGenreFromMedia(mediaId, genreId)
+            await loadMediaFiles()
+        } catch (error) {
+            console.error('Failed to remove genre from media:', error)
+        }
+    }, [loadMediaFiles])
+
+    // ゴミ箱操作
+    const moveToTrash = useCallback(async (id: number) => {
+        try {
+            await window.electronAPI.moveToTrash(id)
+            await loadMediaFiles()
+        } catch (error) {
+            console.error('Failed to move to trash:', error)
+        }
+    }, [loadMediaFiles])
+
+    const restoreFromTrash = useCallback(async (id: number) => {
+        try {
+            await window.electronAPI.restoreFromTrash(id)
+            await loadMediaFiles()
+        } catch (error) {
+            console.error('Failed to restore from trash:', error)
+        }
+    }, [loadMediaFiles])
+
+    const deletePermanently = useCallback(async (id: number) => {
+        try {
+            await window.electronAPI.deletePermanently(id)
+            await loadMediaFiles()
+        } catch (error) {
+            console.error('Failed to delete permanently:', error)
+        }
+    }, [loadMediaFiles])
+
+    // 再生日時更新
+    const updateLastPlayed = useCallback(async (id: number) => {
+        try {
+            await window.electronAPI.updateLastPlayed(id)
+            await loadMediaFiles()
+        } catch (error) {
+            console.error('Failed to update last played:', error)
+        }
+    }, [loadMediaFiles])
+
+    // メディアインポート
+    const importMedia = useCallback(async (filePaths: string[]) => {
+        setLoading(true)
+        try {
+            await window.electronAPI.importMedia(filePaths)
+            await loadMediaFiles()
+        } catch (error) {
+            console.error('Failed to import media:', error)
+        } finally {
+            setLoading(false)
+        }
+    }, [loadMediaFiles])
+
+    // レーティング更新
+    const updateRating = useCallback(async (id: number, rating: number) => {
+        try {
+            await window.electronAPI.updateRating(id, rating)
+            await loadMediaFiles()
+        } catch (error) {
+            console.error('Failed to update rating:', error)
+        }
+    }, [loadMediaFiles])
+
+    // メディア名変更
+    const renameMedia = useCallback(async (id: number, newName: string) => {
+        try {
+            await window.electronAPI.renameMedia(id, newName)
+            await loadMediaFiles()
+        } catch (error) {
+            console.error('Failed to rename media:', error)
+        }
+    }, [loadMediaFiles])
+
+    // 投稿者更新
+    const updateArtist = useCallback(async (id: number, artist: string | null) => {
+        try {
+            await window.electronAPI.updateArtist(id, artist)
+            await loadMediaFiles()
+        } catch (error) {
+            console.error('Failed to update artist:', error)
+        }
+    }, [loadMediaFiles])
+
+    // フィルタリングされたメディアファイル
+    const filteredMediaFiles = useMemo(() => {
+        let result = [...mediaFiles]
+
+        // 基本フィルター (Trash以外はis_deletedを除外)
+        if (filterOptions.filterType === 'trash') {
+            result = result.filter(m => m.is_deleted)
+        } else if (filterOptions.filterType === 'tag_manager') {
+            return [] // タグ管理画面では何も表示しない
+        } else {
+            result = result.filter(m => !m.is_deleted)
+        }
+
+        // セクションフィルター
+        switch (filterOptions.filterType) {
+            case 'uncategorized':
+                result = result.filter(m => !m.genres || m.genres.length === 0)
+                break
+            case 'untagged':
+                result = result.filter(m => !m.tags || m.tags.length === 0)
+                break
+            case 'recent':
+                result = result.filter(m => m.last_played_at !== null)
+                break
+            case 'random':
+                // シードに基づく決定論的なソート (再生開始時などにmediaFilesが更新されても順序を維持するため)
+                result = result.sort((a, b) => {
+                    const seedA = a.id + randomSeed
+                    const seedB = b.id + randomSeed
+                    // 簡易的なハッシュ関数 (Math.sinを使用)
+                    const valA = Math.sin(seedA) * 10000 - Math.floor(Math.sin(seedA) * 10000)
+                    const valB = Math.sin(seedB) * 10000 - Math.floor(Math.sin(seedB) * 10000)
+                    return valA - valB
+                })
+                return result
+            default:
+                break
+        }
+
+        // 検索クエリフィルター
+        if (filterOptions.searchQuery) {
+            const query = filterOptions.searchQuery.toLowerCase()
+            result = result.filter(m => m.file_name.toLowerCase().includes(query))
+        }
+
+        // ジャンルフィルター (Sidebarのジャンル選択 & FolderFilterDropdown)
+        if (filterOptions.selectedGenres.length > 0) {
+            if (filterOptions.folderFilterMode === 'and') {
+                // AND: すべてのジャンルを含む
+                result = result.filter(m =>
+                    filterOptions.selectedGenres.every(genreId =>
+                        m.genres?.some(g => g.id === genreId)
+                    )
+                )
+            } else {
+                // OR: いずれかのジャンルを含む
+                result = result.filter(m =>
+                    m.genres?.some(g => filterOptions.selectedGenres.includes(g.id))
+                )
+            }
+        }
+
+        // 評価フィルター
+        if (filterOptions.selectedRatings && filterOptions.selectedRatings.length > 0) {
+            result = result.filter(m => {
+                const rating = m.rating || 0
+                return filterOptions.selectedRatings.includes(rating)
+            })
+        }
+
+        // 拡張子フィルター
+        if ((filterOptions.selectedExtensions && filterOptions.selectedExtensions.length > 0) ||
+            (filterOptions.excludedExtensions && filterOptions.excludedExtensions.length > 0)) {
+            result = result.filter(m => {
+                const ext = m.file_name.split('.').pop()?.toLowerCase() || ''
+
+                // 除外チェック
+                if (filterOptions.excludedExtensions.includes(ext)) {
+                    return false
+                }
+
+                // 選択チェック (選択されているものがある場合のみ)
+                if (filterOptions.selectedExtensions.length > 0) {
+                    return filterOptions.selectedExtensions.includes(ext)
+                }
+
+                return true
+            })
+        }
+
+        // タグフィルター
+        if (filterOptions.selectedTags.length > 0) {
+            if (filterOptions.tagFilterMode === 'and') {
+                // AND: すべてのタグを含む
+                result = result.filter(m =>
+                    filterOptions.selectedTags.every(tagId =>
+                        m.tags?.some(t => t.id === tagId)
+                    )
+                )
+            } else {
+                // OR: いずれかのタグを含む
+                result = result.filter(m =>
+                    m.tags?.some(t => filterOptions.selectedTags.includes(t.id))
+                )
+            }
+        }
+
+        // タグ除外フィルター
+        if (filterOptions.excludedTags.length > 0) {
+            result = result.filter(m =>
+                !m.tags?.some(t => filterOptions.excludedTags.includes(t.id))
+            )
+        }
+        // 投稿者フィルター
+        if ((filterOptions.selectedArtists && filterOptions.selectedArtists.length > 0) ||
+            (filterOptions.excludedArtists && filterOptions.excludedArtists.length > 0)) {
+            result = result.filter(m => {
+                const artist = m.artist || '未設定'
+
+                // 除外チェック
+                if (filterOptions.excludedArtists.includes(artist)) {
+                    return false
+                }
+
+                // 選択チェック (選択されているものがある場合のみ)
+                if (filterOptions.selectedArtists.length > 0) {
+                    return filterOptions.selectedArtists.includes(artist)
+                }
+
+                return true
+            })
+        }
+
+        // 再生時間フィルター
+        if (filterOptions.durationMin !== null && filterOptions.durationMin !== undefined) {
+            result = result.filter(m => (m.duration || 0) >= filterOptions.durationMin!)
+        }
+        if (filterOptions.durationMax !== null && filterOptions.durationMax !== undefined) {
+            result = result.filter(m => (m.duration || 0) <= filterOptions.durationMax!)
+        }
+
+        if (filterOptions.durationMax !== null && filterOptions.durationMax !== undefined) {
+            result = result.filter(m => (m.duration || 0) <= filterOptions.durationMax!)
+        }
+
+        // 変更日フィルター
+        if (filterOptions.dateModifiedMin || filterOptions.dateModifiedMax) {
+            result = result.filter(m => {
+                if (!m.modified_date) return false
+                const modDate = new Date(m.modified_date).getTime()
+
+                if (filterOptions.dateModifiedMin) {
+                    const minDate = new Date(filterOptions.dateModifiedMin)
+                    minDate.setHours(0, 0, 0, 0)
+                    if (modDate < minDate.getTime()) return false
+                }
+
+                if (filterOptions.dateModifiedMax) {
+                    const maxDate = new Date(filterOptions.dateModifiedMax)
+                    maxDate.setHours(23, 59, 59, 999)
+                    if (modDate > maxDate.getTime()) return false
+                }
+
+                return true
+            })
+        }
+
+        // フォルダーフィルター (ファイルパスベース - UIがジャンルベースに変更されたため無効化)
+        // if (filterOptions.selectedFolders.length > 0) { ... }
+
+        // フォルダー除外フィルター (ファイルパスベース - UIがジャンルベースに変更されたため無効化)
+        // if (filterOptions.excludedFolders.length > 0) { ... }
+
+        // ソート処理
+        result.sort((a, b) => {
+            let comparison = 0
+            switch (filterOptions.sortOrder) {
+                case 'name':
+                    comparison = a.file_name.localeCompare(b.file_name)
+                    break
+                case 'date':
+                    comparison = new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                    break
+                case 'size':
+                    comparison = (a.file_size || 0) - (b.file_size || 0)
+                    break
+                case 'duration':
+                    comparison = (a.duration || 0) - (b.duration || 0)
+                    break
+                case 'last_played':
+                    const dateA = a.last_played_at ? new Date(a.last_played_at).getTime() : 0
+                    const dateB = b.last_played_at ? new Date(b.last_played_at).getTime() : 0
+                    comparison = dateA - dateB
+                    break
+            }
+            return filterOptions.sortDirection === 'asc' ? comparison : -comparison
+        })
+
+        return result
+    }, [mediaFiles, filterOptions, randomSeed])
+
+    // ランダムフィルター選択時にシードを更新（毎回違う順序にするため）
+    const prevFilterType = useRef(filterOptions.filterType)
+    useEffect(() => {
+        if (filterOptions.filterType === 'random' && prevFilterType.current !== 'random') {
+            setRandomSeed(Date.now())
+        }
+        prevFilterType.current = filterOptions.filterType
+    }, [filterOptions.filterType])
+
+    // ライブラリ一覧読み込み
+    const loadLibraries = useCallback(async () => {
+        try {
+            const loadedLibraries = await window.electronAPI.getLibraries()
+            setLibraries(loadedLibraries)
+        } catch (error) {
+            console.error('Failed to load libraries:', error)
+        }
+    }, [])
+
+    // ライブラリ切り替え
+    const switchLibrary = useCallback(async (libraryPath: string) => {
+        try {
+            await window.electronAPI.setActiveLibrary(libraryPath)
+            const library = await window.electronAPI.getActiveLibrary()
+            setActiveLibrary(library)
+
+            // データをリロード
+            await loadMediaFiles()
+            await loadTags()
+            await loadGenres()
+        } catch (error) {
+            console.error('Failed to switch library:', error)
+        }
+    }, [loadMediaFiles, loadTags, loadGenres])
+
+    // ライブラリ統計
+    const libraryStats = useMemo(() => {
+        const totalCount = mediaFiles.length
+        const totalSize = mediaFiles.reduce((acc, file) => acc + (file.file_size || 0), 0)
+        return { totalCount, totalSize }
+    }, [mediaFiles])
+
+    // 初期読み込み
+    useEffect(() => {
+        loadActiveLibrary()
+        loadLibraries() // ライブラリ一覧も読み込む
+        loadMediaFiles()
+        loadTags()
+        loadTagFolders()
+        loadGenres()
+    }, [loadActiveLibrary, loadLibraries, loadMediaFiles, loadTags, loadTagFolders, loadGenres])
+
+    return {
+        mediaFiles: filteredMediaFiles,
+        allMediaFiles: mediaFiles,  // フィルタリング前のメディアファイル一覧（フォルダーフィルター用）
+        tags,
+        tagFolders,
+        genres,
+        libraries,
+        loading,
+        activeLibrary,
+        hasActiveLibrary: activeLibrary !== null,
+        filterOptions,
+        setFilterOptions,
+        createLibrary,
+        switchLibrary,
+        selectAndScanFolder,
+        createTag,
+        deleteTag,
+        createGenre,
+        deleteGenre,
+        addTagToMedia,
+        removeTagFromMedia,
+        addGenreToMedia,
+        removeGenreFromMedia,
+        moveToTrash,
+        restoreFromTrash,
+        deletePermanently,
+        updateLastPlayed,
+        importMedia,
+        updateRating,
+        renameMedia,
+        updateArtist,
+        libraryStats,
+        refreshLibrary: loadMediaFiles,
+        loadGenres,
+        renameGenre,
+        activeRemoteLibrary,
+        switchToRemoteLibrary,
+        switchToLocalLibrary
+    }
+}

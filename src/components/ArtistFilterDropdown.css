@@ -1,0 +1,150 @@
+.artist-filter-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 4px;
+    width: 280px;
+    background-color: var(--bg-dark);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-xl);
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    max-height: 400px;
+    overflow: hidden;
+    animation: fadeIn 0.15s ease-out;
+}
+
+.artist-filter-header {
+    padding: 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.artist-filter-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 12px;
+    color: var(--text-muted);
+}
+
+.artist-filter-search input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text-main);
+    font-size: 13px;
+    outline: none;
+}
+
+.artist-filter-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+
+.artist-filter-item {
+    display: flex;
+    align-items: center;
+    padding: 8px 16px;
+    gap: 12px;
+    cursor: pointer;
+    transition: background 0.15s;
+    user-select: none;
+}
+
+.artist-filter-item:hover {
+    background-color: var(--bg-hover);
+}
+
+.artist-filter-item.selected {
+    background-color: rgba(255, 140, 66, 0.1);
+}
+
+.artist-filter-item.excluded {
+    background-color: rgba(255, 59, 48, 0.1);
+}
+
+.artist-checkbox {
+    width: 16px;
+    height: 16px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.artist-filter-item.selected .artist-checkbox {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: white;
+}
+
+.artist-filter-item.excluded .artist-checkbox {
+    border-color: #ff3b30;
+    background: #ff3b30;
+    color: white;
+}
+
+.artist-filter-item.excluded .artist-name {
+    text-decoration: line-through;
+    color: #ff3b30;
+    opacity: 0.7;
+}
+
+.artist-name {
+    flex: 1;
+    font-size: 13px;
+    color: var(--text-main);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.artist-count {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.artist-filter-item.select-all {
+    border-top: 1px solid var(--border);
+    margin-top: 4px;
+    padding-top: 12px;
+    color: var(--text-muted);
+}
+
+.artist-filter-footer {
+    padding: 8px 16px;
+    border-top: 1px solid var(--border);
+    background: rgba(0, 0, 0, 0.1);
+    display: flex;
+    gap: 16px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.artist-filter-footer u {
+    text-decoration: underline;
+    opacity: 0.8;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
