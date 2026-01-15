@@ -5,10 +5,11 @@
   "main": "dist-electron/main.cjs",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && electron-builder",
+    "bump": "node scripts/bump-version.js",
+    "build": "npm run bump && tsc && vite build && electron-builder",
     "preview": "vite preview",
     "electron:dev": "vite",
-    "electron:build": "vite build && electron-builder"
+    "electron:build": "npm run bump && vite build && electron-builder"
   },
   "keywords": [
     "media",
