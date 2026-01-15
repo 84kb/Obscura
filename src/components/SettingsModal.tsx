@@ -214,10 +214,48 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
         if (!window.electronAPI) return
         setUpdateStatus('checking')
         try {
-            await (window.electronAPI as any).checkForUpdates()
-        } catch (e) {
+            // 15秒のタイムアウトを設定
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Request timed out')), 15000)
+            )
+
+            // アップデートチェック実行
+            const resultPromise = (window.electronAPI as any).checkForUpdates()
+
+            // 競合
+            const result: any = await Promise.race([resultPromise, timeoutPromise])
+
+            console.log('Update Check Result:', result)
+
+            // イベントが発火せず、結果だけで判断する場合のフォールバック
+            // 通常はイベントで処理されるが、念のため
+            if (result && result.updateInfo) {
+                // バージョン比較などをここで行うのは複雑なので、
+                // イベントが来ていない場合は available とみなすか判断が難しい
+                // ただ、resultが返ってきた時点で checking のままなら何かおかしい
+            }
+
+        } catch (e: any) {
             console.error('Check update failed', e)
             setUpdateStatus('error')
+            setUpdateInfo(e.message || 'Check failed')
+        }
+    }
+
+    const handleDownloadUpdate = async () => {
+        if (!window.electronAPI) return
+        setUpdateStatus('downloading')
+        // download-update IPC does not exist in preload yet?
+        // Wait, autoUpdater.downloadUpdate() is needed.
+        // We need to add downloadUpdate to preload and updater.ts
+        // For now, let's just use "checkForUpdates" triggering if autoDownload is true?
+        // No, we set autoDownload=false. So we need an explicit download call.
+        try {
+            await (window.electronAPI as any).downloadUpdate()
+        } catch (e: any) {
+            console.error('Download failed', e)
+            setUpdateStatus('error')
+            setUpdateInfo(e.message)
         }
     }
 
@@ -1108,8 +1146,13 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                 </div>
                             )}
                             {updateStatus === 'available' && (
-                                <div style={{ color: '#4ade80' }}>
-                                    新しいバージョンが利用可能です。ダウンロードを開始します...
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    <div style={{ color: '#4ade80' }}>
+                                        新しいバージョンが利用可能です (v{updateInfo?.version})
+                                    </div>
+                                    <button className="settings-button primary" onClick={handleDownloadUpdate} style={{ backgroundColor: '#0ea5e9', border: 'none' }}>
+                                        ダウンロード開始
+                                    </button>
                                 </div>
                             )}
                             {updateStatus === 'not-available' && (

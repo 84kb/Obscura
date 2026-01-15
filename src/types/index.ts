@@ -209,6 +209,7 @@ export interface ElectronAPI {
 
     // === 自動アップデート ===
     checkForUpdates: () => Promise<any>
+    downloadUpdate: () => Promise<any>
     quitAndInstall: () => Promise<void>
     onUpdateStatus: (callback: (data: { status: string; info?: any }) => void) => () => void
 

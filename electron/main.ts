@@ -12,6 +12,15 @@ import { initClientSettings, getConfig as getClientConfig, updateConfig as updat
 import { downloadFile } from './downloader'
 import { initUpdater } from './updater'
 
+// クラッシュハンドリング
+process.on('uncaughtException', (error) => {
+    console.error('[(Main) Uncaught Exception]:', error)
+})
+
+process.on('unhandledRejection', (reason, _promise) => {
+    console.error('[(Main) Unhandled Rejection]:', reason)
+})
+
 
 // 開発環境かどうか
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged

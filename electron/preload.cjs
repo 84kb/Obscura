@@ -134,6 +134,7 @@ try {
 
         // === 自動アップデート ===
         checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+        downloadUpdate: () => ipcRenderer.invoke('download-update'),
         quitAndInstall: () => ipcRenderer.invoke('quit-and-install'),
         onUpdateStatus: (callback) => {
             const subscription = (_event, data) => callback(data);

@@ -15,8 +15,8 @@ export function initUpdater(win: BrowserWindow) {
     // 開発環境でもアップデートチェックを許可する場合 (デバッグ用)
     // autoUpdater.forceDevUpdateConfig = true
 
-    // 自動ダウンロードを有効にする (デフォルトはtrueだが明示的に)
-    autoUpdater.autoDownload = true
+    // 自動ダウンロードを無効にする (クラッシュ回避のため手動制御に変更)
+    autoUpdater.autoDownload = false
     autoUpdater.autoInstallOnAppQuit = true
     autoUpdater.allowPrerelease = true // Alpha版のためプレリリースを許可
 
@@ -61,7 +61,12 @@ export function initUpdater(win: BrowserWindow) {
     })
 
     ipcMain.handle('quit-and-install', () => {
-        autoUpdater.quitAndInstall()
+        // isSilent=true, isForceRunAfter=true
+        autoUpdater.quitAndInstall(true, true)
+    })
+
+    ipcMain.handle('download-update', async () => {
+        return autoUpdater.downloadUpdate()
     })
 
     // 起動時にアップデートを確認
@@ -79,11 +84,15 @@ export function checkForUpdates() {
 }
 
 export function quitAndInstall() {
-    autoUpdater.quitAndInstall()
+    autoUpdater.quitAndInstall(true, true)
+}
+
+export function downloadUpdate() {
+    return autoUpdater.downloadUpdate()
 }
 
 function sendStatusToWindow(text: string, info?: any) {
-    if (updateWin) {
+    if (updateWin && !updateWin.isDestroyed()) {
         updateWin.webContents.send('update-status', { status: text, info })
     }
 }
