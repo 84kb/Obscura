@@ -1086,7 +1086,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         <div className="settings-info">
                             <span className="settings-label">バージョン情報</span>
                             <span className="settings-description">
-                                現在のバージョン: v{window.electronAPI ? '0.1.0-beta' : 'Unknown'}
+                                現在のバージョン: v{window.electronAPI ? '0.1.0-alpha' : 'Unknown'}
                                 {updateInfo?.version && (
                                     <span style={{ marginLeft: '10px' }}>
                                         (最新: v{updateInfo.version})

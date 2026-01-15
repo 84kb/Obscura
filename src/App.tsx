@@ -24,7 +24,8 @@ const DEFAULT_SETTINGS: AppSettings = {
     viewMode: 'grid'
 }
 
-function App() {
+
+export default function App() {
     const {
         mediaFiles,
         allMediaFiles,
@@ -683,6 +684,7 @@ function App() {
         <div
             className="app"
         >
+
             <Sidebar
                 filterOptions={filterOptions}
                 onFilterChange={setFilterOptions}
@@ -840,4 +842,4 @@ function App() {
     )
 }
 
-export default App
+

@@ -1,0 +1,54 @@
+.titleBar {
+  height: 32px;
+  width: 100%;
+  display: flex;
+  justify-content: flex-end; /* Right-align buttons */
+  align-items: center;
+  /* background-color: #1a1a1a;  Matches main window background */
+  background-color: transparent; /* Overlay on top or blend */
+  position: absolute; /* Fixed at the top */
+  top: 0;
+  left: 0;
+  z-index: 10000; /* Ensure it's on top of everything */
+  -webkit-app-region: drag; /* Window draggable area */
+}
+
+.dragRegion {
+  flex: 1;
+  height: 100%;
+}
+
+.windowControls {
+  display: flex;
+  height: 100%;
+  -webkit-app-region: no-drag; /* Buttons should not be draggable */
+}
+
+.controlButton {
+  width: 46px;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: transparent;
+  border: none;
+  color: #ccc;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+  outline: none;
+}
+
+.controlButton:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.controlButton.closeButton:hover {
+  background-color: #e81123;
+  color: #fff;
+}
+
+.icon {
+  width: 10px;
+  height: 10px;
+}

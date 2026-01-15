@@ -9,13 +9,16 @@
     position: sticky;
     top: 0;
     z-index: 100;
+    -webkit-app-region: drag;
 }
 
 .header-left,
+.header-center,
 .header-right {
     display: flex;
     align-items: center;
     gap: 16px;
+    -webkit-app-region: no-drag;
 }
 
 .history-buttons {
@@ -33,6 +36,7 @@
     display: flex;
     align-items: center;
     transition: all 0.2s;
+    -webkit-app-region: no-drag;
 }
 
 .icon-btn:hover {
@@ -390,8 +394,4 @@
     font-size: 13px;
     cursor: pointer;
     transition: all 0.2s;
-}
-
-.dropdown-refresh-btn:hover {
-    background: var(--bg-hover);
 }

@@ -137,8 +137,14 @@ try {
         onUpdateStatus: (callback) => {
             const subscription = (_event, data) => callback(data);
             ipcRenderer.on('update-status', subscription);
+            ipcRenderer.on('update-status', subscription);
             return () => ipcRenderer.off('update-status', subscription);
         },
+
+        // ウィンドウ操作
+        minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
+        maximizeWindow: () => ipcRenderer.invoke('window-maximize'),
+        closeWindow: () => ipcRenderer.invoke('window-close'),
     });
 
     console.log('✅ [Preload] Electron API successfully exposed to renderer.');

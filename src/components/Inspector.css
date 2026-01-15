@@ -11,7 +11,9 @@
 }
 
 .inspector-header {
-    padding: var(--spacing-md);
+    height: 60px;
+    /* Match MainHeader height */
+    padding: 0 var(--spacing-md);
     border-bottom: 1px solid var(--border);
     display: flex;
     justify-content: space-between;
@@ -23,6 +25,37 @@
     font-size: 16px;
     font-weight: 600;
     color: var(--text-main);
+}
+
+.window-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    -webkit-app-region: no-drag;
+}
+
+.control-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+}
+
+.control-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-main);
+}
+
+.control-btn.close-btn:hover {
+    background: #e81123;
+    color: white;
 }
 
 .inspector-content {
@@ -633,10 +666,6 @@
 
 
 /* Spacing Overrides */
-.inspector-header {
-    padding: var(--spacing-sm) !important;
-}
-
 .section-header {
     padding: 6px var(--spacing-md) !important;
 }

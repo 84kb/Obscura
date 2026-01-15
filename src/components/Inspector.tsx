@@ -410,6 +410,29 @@ export function Inspector({
             <div className="inspector slide-in-right">
                 <div className="inspector-header">
                     <h2 className="inspector-title">ライブラリ統計</h2>
+                    <div className="window-controls">
+                        <button className="control-btn" title="常に手前に表示">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <line x1="12" y1="17" x2="12" y2="22"></line>
+                                <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17z"></path>
+                            </svg>
+                        </button>
+                        <button className="control-btn" onClick={() => window.electronAPI?.minimizeWindow()} title="最小化">
+                            <svg viewBox="0 0 10 1" fill="currentColor" width="10" height="10">
+                                <rect width="10" height="1" y="4.5" />
+                            </svg>
+                        </button>
+                        <button className="control-btn" onClick={() => window.electronAPI?.maximizeWindow()} title="最大化">
+                            <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1" width="10" height="10">
+                                <rect x="0.5" y="0.5" width="9" height="9" />
+                            </svg>
+                        </button>
+                        <button className="control-btn close-btn" onClick={() => window.electronAPI?.closeWindow()} title="閉じる">
+                            <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1" width="10" height="10">
+                                <path d="M1,1 L9,9 M9,1 L1,9" />
+                            </svg>
+                        </button>
+                    </div>
                 </div>
                 <div className="inspector-content">
                     <div className="stats-container">
@@ -431,6 +454,29 @@ export function Inspector({
         <div className="inspector slide-in-right">
             <div className="inspector-header">
                 <h2 className="inspector-title">インスペクタ</h2>
+                <div className="window-controls">
+                    <button className="control-btn" title="常に手前に表示">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <line x1="12" y1="17" x2="12" y2="22"></line>
+                            <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17z"></path>
+                        </svg>
+                    </button>
+                    <button className="control-btn" onClick={() => window.electronAPI?.minimizeWindow()} title="最小化">
+                        <svg viewBox="0 0 10 1" fill="currentColor" width="10" height="10">
+                            <rect width="10" height="1" y="4.5" />
+                        </svg>
+                    </button>
+                    <button className="control-btn" onClick={() => window.electronAPI?.maximizeWindow()} title="最大化">
+                        <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1" width="10" height="10">
+                            <rect x="0.5" y="0.5" width="9" height="9" />
+                        </svg>
+                    </button>
+                    <button className="control-btn close-btn" onClick={() => window.electronAPI?.closeWindow()} title="閉じる">
+                        <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1" width="10" height="10">
+                            <path d="M1,1 L9,9 M9,1 L1,9" />
+                        </svg>
+                    </button>
+                </div>
             </div>
 
             <div className="inspector-content">
@@ -859,6 +905,6 @@ export function Inspector({
                     </div>
                 )}
             </div>
-        </div>
+        </div >
     )
 }

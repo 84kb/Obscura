@@ -471,6 +471,8 @@ export function MainHeader({
                             onChange={(e) => onFilterChange({ ...filterOptions, searchQuery: e.target.value })}
                         />
                     </div>
+
+
                 </div>
             </header>
 

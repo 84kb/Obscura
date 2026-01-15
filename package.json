@@ -1,6 +1,6 @@
 {
   "name": "obscura",
-  "version": "0.1.0-beta",
+  "version": "0.1.0-alpha",
   "description": "ライブラリ型メディアプレイヤー",
   "main": "dist-electron/main.cjs",
   "scripts": {
@@ -72,7 +72,8 @@
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,

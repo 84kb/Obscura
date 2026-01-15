@@ -211,6 +211,11 @@ export interface ElectronAPI {
     onUpdateStatus: (callback: (data: { status: string; info?: any }) => void) => () => void
 
     on: (channel: string, func: (...args: any[]) => void) => void
+
+    // ウィンドウ操作
+    minimizeWindow: () => Promise<void>
+    maximizeWindow: () => Promise<void>
+    closeWindow: () => Promise<void>
 }
 
 export interface RemoteLibrary {

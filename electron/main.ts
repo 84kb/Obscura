@@ -58,6 +58,8 @@ function createWindow() {
         minWidth: 1000,
         minHeight: 600,
         title: 'Obscura',
+        frame: false, // 枠を削除
+        titleBarStyle: 'hidden', // タイトルバーを非表示
         webPreferences: {
             preload: preloadPath,
             contextIsolation: true,
@@ -651,6 +653,23 @@ ipcMain.handle('restore-from-trash', async (_, id: number) => {
 
 ipcMain.handle('delete-permanently', (_, id) => mediaDB.deletePermanently(id))
 ipcMain.handle('update-last-played', (_, id) => mediaDB.updateLastPlayed(id))
+
+// ウィンドウ操作
+ipcMain.handle('window-minimize', () => {
+    mainWindow?.minimize()
+})
+
+ipcMain.handle('window-maximize', () => {
+    if (mainWindow?.isMaximized()) {
+        mainWindow?.unmaximize()
+    } else {
+        mainWindow?.maximize()
+    }
+})
+
+ipcMain.handle('window-close', () => {
+    mainWindow?.close()
+})
 
 // コメント
 ipcMain.handle('add-comment', (_, mediaId, text, time) => commentDB.addComment(mediaId, text, time))

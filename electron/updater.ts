@@ -1,6 +1,6 @@
 import { autoUpdater } from 'electron-updater'
 import { BrowserWindow, ipcMain } from 'electron'
-import { initErrorLogger } from './error-logger'
+
 
 let updateWin: BrowserWindow | null = null
 

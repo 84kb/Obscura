@@ -520,6 +520,11 @@ export const mockElectronAPI = {
 
     getHardwareId: async () => 'mock-hardware-id',
     generateUserToken: async () => 'mock-user-token',
+
+    // ウィンドウ操作 (Mock)
+    minimizeWindow: async () => { console.log('[Mock] minimizeWindow') },
+    maximizeWindow: async () => { console.log('[Mock] maximizeWindow') },
+    closeWindow: async () => { console.log('[Mock] closeWindow') },
 }
 
 // グローバル型定義の拡張
