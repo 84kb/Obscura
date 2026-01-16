@@ -20,8 +20,11 @@ interface InspectorProps {
     onCreateGenre?: (name: string) => Promise<Genre | null>
     onPlay: (media: MediaFile) => void
     onMoveToTrash: (id: number) => void
+    onMoveFilesToTrash: (ids: number[]) => void
     onRestore: (id: number) => void
+    onRestoreFiles: (ids: number[]) => void
     onDeletePermanently: (id: number) => void
+    onDeleteFilesPermanently: (ids: number[]) => void
     onClose: () => void
     onRenameMedia?: (id: number, newName: string) => void
     onUpdateRating?: (id: number, rating: number) => void
@@ -43,8 +46,12 @@ export function Inspector({
     onRemoveGenre,
     onCreateGenre,
     onPlay,
+    onMoveToTrash,
+    onMoveFilesToTrash,
     onRestore,
+    onRestoreFiles,
     onDeletePermanently,
+    onDeleteFilesPermanently,
     onClose,
     onRenameMedia,
     onUpdateRating,
@@ -889,12 +896,12 @@ export function Inspector({
                 {(media.length > 1 && media.every(m => m.is_deleted)) && (
                     <div className="actions-section">
                         <div className="trash-actions">
-                            <button className="btn btn-primary btn-full btn-small" onClick={() => media.forEach(m => onRestore(m.id))}>すべて元に戻す</button>
+                            <button className="btn btn-primary btn-full btn-small" onClick={() => onRestoreFiles(media.map(m => m.id))}>すべて元に戻す</button>
                             <button
                                 className="btn btn-danger btn-full btn-small"
                                 onClick={() => {
                                     if (confirm(`${media.length}個のファイルをデバイスから完全に削除しますか？\nこの操作は取り消せません。`)) {
-                                        media.forEach(m => onDeletePermanently(m.id))
+                                        onDeleteFilesPermanently(media.map(m => m.id))
                                         onClose()
                                     }
                                 }}

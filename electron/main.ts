@@ -1,14 +1,17 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol, shell, clipboard, Menu, MenuItem, nativeImage } from 'electron'
-import path from 'path'
-import fs from 'fs'
+import { app, BrowserWindow, ipcMain, dialog, shell, protocol, Menu, MenuItem, nativeImage, clipboard } from 'electron'
+import path from 'node:path'
+import fs from 'fs-extra'
+import { fileURLToPath } from 'node:url'
 import crypto from 'crypto'
 import { initDatabase, mediaDB, tagDB, tagFolderDB, genreDB, libraryDB, commentDB } from './database'
-import { generatePreviewImages, getVideoMetadata } from './ffmpeg'
+import { ServerConfig, RemoteLibrary } from '../src/types'
+import { getThumbnailPath } from './utils'
+import { generatePreviewImages, getMediaMetadata } from './ffmpeg'
 import { initErrorLogger } from './error-logger'
-import { initSharedLibrary, serverConfigDB, sharedUserDB, ServerConfig, SharedUser } from './shared-library'
+import { initSharedLibrary, serverConfigDB, sharedUserDB, SharedUser } from './shared-library'
 import { startServer, stopServer, isServerRunning } from './server'
 import { getHardwareId, generateUserToken } from './crypto-utils'
-import { initClientSettings, getConfig as getClientConfig, updateConfig as updateClientConfig, ClientConfig, RemoteLibrary } from './settings'
+import { initClientSettings, getConfig as getClientConfig, updateConfig as updateClientConfig, ClientConfig } from './settings'
 import { downloadFile } from './downloader'
 import { initUpdater } from './updater'
 
@@ -135,6 +138,70 @@ function createWindow() {
         if (menu.items.length > 0) {
             menu.popup({ window: mainWindow || undefined })
         }
+    })
+
+    // --- セキュリティとナビゲーション制御 ---
+    // メディアファイル拡張子の判定用
+    const isMediaFile = (url: string) => {
+        const ext = path.extname(url.split('?')[0]).toLowerCase()
+        return VIDEO_EXTENSIONS.includes(ext) || AUDIO_EXTENSIONS.includes(ext)
+    }
+
+    // ドラッグ＆ドロップ時にファイルをブラウザで開こうとするのを防止 & インポートに変換
+    mainWindow.webContents.on('will-navigate', (event, url) => {
+        // fileプロトコルかつメディアファイルの場合はインポートトリガー
+        if (url.startsWith('file://')) {
+            try {
+                const urlObj = new URL(url)
+                if (isMediaFile(urlObj.pathname)) {
+                    // fileURLToPath で安全にパス変換
+                    const localPath = fileURLToPath(url)
+                    // Windowsパスのバックスラッシュをスラッシュに正規化して送る
+                    const normalizedPath = localPath.replace(/\\/g, '/')
+                    console.log('[Security] Intercepted media navigation, triggering import:', normalizedPath)
+
+                    event.preventDefault()
+                    mainWindow?.webContents.send('trigger-import', [normalizedPath])
+                    return
+                }
+            } catch (e) {
+                console.error('[Security] Failed to parse URL:', url, e)
+            }
+        }
+
+        // 同じアプリ内の遷移（localhostやファイルパス）以外をブロック
+        const isInternal = isDev ? url.startsWith('http://localhost:5173') : url.startsWith('file://')
+        if (!isInternal) {
+            console.log('[Security] Prevented navigation to:', url)
+            event.preventDefault()
+        }
+    })
+
+    // 新しいウィンドウ（別ウィンドウ）が開くのを一律禁止、または外部ブラウザで開く
+    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+        console.log('[Security] Checks window open request to:', url)
+
+        // メディアファイルならインポート試行
+        if (url.startsWith('file://')) {
+            try {
+                const urlObj = new URL(url)
+                const ext = path.extname(urlObj.pathname).toLowerCase()
+
+                if (VIDEO_EXTENSIONS.includes(ext) || AUDIO_EXTENSIONS.includes(ext)) {
+                    // fileURLToPath で安全にパス変換
+                    const localPath = fileURLToPath(url)
+                    // Windowsパスのバックスラッシュをスラッシュに正規化して送る
+                    const normalizedPath = localPath.replace(/\\/g, '/')
+                    console.log('[Security] Intercepted new window media request, triggering import:', normalizedPath)
+                    mainWindow?.webContents.send('trigger-import', [normalizedPath])
+                    return { action: 'deny' }
+                }
+            } catch (e) {
+                console.error('[Security] Failed to parse URL for window open:', e)
+            }
+        }
+
+        return { action: 'deny' }
     })
 }
 
@@ -392,7 +459,7 @@ ipcMain.handle('scan-folder', async (_, folderPath: string) => {
                     // 動画ファイル
                     if (VIDEO_EXTENSIONS.includes(ext)) {
                         try {
-                            const meta = await getVideoMetadata(filePath)
+                            const meta = await getMediaMetadata(filePath)
                             options = {
                                 width: meta.width,
                                 height: meta.height,
@@ -419,7 +486,7 @@ ipcMain.handle('scan-folder', async (_, folderPath: string) => {
                     }
                     // 音声ファイル
                     else if (AUDIO_EXTENSIONS.includes(ext)) {
-                        const id = mediaDB.addMediaFile(filePath, file, 'audio')
+                        const id = mediaDB.addMediaFile(filePath, file, 'audio', {})
                         mediaFiles.push({
                             id,
                             file_path: filePath,
@@ -464,7 +531,7 @@ ipcMain.handle('backfill-metadata', async () => {
     let count = 0
     for (const media of targets) {
         try {
-            const meta = await getVideoMetadata(media.file_path)
+            const meta = await getMediaMetadata(media.file_path)
             mediaDB.updateVideoMetadata(media.id, meta.width || 0, meta.height || 0, meta.duration || 0)
             count++
         } catch (e) {
@@ -528,7 +595,7 @@ ipcMain.handle('get-genres', async () => {
 })
 
 ipcMain.handle('create-genre', async (_, name: string, parentId?: number | null) => {
-    return genreDB.createGenre(name, parentId)
+    return genreDB.createGenre(name, parentId ?? null)
 })
 
 ipcMain.handle('delete-genre', (_event, id) => {
@@ -557,16 +624,10 @@ ipcMain.handle('generate-thumbnail', async (_event, mediaId: number, filePath: s
     const fs = require('fs-extra')
 
     try {
-        // サムネイル保存先
         const library = libraryDB.getActiveLibrary()
         if (!library) return null
 
-        const thumbnailDir = path.join(library.path, 'thumbnails')
-        if (!fs.existsSync(thumbnailDir)) {
-            fs.mkdirSync(thumbnailDir, { recursive: true })
-        }
-
-        const thumbnailPath = path.join(thumbnailDir, `${mediaId}.jpg`)
+        const thumbnailPath = await getThumbnailPath(library.path, mediaId, filePath)
 
         // 既に存在する場合はスキップ
         if (fs.existsSync(thumbnailPath)) {
@@ -579,15 +640,12 @@ ipcMain.handle('generate-thumbnail', async (_event, mediaId: number, filePath: s
         // まず埋め込みサムネイル(カバーアート)の抽出を試みる
         const extractEmbedded = (): Promise<boolean> => {
             return new Promise((resolve) => {
-                // ffmpegで埋め込みカバーアートを抽出
-                // -map 0:v:1 は2番目のビデオストリーム(通常カバーアート)
-                // または -an -vcodec copy でattached_picを抽出
                 const args = [
                     '-i', filePath,
-                    '-an',                    // 音声なし
-                    '-vcodec', 'mjpeg',       // MJPEG形式で出力
-                    '-map', '0:v',            // 全ビデオストリームから
-                    '-map', '-0:V',           // メインビデオを除外（attached_picのみ）
+                    '-an',
+                    '-vcodec', 'png',
+                    '-map', '0:v',
+                    '-map', '-0:V',
                     '-vframes', '1',
                     '-y',
                     thumbnailPath
@@ -628,10 +686,11 @@ ipcMain.handle('generate-thumbnail', async (_event, mediaId: number, filePath: s
                 const args = [
                     '-ss', '3',           // 3秒目から
                     '-i', filePath,
-                    '-vframes', '1',      // 1フレームのみ
-                    '-q:v', '3',          // 品質（低いほど高品質）
-                    '-vf', 'scale=320:-1', // 幅320px
-                    '-y',                 // 上書き許可
+                    '-vframes', '1',
+                    '-q:v', '3',
+                    '-vf', 'scale=320:-1',
+                    '-vcodec', 'png',
+                    '-y',
                     thumbnailPath
                 ]
 
@@ -685,7 +744,16 @@ ipcMain.handle('restore-from-trash', async (_, id: number) => {
     mediaDB.restoreFromTrash(id)
 })
 
-ipcMain.handle('delete-permanently', (_, id) => mediaDB.deletePermanently(id))
+ipcMain.handle('move-files-to-trash', async (_, ids: number[]) => {
+    mediaDB.moveMediaFilesToTrash(ids, true)
+})
+
+ipcMain.handle('restore-files-from-trash', async (_, ids: number[]) => {
+    mediaDB.moveMediaFilesToTrash(ids, false)
+})
+
+ipcMain.handle('delete-permanently', (_, id) => mediaDB.deleteMediaFilesPermanently([id]))
+ipcMain.handle('delete-files-permanently', (_, ids: number[]) => mediaDB.deleteMediaFilesPermanently(ids))
 ipcMain.handle('update-last-played', (_, id) => mediaDB.updateLastPlayed(id))
 
 // ウィンドウ操作
@@ -883,12 +951,10 @@ ipcMain.handle('set-captured-thumbnail', async (_event, mediaId: number, dataUrl
         const base64Data = dataUrl.replace(/^data:image\/\w+;base64,/, "")
         const buffer = Buffer.from(base64Data, 'base64')
 
-        const thumbnailDir = path.join(library.path, 'thumbnails')
-        if (!fs.existsSync(thumbnailDir)) {
-            fs.mkdirSync(thumbnailDir, { recursive: true })
-        }
+        const media = mediaDB.get(mediaId)
+        if (!media) return null
 
-        const thumbnailPath = path.join(thumbnailDir, `${mediaId}.jpg`)
+        const thumbnailPath = await getThumbnailPath(library.path, mediaId, media.file_path)
 
         // ファイル書き込み
         fs.writeFileSync(thumbnailPath, buffer)

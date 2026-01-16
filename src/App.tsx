@@ -44,8 +44,11 @@ export default function App() {
         addGenreToMedia,
         removeGenreFromMedia,
         moveToTrash,
+        moveFilesToTrash,
         restoreFromTrash,
+        restoreFilesFromTrash,
         deletePermanently,
+        deleteFilesPermanently,
         updateLastPlayed,
         createLibrary,
         hasActiveLibrary,
@@ -137,16 +140,35 @@ export default function App() {
     const [gridSize, setGridSize] = useState<number>(settings.gridSize)
     const [viewMode, setViewMode] = useState<'grid' | 'list'>(settings.viewMode)
 
+    // イベントリスナー内で最新の状態を参照するための Ref
+    const isDraggingRef = useRef(isDragging)
+    const hasActiveLibraryRef = useRef(hasActiveLibrary)
+    const activeRemoteLibraryRef = useRef(activeRemoteLibrary)
+
+    // StateとRefの同期
+    useEffect(() => {
+        isDraggingRef.current = isDragging
+    }, [isDragging])
+
+    useEffect(() => {
+        hasActiveLibraryRef.current = hasActiveLibrary
+    }, [hasActiveLibrary])
+
+    useEffect(() => {
+        activeRemoteLibraryRef.current = activeRemoteLibrary
+    }, [activeRemoteLibrary])
+
     // ドラッグ＆ドロップ状態のグローバル管理
     useEffect(() => {
         const handleGlobalDragEnter = (e: DragEvent) => {
             e.preventDefault()
+            e.stopPropagation()
             dragCounter.current++
             console.log('[Global D&D] DragEnter:', dragCounter.current, e.dataTransfer?.types)
 
             if (dragCounter.current === 1) {
                 const hasFiles = Array.from(e.dataTransfer?.types || []).some(t => t.toLowerCase() === 'files')
-                if ((hasActiveLibrary || activeRemoteLibrary) && hasFiles && !isInternalDrag.current) {
+                if ((hasActiveLibraryRef.current || activeRemoteLibraryRef.current) && hasFiles && !isInternalDrag.current) {
                     console.log('[Global D&D] Showing overlay')
                     setIsDragging(true)
                     document.body.classList.add('dragging-file')
@@ -156,15 +178,16 @@ export default function App() {
 
         const handleGlobalDragOver = (e: DragEvent) => {
             e.preventDefault()
+            e.stopPropagation()
             if (e.dataTransfer) {
                 // ドロップ効果を設定（これがないと「禁止マーク」になる場合がある）
                 e.dataTransfer.dropEffect = 'copy'
             }
 
             // 万が一 enter で漏れた場合、または移動エリアからの復帰時の補完
-            if (!isDragging && !isInternalDrag.current) {
+            if (!isDraggingRef.current && !isInternalDrag.current) {
                 const hasFiles = Array.from(e.dataTransfer?.types || []).some(t => t.toLowerCase() === 'files')
-                if ((hasActiveLibrary || activeRemoteLibrary) && hasFiles) {
+                if ((hasActiveLibraryRef.current || activeRemoteLibraryRef.current) && hasFiles) {
                     console.log('[Global D&D] Delayed overlay trigger')
                     setIsDragging(true)
                     document.body.classList.add('dragging-file')
@@ -174,6 +197,7 @@ export default function App() {
 
         const handleGlobalDragLeave = (e: DragEvent) => {
             e.preventDefault()
+            e.stopPropagation()
             dragCounter.current--
             console.log('[Global D&D] DragLeave:', dragCounter.current)
 
@@ -189,6 +213,7 @@ export default function App() {
 
         const handleGlobalDrop = async (e: DragEvent) => {
             e.preventDefault()
+            e.stopPropagation()
             console.log('[Global D&D] Drop detected')
             const wasInternal = isInternalDrag.current
 
@@ -202,7 +227,7 @@ export default function App() {
                 console.log('[Global D&D] Internal drop, ignoring')
                 return
             }
-            if (!hasActiveLibrary && !activeRemoteLibrary) {
+            if (!hasActiveLibraryRef.current && !activeRemoteLibraryRef.current) {
                 console.log('[Global D&D] No active library, ignoring')
                 return
             }
@@ -227,7 +252,7 @@ export default function App() {
         const handleMouseDown = () => {
             // マウスクリックが発生した＝ファイルドラッグ中ではないはずなので
             // 念のためドラッグ状態をリセットする
-            if (dragCounter.current !== 0 || isDragging) {
+            if (dragCounter.current !== 0 || isDraggingRef.current) {
                 console.log('[Global D&D] Manual reset via mousedown')
                 dragCounter.current = 0
                 setIsDragging(false)
@@ -238,7 +263,7 @@ export default function App() {
 
         const handleFocusReset = () => {
             // ウィンドウにフォーカスが戻った時（タブ切り替えなど）に状態が残っていたらリセット
-            if (dragCounter.current !== 0 || isDragging) {
+            if (dragCounter.current !== 0 || isDraggingRef.current) {
                 console.log('[Global] Focus recovered, resetting states')
                 dragCounter.current = 0
                 setIsDragging(false)
@@ -247,26 +272,52 @@ export default function App() {
             }
         }
 
-        window.addEventListener('dragenter', handleGlobalDragEnter)
-        window.addEventListener('dragover', handleGlobalDragOver)
-        window.addEventListener('dragleave', handleGlobalDragLeave)
-        window.addEventListener('drop', handleGlobalDrop)
-        window.addEventListener('dragend', handleGlobalDragEnd)
-        window.addEventListener('mouseup', handleGlobalDragEnd)
-        window.addEventListener('mousedown', handleMouseDown)
+        // capture: true を指定して、バブリングフェーズより前にイベントを捕捉し、
+        // 確実に preventDefault できるようにする
+        window.addEventListener('dragenter', handleGlobalDragEnter, { capture: true })
+        window.addEventListener('dragover', handleGlobalDragOver, { capture: true })
+        window.addEventListener('dragleave', handleGlobalDragLeave, { capture: true })
+        window.addEventListener('drop', handleGlobalDrop, { capture: true })
+        window.addEventListener('dragend', handleGlobalDragEnd, { capture: true })
+        window.addEventListener('mouseup', handleGlobalDragEnd, { capture: true })
+        window.addEventListener('mousedown', handleMouseDown, { capture: true })
+        // window.removeEventListener('focus', handleFocusReset) // focusでリセットすると誤爆する場合があるので一旦外すか、必要なら残す
         window.addEventListener('focus', handleFocusReset)
 
         return () => {
-            window.removeEventListener('dragenter', handleGlobalDragEnter)
-            window.removeEventListener('dragover', handleGlobalDragOver)
-            window.removeEventListener('dragleave', handleGlobalDragLeave)
-            window.removeEventListener('drop', handleGlobalDrop)
-            window.removeEventListener('dragend', handleGlobalDragEnd)
-            window.removeEventListener('mouseup', handleGlobalDragEnd)
-            window.removeEventListener('mousedown', handleMouseDown)
+            window.removeEventListener('dragenter', handleGlobalDragEnter, { capture: true })
+            window.removeEventListener('dragover', handleGlobalDragOver, { capture: true })
+            window.removeEventListener('dragleave', handleGlobalDragLeave, { capture: true })
+            window.removeEventListener('drop', handleGlobalDrop, { capture: true })
+            window.removeEventListener('dragend', handleGlobalDragEnd, { capture: true })
+            window.removeEventListener('mouseup', handleGlobalDragEnd, { capture: true })
+            window.removeEventListener('mousedown', handleMouseDown, { capture: true })
             window.removeEventListener('focus', handleFocusReset)
         }
-    }, [hasActiveLibrary, activeRemoteLibrary, importMedia, isDragging])
+    }, [importMedia]) // 依存配列からStateを削除し、importMediaのみにする（importMediaはuseCallbackされている前提）
+
+    useEffect(() => {
+        const handleTriggerImport = (_: any, filePaths: string[]) => {
+            console.log('[App] Received trigger-import:', filePaths)
+            // Refを使用して最新の状態を確認
+            if ((hasActiveLibraryRef.current || activeRemoteLibraryRef.current) && filePaths.length > 0) {
+                importMedia(filePaths).catch(e => console.error('Import failed via trigger:', e))
+            }
+        }
+
+        // イベントリスナー登録
+        let unsubscribe: (() => void) | undefined
+        if (window.electronAPI && window.electronAPI.on) {
+            unsubscribe = window.electronAPI.on('trigger-import', handleTriggerImport)
+        }
+
+        // クリーンアップ
+        return () => {
+            if (unsubscribe) {
+                unsubscribe()
+            }
+        }
+    }, [importMedia])
 
     // 表示設定
     const [viewSettings, setViewSettings] = useState<ViewSettings>(() => {
@@ -827,8 +878,11 @@ export default function App() {
                         updateLastPlayed(media.id)
                     }}
                     onMoveToTrash={moveToTrash}
+                    onMoveFilesToTrash={moveFilesToTrash}
                     onRestore={restoreFromTrash}
+                    onRestoreFiles={restoreFilesFromTrash}
                     onDeletePermanently={deletePermanently}
+                    onDeleteFilesPermanently={deleteFilesPermanently}
                     onClose={handleCloseInspector}
                     onRenameMedia={renameMedia}
                     onUpdateRating={updateRating}
@@ -915,8 +969,14 @@ export default function App() {
                     confirmLabel="削除"
                     cancelLabel="キャンセル"
                     isDestructive={true}
-                    onConfirm={() => {
-                        deleteConfirmIds.forEach(id => deletePermanently(id))
+                    onConfirm={async () => {
+                        if (filterOptions.filterType === 'trash') {
+                            if (confirm(`${deleteConfirmIds.length}個のファイルをデバイスから完全に削除しますか？\nこの操作は取り消せません。`)) {
+                                await deleteFilesPermanently(deleteConfirmIds)
+                            }
+                        } else {
+                            await moveFilesToTrash(deleteConfirmIds)
+                        }
                         setSelectedMediaIds([])
                         setLastSelectedId(null)
                         setDeleteConfirmIds([])

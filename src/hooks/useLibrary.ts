@@ -349,6 +349,33 @@ export function useLibrary() {
         }
     }, [loadMediaFiles])
 
+    const moveFilesToTrash = useCallback(async (ids: number[]) => {
+        try {
+            await window.electronAPI.moveFilesToTrash(ids)
+            await loadMediaFiles()
+        } catch (error) {
+            console.error('Failed to move files to trash:', error)
+        }
+    }, [loadMediaFiles])
+
+    const restoreFilesFromTrash = useCallback(async (ids: number[]) => {
+        try {
+            await window.electronAPI.restoreFilesFromTrash(ids)
+            await loadMediaFiles()
+        } catch (error) {
+            console.error('Failed to restore files from trash:', error)
+        }
+    }, [loadMediaFiles])
+
+    const deleteFilesPermanently = useCallback(async (ids: number[]) => {
+        try {
+            await window.electronAPI.deleteFilesPermanently(ids)
+            await loadMediaFiles()
+        } catch (error) {
+            console.error('Failed to delete files permanently:', error)
+        }
+    }, [loadMediaFiles])
+
     // 再生日時更新
     const updateLastPlayed = useCallback(async (id: number) => {
         try {
@@ -761,6 +788,9 @@ export function useLibrary() {
         deletePermanently,
         updateLastPlayed,
         importMedia,
+        moveFilesToTrash,
+        restoreFilesFromTrash,
+        deleteFilesPermanently,
         updateRating,
         renameMedia,
         updateArtist,
@@ -778,6 +808,7 @@ export function useLibrary() {
         filterOptions, setFilterOptions, createLibrary, switchLibrary, selectAndScanFolder,
         createTag, deleteTag, createGenre, deleteGenre, addTagToMedia, removeTagFromMedia,
         addGenreToMedia, removeGenreFromMedia, moveToTrash, restoreFromTrash, deletePermanently,
+        moveFilesToTrash, restoreFilesFromTrash, deleteFilesPermanently,
         updateLastPlayed, importMedia, updateRating, renameMedia, updateArtist, libraryStats,
         loadMediaFiles, loadGenres, renameGenre, activeRemoteLibrary, switchToRemoteLibrary,
         switchToLocalLibrary, openLibrary, myUserToken

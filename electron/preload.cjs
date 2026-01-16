@@ -147,6 +147,29 @@ try {
         minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
         maximizeWindow: () => ipcRenderer.invoke('window-maximize'),
         closeWindow: () => ipcRenderer.invoke('window-close'),
+
+        // 汎用イベントリスナー (ホワイトリスト形式)
+        on: (channel, callback) => {
+            const validChannels = ['trigger-import'];
+            if (validChannels.includes(channel)) {
+                // 自動的に購読解除できるようにラッパーを返すか、あるいは単純にonするか
+                // App.tsxの実装を見ると removeListener は使っていないようなので、
+                // ここでは単純に callback を登録する。
+                // ただし、useEffectのクリーンアップで解除できないとメモリリークの可能性がある。
+                // App.tsx では window.electronAPI.on(...) としているだけで、返り値を見ていない。
+                // preload側で subscription を管理するのは難しいので、
+                // ここは単純に ipcRenderer.on する。
+                // メモリリーク防止のためには本当は off も必要だが、
+                // App.tsx は現状 removeListener していない（依存配列で再作成されるが...）
+                // 確認すると App.tsx には removeListener のロジックがない。
+                // 暫定対応として on を実装する。
+                const subscription = (_event, ...args) => callback(_event, ...args);
+                ipcRenderer.on(channel, subscription);
+
+                // 解除用関数を返す（App.tsxが使えば使える）
+                return () => ipcRenderer.removeListener(channel, subscription);
+            }
+        },
     });
 
     console.log('✅ [Preload] Electron API successfully exposed to renderer.');

@@ -1,6 +1,6 @@
 import path from 'path'
 import { app } from 'electron'
-import { getVideoMetadata } from './ffmpeg'
+import { generatePreviewImages, getMediaMetadata } from './ffmpeg'
 import crypto from 'crypto'
 const fs = require('fs-extra')
 
@@ -175,15 +175,24 @@ export class MediaLibrary {
         await fs.writeJson(path.join(destDir, 'metadata.json'), metadata, { spaces: 2 })
 
         const stats = await fs.stat(destPath)
-        let width, height, duration = null, artist = null, description = null
+        let width = 0
+        let height = 0
+        let duration: number | null = null
+        let artist: string | null = null
+        let description: string | null = null
 
-        if (fileType === 'video') {
-          try {
-            const meta = await getVideoMetadata(destPath)
-            width = meta.width; height = meta.height;
-            if (meta.duration) duration = meta.duration
-            artist = meta.artist || null; description = meta.description || null
-          } catch (e) { console.error('Failed to get video metadata:', e) }
+        // 動画・音声両方のメタデータを取得
+        try {
+          const meta = await getMediaMetadata(destPath)
+          if (fileType === 'video') {
+            width = meta.width || 0
+            height = meta.height || 0
+          }
+          if (meta.duration) duration = meta.duration
+          artist = meta.artist || null
+          description = meta.description || null
+        } catch (e) {
+          console.error(`Failed to get ${fileType} metadata:`, e)
         }
 
         const mediaFile = {
@@ -275,23 +284,66 @@ export class MediaLibrary {
     if (media) { media.is_deleted = false; this.save() }
   }
 
+  /**
+   * 複数のメディアファイルを一括でゴミ箱へ移動/復元する
+   */
+  public moveMediaFilesToTrash(ids: number[], isDeleted: boolean) {
+    let changed = false
+    ids.forEach(id => {
+      const media = this.db.mediaFiles.find(m => m.id === id)
+      if (media && media.is_deleted !== isDeleted) {
+        media.is_deleted = isDeleted
+        changed = true
+      }
+    })
+    if (changed) this.save()
+  }
+
   public async deletePermanently(id: number) {
-    const mediaIdx = this.db.mediaFiles.findIndex((m) => m.id === id)
-    if (mediaIdx !== -1) {
-      const media = this.db.mediaFiles[mediaIdx]
+    // 既存の単一削除も一括削除メソッドを利用するように変更して共通化可能だが、
+    // まずは確実に動作する一括削除メソッドを実装する
+    await this.deleteMediaFilesPermanently([id])
+  }
+
+  /**
+   * 複数のメディアファイルを一括で完全に削除する
+   */
+  public async deleteMediaFilesPermanently(ids: number[]) {
+    if (ids.length === 0) return
+
+    // 削除対象のメディア情報を先に取得しておく
+    const targets = this.db.mediaFiles.filter(m => ids.includes(m.id))
+
+    // DBから即座に削除することで、後続の同一IDに対する操作を防ぐ（競合対策）
+    this.db.mediaFiles = this.db.mediaFiles.filter(m => !ids.includes(m.id))
+    this.db.mediaTags = this.db.mediaTags.filter((mt) => !ids.includes(mt.mediaId))
+    this.db.mediaGenres = this.db.mediaGenres.filter((mg) => !ids.includes(mg.mediaId))
+    this.save()
+
+    // 物理ファイルの削除（非同期）
+    for (const media of targets) {
       try {
-        const dirPath = path.dirname(media.file_path)
-        const grandParentDir = path.basename(path.dirname(dirPath))
-        if (grandParentDir === 'images') {
-          if (fs.existsSync(dirPath)) await fs.remove(dirPath)
+        const filePath = media.file_path
+        const dirPath = path.dirname(filePath)
+        const parentDirName = path.basename(path.dirname(dirPath))
+
+        if (parentDirName === 'images') {
+          if (fs.existsSync(dirPath)) {
+            console.log(`[Database] Deleting media directory: ${dirPath}`)
+            await fs.remove(dirPath)
+          }
         } else {
-          if (fs.existsSync(media.file_path)) await fs.remove(media.file_path)
+          if (fs.existsSync(filePath)) await fs.remove(filePath)
+
+          const thumbDir = path.join(this.path, 'images', media.id.toString())
+          if (fs.existsSync(thumbDir)) {
+            console.log(`[Database] Deleting thumbnail directory: ${thumbDir}`)
+            await fs.remove(thumbDir)
+          }
         }
-      } catch (error) { console.error('Failed to delete file/directory:', media.file_path, error) }
-      this.db.mediaFiles.splice(mediaIdx, 1)
-      this.db.mediaTags = this.db.mediaTags.filter((mt) => mt.mediaId !== id)
-      this.db.mediaGenres = this.db.mediaGenres.filter((mg) => mg.mediaId !== id)
-      this.save()
+      } catch (error) {
+        console.error('Failed to delete file/directory:', media.file_path, error)
+      }
     }
   }
 
@@ -519,6 +571,8 @@ export const mediaDB = {
   updateFileName: (id: number, name: string) => getActiveMediaLibrary()?.updateFileName(id, name),
   updateArtist: (id: number, artist: string | null) => getActiveMediaLibrary()?.updateArtist(id, artist),
   updateDescription: (id: number, desc: string | null) => getActiveMediaLibrary()?.updateDescription(id, desc),
+  moveMediaFilesToTrash: (ids: number[], isDeleted: boolean) => getActiveMediaLibrary()?.moveMediaFilesToTrash(ids, isDeleted),
+  deleteMediaFilesPermanently: (ids: number[]) => getActiveMediaLibrary()?.deleteMediaFilesPermanently(ids) || Promise.resolve(),
 }
 
 export const tagDB = {

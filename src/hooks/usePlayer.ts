@@ -226,17 +226,22 @@ export function usePlayer() {
         const media = videoRef.current || audioRef.current
         if (!media) return
 
-        // 保存された設定を適用
+        // 保存された設定を即座に適用
         media.volume = volume
         media.muted = isMuted
         media.loop = isLooping
+        media.playbackRate = playbackRate
 
         const handleTimeUpdate = () => setCurrentTime(media.currentTime)
         const handleDurationChange = () => setDuration(media.duration)
         const handleEnded = () => {
             if (!isLooping) setIsPlaying(false)
         }
-        const handleRateChange = () => setPlaybackRate(media.playbackRate)
+        const handleRateChange = () => {
+            if (media.playbackRate !== playbackRate) {
+                setPlaybackRate(media.playbackRate)
+            }
+        }
 
         // requestAnimationFrameで滑らかなアニメーションを実現
         let animationFrameId: number | null = null
@@ -283,7 +288,7 @@ export function usePlayer() {
                 cancelAnimationFrame(animationFrameId)
             }
         }
-    }, [isLooping])
+    }, [videoRef.current, audioRef.current, isLooping]) // メディア要素が切り替わった時に再実行
 
     return {
         containerRef,

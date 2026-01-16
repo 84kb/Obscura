@@ -69,14 +69,13 @@ export async function generatePreviewImages(videoPath: string, outputDir: string
 }
 
 /**
- * 動画ファイルからメタデータを取得する
+ * メディアファイルからメタデータを取得する（動画・音声対応）
  */
-export async function getVideoMetadata(filePath: string): Promise<{ width?: number; height?: number; duration?: number; artist?: string; description?: string }> {
+export async function getMediaMetadata(filePath: string): Promise<{ width?: number; height?: number; duration?: number; artist?: string; description?: string }> {
     return new Promise((resolve) => {
         const args = [
             '-v', 'error',
-            '-select_streams', 'v:0',
-            '-show_entries', 'stream=width,height,duration:format_tags=artist,uploader,performer,comment,description,DESCRIPTION',
+            '-show_entries', 'stream=width,height,duration:format=duration:format_tags=artist,uploader,performer,comment,description,DESCRIPTION',
             '-of', 'json',
             filePath
         ]
@@ -99,15 +98,23 @@ export async function getVideoMetadata(filePath: string): Promise<{ width?: numb
                     let description: string | undefined
 
                     // ストリーム情報から解像度とデュレーションを取得
-                    if (json.streams && json.streams[0]) {
-                        const s = json.streams[0]
-                        width = s.width
-                        height = s.height
-                        duration = parseFloat(s.duration)
+                    if (json.streams && json.streams.length > 0) {
+                        // ビデオストリームを優先的に探す
+                        const videoStream = json.streams.find((s: any) => s.codec_type === 'video')
+                        const firstStream = json.streams[0]
+
+                        if (videoStream) {
+                            width = videoStream.width
+                            height = videoStream.height
+                        }
+
+                        // durationはストリームまたはフォーマットから取得
+                        duration = parseFloat(videoStream?.duration || firstStream?.duration || json.format?.duration)
+                    } else if (json.format && json.format.duration) {
+                        duration = parseFloat(json.format.duration)
                     }
 
                     // フォーマットタグからアーティスト/投稿者を取得
-                    // 優先順位: artist > uploader > performer
                     if (json.format && json.format.tags) {
                         const tags = json.format.tags
                         artist = tags.artist || tags.ARTIST || tags.Artist ||

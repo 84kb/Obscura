@@ -141,8 +141,11 @@ export interface ElectronAPI {
     generateThumbnail: (mediaId: number, filePath: string) => Promise<string | null>
 
     moveToTrash: (id: number) => Promise<void>
+    moveFilesToTrash: (ids: number[]) => Promise<void>
     restoreFromTrash: (id: number) => Promise<void>
+    restoreFilesFromTrash: (ids: number[]) => Promise<void>
     deletePermanently: (id: number) => Promise<void>
+    deleteFilesPermanently: (ids: number[]) => Promise<void>
     updateLastPlayed: (id: number) => Promise<void>
 
     importMedia: (filePaths: string[]) => Promise<MediaFile[]>
@@ -215,7 +218,7 @@ export interface ElectronAPI {
     quitAndInstall: () => Promise<void>
     onUpdateStatus: (callback: (data: { status: string; info?: any }) => void) => () => void
 
-    on: (channel: string, func: (...args: any[]) => void) => void
+    on: (channel: string, func: (...args: any[]) => void) => () => void
 
     // ウィンドウ操作
     minimizeWindow: () => Promise<void>
