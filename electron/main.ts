@@ -895,6 +895,15 @@ ipcMain.handle('update-description', async (_event, mediaId: number, description
     }
 })
 
+// URL更新
+ipcMain.handle('update-url', async (_event, mediaId: number, url: string | null) => {
+    try {
+        mediaDB.updateUrl(mediaId, url)
+    } catch (error) {
+        console.error('Failed to update url:', error)
+    }
+})
+
 // ネイティブファイルドラッグ（同期的にipcMain.onを使用）
 ipcMain.on('start-drag', (event, filePaths: string[]) => {
     try {

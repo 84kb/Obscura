@@ -101,6 +101,7 @@ export class MediaLibrary {
           if (file.file_size === undefined) { file.file_size = 0; changed = true; }
           if (file.artist === undefined) { file.artist = null; changed = true; }
           if (file.description === undefined) { file.description = null; changed = true; }
+          if (file.url === undefined) { file.url = null; changed = true; }
         })
 
         if (this.db.comments === undefined) {
@@ -180,6 +181,7 @@ export class MediaLibrary {
         let duration: number | null = null
         let artist: string | null = null
         let description: string | null = null
+        let url: string | null = null
 
         // 動画・音声両方のメタデータを取得
         try {
@@ -191,6 +193,10 @@ export class MediaLibrary {
           if (meta.duration) duration = meta.duration
           artist = meta.artist || null
           description = meta.description || null
+          // Use comment as URL if available
+          if (meta.comment) {
+            url = meta.comment
+          }
         } catch (e) {
           console.error(`Failed to get ${fileType} metadata:`, e)
         }
@@ -200,7 +206,7 @@ export class MediaLibrary {
           file_size: stats.size, duration, width, height, rating: 0,
           created_date: stats.birthtime.toISOString(), modified_date: stats.mtime.toISOString(),
           thumbnail_path: null, created_at: new Date().toISOString(), is_deleted: false,
-          last_played_at: null, artist, description,
+          last_played_at: null, artist, description, url
         }
         this.db.mediaFiles.push(mediaFile)
         importedFiles.push(mediaFile)
@@ -377,6 +383,11 @@ export class MediaLibrary {
   public updateDescription(id: number, description: string | null) {
     const media = this.db.mediaFiles.find((m) => m.id === id)
     if (media) { media.description = description; this.save() }
+  }
+
+  public updateUrl(id: number, url: string | null) {
+    const media = this.db.mediaFiles.find((m) => m.id === id)
+    if (media) { media.url = url; this.save() }
   }
 
   // タグ操作
@@ -571,6 +582,7 @@ export const mediaDB = {
   updateFileName: (id: number, name: string) => getActiveMediaLibrary()?.updateFileName(id, name),
   updateArtist: (id: number, artist: string | null) => getActiveMediaLibrary()?.updateArtist(id, artist),
   updateDescription: (id: number, desc: string | null) => getActiveMediaLibrary()?.updateDescription(id, desc),
+  updateUrl: (id: number, url: string | null) => getActiveMediaLibrary()?.updateUrl(id, url),
   moveMediaFilesToTrash: (ids: number[], isDeleted: boolean) => getActiveMediaLibrary()?.moveMediaFilesToTrash(ids, isDeleted),
   deleteMediaFilesPermanently: (ids: number[]) => getActiveMediaLibrary()?.deleteMediaFilesPermanently(ids) || Promise.resolve(),
 }

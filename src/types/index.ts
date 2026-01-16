@@ -19,6 +19,7 @@ export interface MediaFile {
     comments?: MediaComment[]
     artist?: string | null
     description?: string | null
+    url?: string | null
 }
 
 export interface MediaComment {
@@ -172,6 +173,7 @@ export interface ElectronAPI {
     backfillMetadata: () => Promise<number>
     updateArtist: (mediaId: number, artist: string | null) => Promise<void>
     updateDescription: (mediaId: number, description: string | null) => Promise<void>
+    updateUrl: (mediaId: number, url: string | null) => Promise<void>
 
     // タグフォルダー操作
     getTagFolders: () => Promise<TagFolder[]>

@@ -771,7 +771,6 @@ export default function App() {
                     allMediaFiles={allMediaFiles}
                     viewSettings={viewSettings}
                     onViewSettingsChange={setViewSettings}
-                    onRefresh={refreshLibrary}
                     genres={genres}
                 />
                 {/* サブフォルダー表示 */}
@@ -866,7 +865,6 @@ export default function App() {
                 onSwitchLibrary={switchToLocalLibrary}
                 onSwitchRemoteLibrary={switchToRemoteLibrary}
                 onOpenSettings={() => setShowSettingsModal(true)}
-                onRefreshLibrary={refreshLibrary}
                 hasActiveLibrary={hasActiveLibrary}
                 onRefreshGenres={loadGenres}
                 onDropFileOnGenre={handleDropOnGenre}
@@ -918,6 +916,9 @@ export default function App() {
                     onUpdateRating={updateRating}
                     onUpdateArtist={updateArtist}
                     onUpdateDescription={updateDescription}
+                    onUpdateUrl={(id, url) => window.electronAPI.updateUrl(id, url).then(() => {
+                        setMediaFiles(prev => prev.map(m => m.id === id ? { ...m, url } : m))
+                    })}
                     totalStats={libraryStats}
                     currentContextMedia={mediaFiles}
                 />

@@ -669,3 +669,60 @@
 .section-header {
     padding: 6px var(--spacing-md) !important;
 }
+/* URL field styles */
+.url-input-container {
+    margin-top: 4px;
+    margin-bottom: 8px;
+}
+
+.url-input {
+    width: 100%;
+    background: var(--bg-secondary);
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 12px;
+    color: var(--text-main);
+    font-size: 13px;
+    outline: none;
+    transition: all 0.2s;
+}
+
+.url-input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(255, 140, 66, 0.1);
+}
+
+.url-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.url-action-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-main);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.url-action-btn:hover {
+    background: var(--bg-secondary);
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.url-action-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    border-color: var(--border);
+    color: var(--text-muted);
+}

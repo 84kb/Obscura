@@ -73,7 +73,7 @@ export async function generatePreviewImages(videoPath: string, outputDir: string
 /**
  * メディアファイルからメタデータを取得する（動画・音声対応）
  */
-export async function getMediaMetadata(filePath: string): Promise<{ width?: number; height?: number; duration?: number; artist?: string; description?: string }> {
+export async function getMediaMetadata(filePath: string): Promise<{ width?: number; height?: number; duration?: number; artist?: string; description?: string; comment?: string }> {
     return new Promise((resolve) => {
         const args = [
             '-v', 'error',
@@ -125,12 +125,21 @@ export async function getMediaMetadata(filePath: string): Promise<{ width?: numb
                             tags.performer || tags.PERFORMER || tags.Performer ||
                             undefined
 
-                        description = tags.description || tags.DESCRIPTION || tags.Description ||
-                            tags.comment || tags.COMMENT || tags.Comment ||
-                            undefined
+                        description = tags.description || tags.DESCRIPTION || tags.Description || undefined
+
+                        // User Request: Comment field is used for URL
+                        // If description is empty, check if comment looks like a URL? No, request says "comment field is automatically entered" into URL field.
+                        // Assuming comment tag holds the URL.
+                        const comment = tags.comment || tags.COMMENT || tags.Comment
+                        if (comment) {
+                            // Simple heuristic: if it starts with http, treat as URL. 
+                            // Or just always assign to url field as per request "comment field automatic input".
+                            // Let's pass it as a separate field.
+                            // However, getMediaMetadata return type needs update.
+                        }
                     }
 
-                    resolve({ width, height, duration, artist, description })
+                    resolve({ width, height, duration, artist, description, comment: (json.format && json.format.tags) ? (json.format.tags.comment || json.format.tags.COMMENT || json.format.tags.Comment) : undefined })
                     return
                 } catch (e) {
                     console.error('Failed to parse ffprobe output', e)

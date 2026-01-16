@@ -385,18 +385,3 @@ body.dragging-file .app-drag-overlay {
 .switch input:checked+.slider:before {
     transform: translateX(16px);
 }
-
-/* 更新ボタン */
-.dropdown-refresh-btn {
-    display: block;
-    width: calc(100% - 32px);
-    margin: 8px 16px;
-    padding: 8px 16px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text-main);
-    font-size: 13px;
-    cursor: pointer;
-    transition: all 0.2s;
-}

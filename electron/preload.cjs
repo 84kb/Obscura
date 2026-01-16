@@ -87,6 +87,7 @@ try {
         backfillMetadata: () => ipcRenderer.invoke('backfill-metadata'),
         updateArtist: (mediaId, artist) => ipcRenderer.invoke('update-artist', mediaId, artist),
         updateDescription: (mediaId, description) => ipcRenderer.invoke('update-description', mediaId, description),
+        updateUrl: (mediaId, url) => ipcRenderer.invoke('update-url', mediaId, url),
 
         // キャプチャ
         onTriggerFrameCapture: (callback) => {

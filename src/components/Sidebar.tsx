@@ -20,7 +20,6 @@ interface SidebarProps {
     onOpenLibrary: () => Promise<any>
     onSwitchLibrary: (lib: Library) => void
     onSwitchRemoteLibrary: (lib: RemoteLibrary) => void
-    onRefreshLibrary: () => void // Added
     onOpenSettings: () => void
     hasActiveLibrary: boolean
     onRefreshGenres?: () => void
@@ -147,7 +146,6 @@ export function Sidebar({
     onOpenLibrary,
     onSwitchLibrary,
     onSwitchRemoteLibrary,
-    onRefreshLibrary,
     onOpenSettings,
     hasActiveLibrary,
     onRefreshGenres,
@@ -503,34 +501,9 @@ export function Sidebar({
         <div className="sidebar">
             <div className="sidebar-header">
                 {activeRemoteLibrary && (
-                    <button
-                        className="refresh-library-btn"
-                        onClick={(e) => {
-                            e.stopPropagation()
-                            if (onRefreshLibrary) onRefreshLibrary()
-                        }}
-                        title="ライブラリを更新"
-                        style={{
-                            position: 'absolute',
-                            right: '40px',
-                            top: '16px',
-                            background: 'none',
-                            border: 'none',
-                            color: 'var(--text-secondary)',
-                            cursor: 'pointer',
-                            padding: '4px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            zIndex: 10
-                        }}
-                    >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="23 4 23 10 17 10"></polyline>
-                            <polyline points="1 20 1 14 7 14"></polyline>
-                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-                        </svg>
-                    </button>
+                    <div className="sidebar-remote-status">
+                        {/* Remote status indicator or controls if needed */}
+                    </div>
                 )}
                 <div className="library-menu-container" ref={libraryMenuRef}>
                     <button
@@ -749,21 +722,23 @@ export function Sidebar({
                     </div>
                 )
             }
-            {genreToDelete !== null && (
-                <ConfirmModal
-                    title="フォルダーを削除"
-                    message="このフォルダーを削除してもよろしいですか？"
-                    confirmLabel="削除"
-                    cancelLabel="キャンセル"
-                    isDestructive={true}
-                    onConfirm={async () => {
-                        const id = genreToDelete
-                        setGenreToDelete(null)
-                        await onDeleteGenre(id)
-                    }}
-                    onCancel={() => setGenreToDelete(null)}
-                />
-            )}
+            {
+                genreToDelete !== null && (
+                    <ConfirmModal
+                        title="フォルダーを削除"
+                        message="このフォルダーを削除してもよろしいですか？"
+                        confirmLabel="削除"
+                        cancelLabel="キャンセル"
+                        isDestructive={true}
+                        onConfirm={async () => {
+                            const id = genreToDelete
+                            setGenreToDelete(null)
+                            await onDeleteGenre(id)
+                        }}
+                        onCancel={() => setGenreToDelete(null)}
+                    />
+                )
+            }
         </div >
     )
 }

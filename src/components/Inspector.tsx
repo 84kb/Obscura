@@ -30,6 +30,7 @@ interface InspectorProps {
     onUpdateRating?: (id: number, rating: number) => void
     onUpdateArtist?: (id: number, artist: string | null) => void
     onUpdateDescription?: (id: number, description: string | null) => void
+    onUpdateUrl?: (id: number, url: string | null) => void
     totalStats: { totalCount: number; totalSize: number }
     currentContextMedia?: MediaFile[]
 }
@@ -57,6 +58,7 @@ export function Inspector({
     onUpdateRating,
     onUpdateArtist,
     onUpdateDescription,
+    onUpdateUrl,
     totalStats,
     currentContextMedia
 }: InspectorProps) {
@@ -76,6 +78,9 @@ export function Inspector({
 
     // 投稿者編集用
     const [artistName, setArtistName] = useState('')
+
+    // URL編集用
+    const [url, setUrl] = useState('')
 
     // ポップオーバー位置
     const [tagPickerPos, setTagPickerPos] = useState<{ top: number; right: number } | null>(null)
@@ -113,6 +118,7 @@ export function Inspector({
             setFileName(getFileNameWithoutExt(media[0].file_name))
             setCurrentRating(media[0].rating || 0)
             setArtistName(media[0].artist || '')
+            setUrl(media[0].url || '')
         } else if (media.length > 1) {
             setFileName('')
             // 共通の評価を確認
@@ -124,6 +130,11 @@ export function Inspector({
             const artists = media.map(m => m.artist || '')
             const allSameArtist = artists.every(a => a === artists[0])
             setArtistName(allSameArtist ? artists[0] : '')
+
+            // 共通のURLを確認
+            const urls = media.map(m => m.url || '')
+            const allSameUrl = urls.every(u => u === urls[0])
+            setUrl(allSameUrl ? urls[0] : '')
         }
     }, [media])
 
@@ -315,8 +326,19 @@ export function Inspector({
         }
     }
 
+    const handleUrlSave = () => {
+        if (media.length > 0 && onUpdateUrl) {
+            const newUrl = url.trim() || null
+            media.forEach(m => {
+                if (newUrl !== (m.url || null)) {
+                    onUpdateUrl(m.id, newUrl)
+                }
+            })
+        }
+    }
+
     // --- DnD & Layout State ---
-    const initialOrder = ['artist', 'description', 'tags', 'genres', 'info', 'comments', 'playlist']
+    const initialOrder = ['artist', 'description', 'url', 'tags', 'genres', 'info', 'comments', 'playlist']
     const [sectionOrder, setSectionOrder] = useState<string[]>(() => {
         try {
             const saved = localStorage.getItem('inspector_layout_order_v2')
@@ -670,6 +692,62 @@ export function Inspector({
                                                 }}
                                                 disabled={media.length !== 1}
                                             />
+                                        </InspectorSection>
+                                    )
+                                case 'url':
+                                    // URL Field
+                                    if (media.length === 0) return null
+                                    return (
+                                        <InspectorSection
+                                            key={sectionId}
+                                            id={sectionId}
+                                            title="URL"
+                                            isOpen={isOpen}
+                                            onToggle={() => toggleSection(sectionId)}
+                                        >
+                                            <div className="url-input-container">
+                                                <input
+                                                    type="text"
+                                                    className="url-input"
+                                                    value={url}
+                                                    onChange={(e) => setUrl(e.target.value)}
+                                                    onBlur={handleUrlSave}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') {
+                                                            e.preventDefault();
+                                                            (e.target as HTMLInputElement).blur();
+                                                            handleUrlSave();
+                                                        }
+                                                    }}
+                                                    placeholder="URLを入力..."
+                                                />
+                                            </div>
+                                            <div className="url-actions">
+                                                <button
+                                                    className="url-action-btn"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        window.electronAPI.copyToClipboard(url)
+                                                    }}
+                                                    title="URLをコピー"
+                                                    disabled={!url}
+                                                >
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                                                    コピー
+                                                </button>
+                                                <button
+                                                    className="url-action-btn"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        if (url) window.electronAPI.openWith(url)
+                                                    }}
+                                                    title="ブラウザで開く"
+                                                    disabled={!url}
+                                                >
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                                                    開く
+                                                </button>
+                                            </div>
                                         </InspectorSection>
                                     )
                                 case 'info':
