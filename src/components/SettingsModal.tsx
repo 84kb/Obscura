@@ -233,25 +233,24 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     const [ffmpegUpdateProgress, setFfmpegUpdateProgress] = useState(0)
 
     useEffect(() => {
-        if (activeCategory === 'media-engine' && window.electronAPI) {
+        if (activeCategory === 'media-engine' && window.electronAPI && (window.electronAPI as any).getFFmpegInfo) {
             (window.electronAPI as any).getFFmpegInfo().then((info: any) => setFfmpegInfo(info))
         }
     }, [activeCategory])
 
     useEffect(() => {
-        if (!window.electronAPI) return
-        // @ts-ignore
-        const removeListener = window.electronAPI.onFFmpegUpdateProgress((progress) => {
+        if (!window.electronAPI || !(window.electronAPI as any).onFFmpegUpdateProgress) return
+
+        const removeListener = (window.electronAPI as any).onFFmpegUpdateProgress((progress: number) => {
             setFfmpegUpdateProgress(progress)
         })
         return () => {
-            // @ts-ignore
             if (removeListener) removeListener()
         }
     }, [])
 
     const handleCheckFFmpegUpdate = async () => {
-        if (!window.electronAPI) return
+        if (!window.electronAPI || !(window.electronAPI as any).checkFFmpegUpdate) return
         setFfmpegUpdateStatus('checking')
         try {
             const result = await (window.electronAPI as any).checkFFmpegUpdate()
@@ -267,7 +266,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }
 
     const handleUpdateFFmpeg = async () => {
-        if (!window.electronAPI) return
+        if (!window.electronAPI || !(window.electronAPI as any).updateFFmpeg) return
         setFfmpegUpdateStatus('updating')
         setFfmpegUpdateProgress(0)
         try {
