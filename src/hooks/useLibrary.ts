@@ -103,9 +103,9 @@ export function useLibrary() {
                 // パス変換してセット
                 const transformed = transformRemoteMedia(data.media, activeRemoteLibrary)
                 setMediaFiles(transformed)
-            } catch (error) {
+            } catch (error: any) {
                 console.error('Failed to load remote media files:', error)
-                // エラー通知などを入れたいが、一旦コンソールのみ
+                throw error // エラーを上位に伝播させる
             } finally {
                 setLoading(false)
             }
@@ -664,9 +664,10 @@ export function useLibrary() {
             return
         }
 
+        // 接続テストを行ってから切り替える
         setActiveLibrary(null)
         setActiveRemoteLibrary(lib)
-        setMediaFiles([]) // クリアしてもuseEffectが走るのでOK
+        setMediaFiles([])
         setTags([])
         setGenres([])
     }, [activeRemoteLibrary, activeLibrary])

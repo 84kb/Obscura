@@ -74,6 +74,23 @@ export default function App() {
         accessToken: activeRemoteLibrary?.token
     })
 
+    // データ読み込み (ライブラリ切り替え時などに再実行)
+    useEffect(() => {
+        const loadAll = async () => {
+            try {
+                await refreshLibrary()
+                await loadGenres()
+                // 他のデータも必要に応じて
+            } catch (e: any) {
+                if (activeRemoteLibrary) {
+                    alert(`リモートライブラリ "${activeRemoteLibrary.name}" への接続に失敗しました。\nサーバーが起動していないか、ネットワークに問題があります。`)
+                    // 失敗した場合はローカルに戻すなどの処理も検討可能だが、一旦警告のみ
+                }
+            }
+        }
+        loadAll()
+    }, [refreshLibrary, loadGenres, activeRemoteLibrary])
+
     // Socketイベントハンドリング
     useEffect(() => {
         if (!isSocketConnected) return

@@ -9,7 +9,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 3000;
+    z-index: 5000;
 }
 
 .settings-modal-container {
@@ -128,13 +128,14 @@
     background: #1c1a19;
 }
 
-.main-header {
+.settings-header {
     height: 72px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 0 32px;
     border-bottom: 1px solid rgba(255, 230, 200, 0.05);
+    -webkit-app-region: no-drag;
 }
 
 .category-title {
@@ -155,6 +156,8 @@
     color: #a0a0a0;
     cursor: pointer;
     transition: all 0.2s;
+    -webkit-app-region: no-drag;
+    pointer-events: auto;
 }
 
 .close-btn:hover {
@@ -629,6 +632,8 @@ input:checked+.slider:before {
     background: rgba(255, 255, 255, 0.05);
     border-color: #fff;
 }
+
+/* btn-dang clean up */
 
 .btn-danger {
     background: transparent;
