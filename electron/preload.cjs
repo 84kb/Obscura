@@ -131,6 +131,10 @@ try {
         testConnection: (url, token) => ipcRenderer.invoke('test-connection', { url, token }),
         addRemoteLibrary: (name, url, token) => ipcRenderer.invoke('add-remote-library', { name, url, token }),
         downloadRemoteMedia: (url, filename) => ipcRenderer.invoke('download-remote-media', url, filename),
+        uploadRemoteMedia: (url, token, filePaths) => ipcRenderer.invoke('upload-remote-media', { url, token, filePaths }),
+        renameRemoteMedia: (url, token, id, newName) => ipcRenderer.invoke('rename-remote-media', { url, token, id, newName }),
+        deleteRemoteMedia: (url, token, id) => ipcRenderer.invoke('delete-remote-media', { url, token, id }),
+        updateRemoteMedia: (url, token, id, updates) => ipcRenderer.invoke('update-remote-media', { url, token, id, updates }),
 
         // === 自動アップデート ===
         checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),

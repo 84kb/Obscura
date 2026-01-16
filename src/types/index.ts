@@ -211,6 +211,10 @@ export interface ElectronAPI {
     testConnection: (url: string, token: string) => Promise<{ success: boolean; message?: string }>
     addRemoteLibrary: (name: string, url: string, token: string) => Promise<any>
     downloadRemoteMedia: (url: string, filename: string) => Promise<{ success: boolean; path?: string; message?: string }>
+    uploadRemoteMedia: (url: string, token: string, filePaths: string[]) => Promise<{ success: boolean; results?: any[]; message?: string }>
+    renameRemoteMedia: (url: string, token: string, id: number, newName: string) => Promise<any>
+    deleteRemoteMedia: (url: string, token: string, id: number) => Promise<any>
+    updateRemoteMedia: (url: string, token: string, id: number, updates: any) => Promise<any>
 
     // === 自動アップデート ===
     checkForUpdates: () => Promise<any>

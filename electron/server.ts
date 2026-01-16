@@ -288,10 +288,15 @@ export function startServer(port: number): Promise<void> {
                 try {
                     const id = req.params.id ? parseInt(req.params.id) : NaN
                     if (isNaN(id)) return res.status(400).send()
-                    const { rating, artist, description } = req.body
+                    const { rating, artist, description, fileName } = req.body
                     if (rating !== undefined) library.updateRating(id, rating)
                     if (artist !== undefined) library.updateArtist(id, artist)
                     if (description !== undefined) library.updateDescription(id, description)
+
+                    if (fileName) {
+                        // updateFileName 内で物理リネームとDB更新が行われる
+                        library.updateFileName(id, fileName)
+                    }
                     res.json({ success: true })
                 } catch (e) { res.status(500).send() }
             })

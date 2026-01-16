@@ -421,13 +421,29 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
         const user = sharedUsers.find(u => u.id === userId)
         if (!user || !window.electronAPI) return
 
-        let newPermissions: any[]
-        const currentPermissions = user.permissions || []
-        if (currentPermissions.includes(permission)) {
-            newPermissions = currentPermissions.filter((p: any) => p !== permission)
+        let newPermissions: any[] = [...(user.permissions || [])]
+        const allPermissions = ['READ_ONLY', 'DOWNLOAD', 'UPLOAD', 'EDIT', 'FULL']
+
+        if (permission === 'FULL') {
+            if (newPermissions.includes('FULL')) {
+                // FULLをOFFにする -> FULLのみ外す (他は残す)
+                newPermissions = newPermissions.filter(p => p !== 'FULL')
+            } else {
+                // FULLをONにする -> 全てON
+                newPermissions = [...allPermissions]
+            }
         } else {
-            newPermissions = [...currentPermissions, permission]
+            if (newPermissions.includes(permission)) {
+                // 個別解除 -> その権限解除 & FULLも解除
+                newPermissions = newPermissions.filter(p => p !== permission && p !== 'FULL')
+            } else {
+                // 個別追加
+                newPermissions.push(permission)
+            }
         }
+
+        // ユニーク化
+        newPermissions = Array.from(new Set(newPermissions))
 
         try {
             await (window.electronAPI as any).updateSharedUser(userId, { permissions: newPermissions })

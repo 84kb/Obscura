@@ -1221,3 +1221,94 @@ ipcMain.handle('download-remote-media', async (_event, url: string, filename: st
         return { success: false, message: error.message }
     }
 })
+
+
+ipcMain.handle('upload-remote-media', async (_event, { url, token, filePaths }: { url: string; token: string; filePaths: string[] }) => {
+    try {
+        const results = []
+
+        // Node.js の fetch でマルチパート送信を行う
+        const userToken = getClientConfig().myUserToken || ''
+
+        // トークン解析
+        let accessToken = token
+        if (token.includes(':')) {
+            const parts = token.split(':')
+            accessToken = parts[1]
+        }
+
+        for (const filePath of filePaths) {
+            if (!fs.existsSync(filePath)) continue
+
+            const formData = new FormData()
+            const fileBuffer = fs.readFileSync(filePath)
+            const fileName = path.basename(filePath)
+            const blob = new Blob([fileBuffer])
+            formData.append('files', blob, fileName)
+
+            const response = await fetch(`${url}/api/upload`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'X-User-Token': userToken
+                },
+                body: formData
+            })
+
+            if (!response.ok) {
+                throw new Error(`Upload failed: ${response.statusText}`)
+            }
+            const data = await response.json()
+            results.push(data)
+        }
+        return { success: true, results }
+    } catch (e: any) {
+        console.error('Remote upload failed:', e)
+        return { success: false, message: e.message }
+    }
+})
+
+ipcMain.handle('rename-remote-media', async (_event, { url, token, id, newName }: { url: string; token: string; id: number; newName: string }) => {
+    return callRemoteApi(url, token, `/api/media/${id}`, 'PUT', { fileName: newName })
+})
+
+ipcMain.handle('delete-remote-media', async (_event, { url, token, id }: { url: string; token: string; id: number }) => {
+    return callRemoteApi(url, token, `/api/media/${id}`, 'DELETE')
+})
+
+ipcMain.handle('update-remote-media', async (_event, { url, token, id, updates }: { url: string; token: string; id: number; updates: any }) => {
+    return callRemoteApi(url, token, `/api/media/${id}`, 'PUT', updates)
+})
+
+// ヘルパー関数
+async function callRemoteApi(baseUrl: string, token: string, path: string, method: string, body?: any) {
+    try {
+        const userToken = getClientConfig().myUserToken || ''
+        let accessToken = token
+        if (token.includes(':')) {
+            accessToken = token.split(':')[1]
+        }
+
+        const headers: any = {
+            'Authorization': `Bearer ${accessToken}`,
+            'X-User-Token': userToken,
+        }
+        if (body) {
+            headers['Content-Type'] = 'application/json'
+        }
+
+        const response = await fetch(`${baseUrl}${path}`, {
+            method,
+            headers,
+            body: body ? JSON.stringify(body) : undefined
+        })
+
+        if (!response.ok) {
+            throw new Error(`API Error: ${response.status} ${response.statusText}`)
+        }
+        return await response.json()
+    } catch (e: any) {
+        console.error(`Remote API call failed (${method} ${path}):`, e)
+        throw e
+    }
+}
