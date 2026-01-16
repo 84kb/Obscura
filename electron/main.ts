@@ -1,8 +1,10 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, protocol, Menu, MenuItem, nativeImage, clipboard } from 'electron'
 import path from 'node:path'
 import fs from 'fs-extra'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, URL } from 'node:url'
 import crypto from 'crypto'
+import http from 'node:http'
+import https from 'node:https'
 import { initDatabase, mediaDB, tagDB, tagFolderDB, genreDB, libraryDB, commentDB } from './database'
 import { ServerConfig, RemoteLibrary } from '../src/types'
 import { getThumbnailPath } from './utils'
@@ -1223,11 +1225,10 @@ ipcMain.handle('download-remote-media', async (_event, url: string, filename: st
 })
 
 
-ipcMain.handle('upload-remote-media', async (_event, { url, token, filePaths }: { url: string; token: string; filePaths: string[] }) => {
+ipcMain.handle('upload-remote-media', async (event, { url, token, filePaths, options }: { url: string; token: string; filePaths: string[], options?: { notificationId?: string } }) => {
     try {
+        const notificationId = options?.notificationId
         const results = []
-
-        // Node.js の fetch でマルチパート送信を行う
         const userToken = getClientConfig().myUserToken || ''
 
         // トークン解析
@@ -1237,30 +1238,92 @@ ipcMain.handle('upload-remote-media', async (_event, { url, token, filePaths }: 
             accessToken = parts[1]
         }
 
-        for (const filePath of filePaths) {
-            if (!fs.existsSync(filePath)) continue
+        // ファイル情報収集と合計サイズ計算
+        let totalSize = 0
+        const filesToUpload = []
+        for (const p of filePaths) {
+            if (fs.existsSync(p)) {
+                const stat = fs.statSync(p)
+                totalSize += stat.size
+                filesToUpload.push({ path: p, size: stat.size, name: path.basename(p) })
+            }
+        }
 
-            const formData = new FormData()
-            const fileBuffer = fs.readFileSync(filePath)
-            const fileName = path.basename(filePath)
-            const blob = new Blob([fileBuffer])
-            formData.append('files', blob, fileName)
+        if (filesToUpload.length === 0) return { success: false, message: 'No valid files found' }
 
-            const response = await fetch(`${url}/api/upload`, {
+        let currentUploaded = 0
+
+        for (const file of filesToUpload) {
+            const targetUrl = new URL(`${url}/api/upload`)
+            const isHttps = targetUrl.protocol === 'https:'
+            const requestLib = isHttps ? https : http
+            const boundary = '----ObscuraUploadBoundary' + crypto.randomUUID()
+
+            const postDataStart = `--${boundary}\r\n` +
+                `Content-Disposition: form-data; name="files"; filename="${file.name}"\r\n` +
+                `Content-Type: application/octet-stream\r\n\r\n`
+            const postDataEnd = `\r\n--${boundary}--\r\n`
+
+            const reqOptions = {
                 method: 'POST',
+                hostname: targetUrl.hostname,
+                port: targetUrl.port || (isHttps ? 443 : 80),
+                path: targetUrl.pathname,
                 headers: {
                     'Authorization': `Bearer ${accessToken}`,
-                    'X-User-Token': userToken
-                },
-                body: formData
-            })
-
-            if (!response.ok) {
-                throw new Error(`Upload failed: ${response.statusText}`)
+                    'X-User-Token': userToken,
+                    'Content-Type': `multipart/form-data; boundary=${boundary}`
+                }
             }
-            const data = await response.json()
-            results.push(data)
+
+            try {
+                const result = await new Promise((resolve, reject) => {
+                    const req = requestLib.request(reqOptions, (res) => {
+                        let data = ''
+                        res.on('data', chunk => data += chunk)
+                        res.on('end', () => {
+                            if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+                                try {
+                                    resolve(JSON.parse(data))
+                                } catch {
+                                    resolve({ success: true })
+                                }
+                            } else {
+                                reject(new Error(`Upload failed: ${res.statusMessage || res.statusCode}`))
+                            }
+                        })
+                    })
+
+                    req.on('error', e => reject(e))
+
+                    // ヘッダー書き込み
+                    req.write(postDataStart)
+
+                    // ファイルストリーム書き込み
+                    const stream = fs.createReadStream(file.path)
+                    stream.on('data', (chunk) => {
+                        req.write(chunk)
+                        currentUploaded += chunk.length
+                        if (notificationId) {
+                            const progress = Math.min(100, Math.round((currentUploaded / totalSize) * 100))
+                            event.sender.send('upload-progress', { id: notificationId, progress })
+                        }
+                    })
+
+                    stream.on('end', () => {
+                        req.write(postDataEnd)
+                        req.end()
+                    })
+
+                    stream.on('error', err => reject(err))
+                })
+                results.push(result)
+            } catch (error: any) {
+                console.error(`Failed to upload ${file.name}:`, error)
+                // 1つの失敗で全体を止めない
+            }
         }
+
         return { success: true, results }
     } catch (e: any) {
         console.error('Remote upload failed:', e)

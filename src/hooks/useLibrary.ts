@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { MediaFile, Tag, TagFolder, Genre, FilterOptions, Library, RemoteLibrary } from '../types'
+import { useNotification } from '../contexts/NotificationContext'
 
 export function useLibrary() {
     const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([])
@@ -32,12 +33,30 @@ export function useLibrary() {
     })
 
     const [myUserToken, setMyUserToken] = useState<string>('')
+    const { addNotification, removeNotification, updateProgress } = useNotification()
+
+    // アップロード進捗リスナー
+    useEffect(() => {
+        if (!window.electronAPI || !window.electronAPI.on) return
+
+        const handleProgress = (_: any, data: { id: string, progress: number }) => {
+            updateProgress(data.id, data.progress)
+        }
+
+        const removeListener = window.electronAPI.on('upload-progress', handleProgress)
+        return () => {
+            // @ts-ignore
+            if (removeListener) {
+                (removeListener as any)()
+            }
+        }
+    }, [updateProgress])
 
     // クライアント設定（UserToken）読み込み
     useEffect(() => {
         const loadConfig = async () => {
             try {
-                const config = await window.electronAPI.getClientConfig()
+                const config = await (window.electronAPI as any).getClientConfig()
                 if (config && config.myUserToken) {
                     setMyUserToken(config.myUserToken)
                 }
@@ -418,25 +437,44 @@ export function useLibrary() {
 
     // メディアインポート
     const importMedia = useCallback(async (filePaths: string[]) => {
+        if (filePaths.length === 0) return
+
         setLoading(true)
+        const notificationId = activeRemoteLibrary
+            ? addNotification({ type: 'progress', title: 'アップロード中', message: `${filePaths.length}個のファイルを転送しています...`, progress: 0, duration: 0 })
+            : addNotification({ type: 'info', title: 'インポート中', message: `${filePaths.length}個のファイルを読み込んでいます...`, duration: 0 })
+
         try {
             if (activeRemoteLibrary) {
-                const res = await (window.electronAPI as any).uploadRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, filePaths)
+                // notificationId を渡して、バックエンドからそのIDで進捗イベントを送ってもらう
+                const res = await (window.electronAPI as any).uploadRemoteMedia(
+                    activeRemoteLibrary.url,
+                    activeRemoteLibrary.token,
+                    filePaths,
+                    { notificationId }
+                )
                 if (!res.success) {
                     throw new Error(res.message || 'Remote upload failed')
                 }
+
+                removeNotification(notificationId)
+                addNotification({ type: 'success', title: 'アップロード完了', message: `${filePaths.length}個のファイルを追加しました。` })
                 await loadMediaFiles()
                 return
             }
 
             await window.electronAPI.importMedia(filePaths)
+            removeNotification(notificationId)
+            addNotification({ type: 'success', title: 'インポート完了', message: `${filePaths.length}個のファイルを追加しました。` })
             await loadMediaFiles()
         } catch (error) {
             console.error('Failed to import media:', error)
+            removeNotification(notificationId)
+            addNotification({ type: 'error', title: 'インポート失敗', message: String(error) })
         } finally {
             setLoading(false)
         }
-    }, [loadMediaFiles, activeRemoteLibrary])
+    }, [loadMediaFiles, activeRemoteLibrary, addNotification, removeNotification])
 
     // レーティング更新
     const updateRating = useCallback(async (id: number, rating: number) => {

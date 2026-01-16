@@ -1,0 +1,168 @@
+.notification-container {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    display: flex;
+    flex-direction: column-reverse;
+    /* 新しい通知が上に積み重なる or 下に出る？ Eagleは右下積み上げ */
+    /* column-reverseだと下にスペースが必要。通常はcolumnで新しいのが下、あるいはtop-rightなら上。
+       Eagle風とのことなので、右下にスタックし、新しいものが「追加」されていくイメージ。
+       flex-direction: column で、コンテナの下端を固定にするなどの工夫が必要だが、
+       シンプルに column で表示し、position bottom: 24px から上に伸びていく形にするには column-reverse が適している。
+    */
+    gap: 12px;
+    z-index: 9999;
+    pointer-events: none;
+    /* コンテナ自体はクリック透過 */
+    width: 320px;
+    max-width: 90vw;
+}
+
+.notification-item {
+    background: #1c1a19;
+    border: 1px solid rgba(255, 230, 200, 0.08);
+    /* Warm border matching settings */
+    border-left: 4px solid #505052;
+    /* Default border color */
+    border-radius: 8px;
+    padding: 16px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    pointer-events: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    animation: slideIn 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+    transition: all 0.3s ease;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+}
+
+.notification-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.6);
+}
+
+.notification-item.exiting {
+    animation: slideOut 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+/* Types */
+.notification-item.info {
+    border-left-color: #0ea5e9;
+    /* Blue */
+}
+
+.notification-item.success {
+    border-left-color: #4ade80;
+    /* Green */
+}
+
+.notification-item.error {
+    border-left-color: #ef4444;
+    /* Red */
+}
+
+.notification-item.progress {
+    border-left-color: #ea580c;
+    /* Orange (Primary) */
+}
+
+/* Content */
+.notification-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+.notification-icon {
+    margin-right: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+}
+
+.notification-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.notification-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 4px;
+    line-height: 1.4;
+}
+
+.notification-message {
+    font-size: 13px;
+    color: #a8a29e;
+    /* Warm grey */
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.notification-close {
+    background: transparent;
+    border: none;
+    color: #606060;
+    cursor: pointer;
+    padding: 4px;
+    margin-left: 8px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.2s;
+}
+
+.notification-close:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* Progress Bar */
+.notification-progress-container {
+    width: 100%;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    margin-top: 8px;
+    overflow: hidden;
+}
+
+.notification-progress-bar {
+    height: 100%;
+    background: #ea580c;
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
+
+/* Animations */
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateX(20px) scale(0.95);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0) scale(1);
+    }
+}
+
+@keyframes slideOut {
+    from {
+        opacity: 1;
+        transform: translateX(0) scale(1);
+    }
+
+    to {
+        opacity: 0;
+        transform: translateX(20px) scale(0.95);
+    }
+}

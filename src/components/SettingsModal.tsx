@@ -1279,7 +1279,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     <div style={{ color: '#4ade80' }}>
                                         新しいバージョンが利用可能です (v{updateInfo?.version})
                                     </div>
-                                    <button className="settings-button primary" onClick={handleDownloadUpdate} style={{ backgroundColor: '#0ea5e9', border: 'none' }}>
+                                    <button className="btn btn-primary" onClick={handleDownloadUpdate}>
                                         ダウンロード開始
                                     </button>
                                 </div>
@@ -1303,7 +1303,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                             {updateStatus === 'downloaded' && (
                                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                                     <span style={{ color: '#4ade80' }}>ダウンロード完了！</span>
-                                    <button className="settings-button primary" onClick={handleQuitAndInstall} style={{ backgroundColor: '#0ea5e9', border: 'none' }}>
+                                    <button className="btn btn-primary" onClick={handleQuitAndInstall}>
                                         再起動してインストール
                                     </button>
                                 </div>

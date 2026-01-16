@@ -275,13 +275,33 @@ export function startServer(port: number): Promise<void> {
             })
 
             expressApp.post('/api/upload', authMiddleware, requirePermission('UPLOAD'), upload.array('files'), async (req: AuthenticatedRequest, res) => {
+                const tempFiles: string[] = []
                 try {
                     const files = req.files as Express.Multer.File[]
                     if (!files || files.length === 0) return res.status(400).send()
-                    const imported = await library.importMediaFiles(files.map(f => f.path))
-                    files.forEach(f => { if (f.path && fs.existsSync(f.path)) fs.unlinkSync(f.path) })
+
+                    // 拡張子がないとDB側でスキップされるため、元の拡張子を付与する
+                    const pathsToImport = files.map(f => {
+                        const ext = path.extname(f.originalname)
+                        if (ext) {
+                            const newPath = f.path + ext
+                            fs.renameSync(f.path, newPath)
+                            tempFiles.push(newPath)
+                            return newPath
+                        }
+                        tempFiles.push(f.path)
+                        return f.path
+                    })
+
+                    const imported = await library.importMediaFiles(pathsToImport)
                     res.status(201).json(imported)
-                } catch (e) { res.status(500).send() }
+                } catch (e) {
+                    console.error('Upload error:', e)
+                    res.status(500).send()
+                } finally {
+                    // クリーンアップ
+                    tempFiles.forEach(p => { if (fs.existsSync(p)) fs.unlinkSync(p) })
+                }
             })
 
             expressApp.put('/api/media/:id', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res) => {

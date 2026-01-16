@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Sidebar } from './components/Sidebar'
+import { useNotification } from './contexts/NotificationContext'
 import { LibraryGrid } from './components/LibraryGrid'
 import { Player } from './components/Player'
 import { Inspector } from './components/Inspector'
@@ -113,6 +114,33 @@ export default function App() {
             unsubDetails.forEach(unsub => unsub())
         }
     }, [isSocketConnected, subscribe, refreshLibrary])
+
+    // アップデート通知
+    const { addNotification } = useNotification()
+    useEffect(() => {
+        if (!window.electronAPI) return
+        const removeListener = window.electronAPI.onUpdateStatus((data) => {
+            if (data.status === 'update-downloaded') {
+                addNotification({
+                    type: 'success',
+                    title: 'アップデート完了',
+                    message: '新しいバージョンをインストールする準備ができました。設定画面から再起動してください。',
+                    duration: 0
+                })
+            }
+            if (data.status === 'update-available') {
+                addNotification({
+                    type: 'info',
+                    title: 'アップデートがあります',
+                    message: `新しいバージョン v${data.info?.version} が利用可能です。設定画面からダウンロードできます。`,
+                    duration: 10000
+                })
+            }
+        })
+        return () => {
+            if (removeListener && typeof removeListener === 'function') removeListener()
+        }
+    }, [addNotification])
 
     // 選択されたメディアのIDリスト
     const [selectedMediaIds, setSelectedMediaIds] = useState<number[]>([])
