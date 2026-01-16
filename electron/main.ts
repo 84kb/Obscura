@@ -9,6 +9,8 @@ import { initDatabase, mediaDB, tagDB, tagFolderDB, genreDB, libraryDB, commentD
 import { ServerConfig, RemoteLibrary } from '../src/types'
 import { getThumbnailPath } from './utils'
 import { generatePreviewImages, getMediaMetadata } from './ffmpeg'
+import { getFFmpegPath } from './ffmpeg-path'
+import { getCurrentFFmpegVersion, checkForAppUpdates, updateFFmpeg } from './ffmpeg-updater'
 import { initErrorLogger } from './error-logger'
 import { initSharedLibrary, serverConfigDB, sharedUserDB, SharedUser } from './shared-library'
 import { startServer, stopServer, isServerRunning } from './server'
@@ -653,7 +655,8 @@ ipcMain.handle('generate-thumbnail', async (_event, mediaId: number, filePath: s
                     thumbnailPath
                 ]
 
-                const ffmpeg = spawn('ffmpeg', args)
+                const ffmpegPath = getFFmpegPath()
+                const ffmpeg = spawn(ffmpegPath, args)
                 let stderr = ''
 
                 ffmpeg.stderr.on('data', (data: Buffer) => {
@@ -696,7 +699,8 @@ ipcMain.handle('generate-thumbnail', async (_event, mediaId: number, filePath: s
                     thumbnailPath
                 ]
 
-                const ffmpeg = spawn('ffmpeg', args)
+                const ffmpegPath = getFFmpegPath()
+                const ffmpeg = spawn(ffmpegPath, args)
 
                 ffmpeg.on('close', (code: number) => {
                     if (code === 0 && fs.existsSync(thumbnailPath)) {
@@ -1386,8 +1390,7 @@ async function callRemoteApi(baseUrl: string, token: string, path: string, metho
 }
 
 // === FFmpeg Update Handlers ===
-import { getCurrentFFmpegVersion, checkForAppUpdates, updateFFmpeg } from './ffmpeg-updater'
-import { getFFmpegPath } from './ffmpeg-path'
+
 
 ipcMain.handle('ffmpeg-get-info', async () => {
     const version = await getCurrentFFmpegVersion()
