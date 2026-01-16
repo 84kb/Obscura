@@ -92,6 +92,7 @@ export interface ServerConfig {
     requireHttps: boolean
     sslCertPath?: string
     sslKeyPath?: string
+    publishLibraryPath?: string
 }
 
 export interface SharedUser {

@@ -32,6 +32,7 @@ export interface ServerConfig {
     requireHttps: boolean
     sslCertPath?: string
     sslKeyPath?: string
+    publishLibraryPath?: string // 公開するライブラリのパス
 }
 
 // 共有ユーザー

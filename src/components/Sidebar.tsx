@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { FilterOptions, Genre, Library } from '../types'
 import './Sidebar.css'
 
 import { RemoteLibrary } from '../types'
+import { ConfirmModal } from './ConfirmModal'
 
 interface SidebarProps {
     filterOptions: FilterOptions
@@ -76,7 +77,58 @@ const Icons = {
     Trash: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>,
     Folder: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>,
     FolderOpen: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>,
-    Cloud: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path></svg>
+    Cloud: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path></svg>,
+    Plus: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+}
+
+// リネーム用入力コンポーネント
+function RenameInput({
+    initialValue,
+    onSubmit,
+    onCancel
+}: {
+    initialValue: string,
+    onSubmit: (value: string) => void,
+    onCancel: () => void
+}) {
+    const [value, setValue] = useState(initialValue)
+    const inputRef = useRef<HTMLInputElement>(null)
+
+    useEffect(() => {
+        // マウント時に確実にフォーカスを当てる
+        const timer = setTimeout(() => {
+            if (inputRef.current) {
+                console.log('[RenameInput] Focusing...')
+                inputRef.current.focus()
+                inputRef.current.select()
+            }
+        }, 50) // レンダリング完了とイベントループのクリーンアップを待つ
+        return () => clearTimeout(timer)
+    }, [])
+
+    return (
+        <input
+            ref={inputRef}
+            type="text"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onBlur={() => {
+                console.log('[RenameInput] Blurred')
+                onSubmit(value)
+            }}
+            onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                    onSubmit(value)
+                } else if (e.key === 'Escape') {
+                    onCancel()
+                }
+            }}
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="sidebar-input-tiny"
+            style={{ flex: 1, height: '22px', minWidth: 0, position: 'relative', zIndex: 10001 }}
+        />
+    )
 }
 
 export function Sidebar({
@@ -102,15 +154,17 @@ export function Sidebar({
     onInternalDragEnd
 }: SidebarProps) {
     const [renamingGenreId, setRenamingGenreId] = useState<number | null>(null)
+    const [renamingName, setRenamingName] = useState("")
     const [isLibraryMenuOpen, setIsLibraryMenuOpen] = useState(false)
     const [expandedFolders, setExpandedFolders] = useState<Set<number>>(new Set())
     const [draggedGenreId, setDraggedGenreId] = useState<number | null>(null)
     const [dropTarget, setDropTarget] = useState<{ id: number; position: 'top' | 'middle' | 'bottom' } | null>(null)
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; genreId: number } | null>(null)
+    const [genreToDelete, setGenreToDelete] = useState<number | null>(null)
     const libraryMenuRef = useRef<HTMLDivElement>(null)
 
-    // ジャンルツリーの構築
-    const genreTree = buildGenreTree(genres)
+    // ジャンルツリーの構築 (メモ化)
+    const genreTree = useMemo(() => buildGenreTree(genres), [genres])
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -133,6 +187,7 @@ export function Sidebar({
             const newGenre = await onCreateGenre("無題")
             if (newGenre) {
                 setRenamingGenreId(newGenre.id)
+                setRenamingName(newGenre.name)
             }
         } catch (error) {
             console.error("Failed to create genre", error)
@@ -140,10 +195,13 @@ export function Sidebar({
     }
 
     const handleRenameSubmit = (id: number, newName: string) => {
-        if (newName.trim() && newName !== "無題") {
-            onRenameGenre(id, newName.trim())
+        const trimmed = newName.trim()
+        const originalName = genres.find(g => g.id === id)?.name
+        if (trimmed && trimmed !== "無題" && trimmed !== originalName) {
+            onRenameGenre(id, trimmed)
         }
         setRenamingGenreId(null)
+        setRenamingName("")
     }
 
     // コンテキストメニュー関連
@@ -162,17 +220,17 @@ export function Sidebar({
         if (!genre) return
 
         if (action === 'delete') {
-            if (window.confirm('このフォルダーを削除してもよろしいですか？')) {
-                await onDeleteGenre(genreId)
-            }
+            setGenreToDelete(genreId)
         } else if (action === 'rename') {
             setRenamingGenreId(genreId)
+            setRenamingName(genre.name)
         } else if (action === 'new-folder') {
             // 兄弟を作成 (同じparentId)
             try {
                 const newGenre = await onCreateGenre("無題", genre.parentId)
                 if (newGenre) {
                     setRenamingGenreId(newGenre.id)
+                    setRenamingName(newGenre.name)
                 }
             } catch (error) {
                 console.error("Failed to create sibling folder", error)
@@ -185,6 +243,7 @@ export function Sidebar({
                 const newGenre = await onCreateGenre("無題", genreId)
                 if (newGenre) {
                     setRenamingGenreId(newGenre.id)
+                    setRenamingName(newGenre.name)
                 }
             } catch (error) {
                 console.error("Failed to create subfolder", error)
@@ -415,22 +474,13 @@ export function Sidebar({
                     </div>
 
                     {isRenaming ? (
-                        <input
-                            type="text"
-                            defaultValue={node.name}
-                            autoFocus
-                            onFocus={(e) => e.target.select()}
-                            onBlur={(e) => handleRenameSubmit(node.id, e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                    handleRenameSubmit(node.id, e.currentTarget.value)
-                                } else if (e.key === 'Escape') {
-                                    setRenamingGenreId(null)
-                                }
+                        <RenameInput
+                            initialValue={renamingName}
+                            onSubmit={(val) => handleRenameSubmit(node.id, val)}
+                            onCancel={() => {
+                                setRenamingGenreId(null)
+                                setRenamingName("")
                             }}
-                            onClick={(e) => e.stopPropagation()}
-                            className="sidebar-input-tiny"
-                            style={{ flex: 1, height: '20px', minWidth: 0 }}
                         />
                     ) : (
                         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</span>
@@ -616,16 +666,17 @@ export function Sidebar({
 
             <div className="sidebar-section">
                 <div className="flex justify-between items-center px-2 mb-1">
-                    <h2 className="sidebar-section-title">フォルダー</h2>
-                    <button
-                        className="btn-icon-tiny"
-                        onClick={handleCreateClick}
-                        title="追加"
-                    >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
-                        </svg>
-                    </button>
+                    <div className="sidebar-section-header">
+                        <span>フォルダー</span>
+                        <button
+                            className="sidebar-action-btn"
+                            onClick={handleCreateClick}
+                            title={(!hasActiveLibrary && !activeRemoteLibrary) ? "ライブラリが選択されていません" : "フォルダーを作成"}
+                            disabled={!hasActiveLibrary && !activeRemoteLibrary}
+                        >
+                            +
+                        </button>
+                    </div>
                 </div>
 
                 <div className="sidebar-genre-list">
@@ -666,6 +717,21 @@ export function Sidebar({
                     </div>
                 )
             }
+            {genreToDelete !== null && (
+                <ConfirmModal
+                    title="フォルダーを削除"
+                    message="このフォルダーを削除してもよろしいですか？"
+                    confirmLabel="削除"
+                    cancelLabel="キャンセル"
+                    isDestructive={true}
+                    onConfirm={async () => {
+                        const id = genreToDelete
+                        setGenreToDelete(null)
+                        await onDeleteGenre(id)
+                    }}
+                    onCancel={() => setGenreToDelete(null)}
+                />
+            )}
         </div >
     )
 }

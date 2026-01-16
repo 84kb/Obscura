@@ -13,7 +13,7 @@
 }
 
 .confirm-modal {
-    background: var(--bg-secondary);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     width: 100%;
@@ -27,6 +27,7 @@
         opacity: 0;
         transform: scale(0.95);
     }
+
     to {
         opacity: 1;
         transform: scale(1);
@@ -41,7 +42,7 @@
     margin: 0;
     font-size: 16px;
     font-weight: 600;
-    color: var(--text-primary);
+    color: var(--text-main);
 }
 
 .confirm-modal-body {
@@ -51,7 +52,7 @@
 .confirm-modal-body p {
     margin: 0;
     font-size: 14px;
-    color: var(--text-secondary);
+    color: var(--text-muted);
     line-height: 1.5;
     white-space: pre-line;
 }

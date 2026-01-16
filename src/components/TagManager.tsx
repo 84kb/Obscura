@@ -6,9 +6,10 @@ interface TagManagerProps {
     tags: Tag[]
     onCreateTag: (name: string) => void
     onDeleteTag: (id: number) => void
+    disabled?: boolean
 }
 
-export function TagManager({ tags, onCreateTag, onDeleteTag }: TagManagerProps) {
+export function TagManager({ tags, onCreateTag, onDeleteTag, disabled = false }: TagManagerProps) {
     const [newTagName, setNewTagName] = useState('')
     const [newFolderName, setNewFolderName] = useState('')
     const [tagFolders, setTagFolders] = useState<TagFolder[]>([])
@@ -173,8 +174,9 @@ export function TagManager({ tags, onCreateTag, onDeleteTag }: TagManagerProps) 
                     <span>タグ グループ({tagFolders.length})</span>
                     <button
                         className="add-folder-btn"
-                        onClick={() => setShowFolderInput(!showFolderInput)}
-                        title="グループを追加"
+                        onClick={() => !disabled && setShowFolderInput(!showFolderInput)}
+                        title={disabled ? "ライブラリが選択されていません" : "グループを追加"}
+                        disabled={disabled}
                     >
                         +
                     </button>
@@ -243,10 +245,11 @@ export function TagManager({ tags, onCreateTag, onDeleteTag }: TagManagerProps) 
                             type="text"
                             value={newTagName}
                             onChange={(e) => setNewTagName(e.target.value)}
-                            placeholder="新しいタグ名..."
+                            placeholder={disabled ? "ライブラリが選択されていません" : "新しいタグ名..."}
                             className="tag-manager-input"
+                            disabled={disabled}
                         />
-                        <button type="submit" className="btn btn-primary btn-small">追加</button>
+                        <button type="submit" className="btn btn-primary btn-small" disabled={disabled}>追加</button>
                     </form>
                 </div>
 

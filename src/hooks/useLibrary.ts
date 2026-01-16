@@ -118,7 +118,7 @@ export function useLibrary() {
                 console.error('Failed to load media files:', error)
             }
         }
-    }, [activeRemoteLibrary, transformRemoteMedia, myUserToken])
+    }, [activeRemoteLibrary, activeLibrary, transformRemoteMedia, myUserToken])
 
     // タグ読み込み
     const loadTags = useCallback(async () => {
@@ -226,16 +226,17 @@ export function useLibrary() {
     }, [loadMediaFiles])
 
     // タグ作成
-    const createTag = useCallback(async (name: string) => {
+    const createTag = useCallback(async (name: string): Promise<Tag | null> => {
+        if (!activeLibrary && !activeRemoteLibrary) return null
         try {
-            const result = await window.electronAPI.createTag(name)
+            const newTag = await window.electronAPI.createTag(name)
             await loadTags()
-            return result
+            return newTag
         } catch (error) {
             console.error('Failed to create tag:', error)
             return null
         }
-    }, [loadTags])
+    }, [loadTags, activeLibrary, activeRemoteLibrary])
 
     // タグ削除
     const deleteTag = useCallback(async (id: number) => {
@@ -245,19 +246,20 @@ export function useLibrary() {
         } catch (error) {
             console.error('Failed to delete tag:', error)
         }
-    }, [loadTags])
+    }, [loadTags, activeLibrary, activeRemoteLibrary])
 
     // ジャンル作成
     const createGenre = useCallback(async (name: string, parentId?: number | null) => {
+        if (!activeLibrary && !activeRemoteLibrary) return null
         try {
-            const result = await window.electronAPI.createGenre(name, parentId)
+            const newGenre = await window.electronAPI.createGenre(name, parentId)
             await loadGenres()
-            return result
+            return newGenre
         } catch (error) {
             console.error('Failed to create genre:', error)
             return null
         }
-    }, [loadGenres])
+    }, [loadGenres, activeLibrary, activeRemoteLibrary])
 
     // ジャンル削除
     const deleteGenre = useCallback(async (id: number) => {
@@ -267,7 +269,7 @@ export function useLibrary() {
         } catch (error) {
             console.error('Failed to delete genre:', error)
         }
-    }, [loadGenres])
+    }, [loadGenres, activeLibrary, activeRemoteLibrary])
 
     // ジャンル名変更
     const renameGenre = useCallback(async (id: number, newName: string) => {
@@ -277,7 +279,7 @@ export function useLibrary() {
         } catch (error) {
             console.error('Failed to rename genre:', error)
         }
-    }, [loadGenres])
+    }, [loadGenres, activeLibrary, activeRemoteLibrary])
 
     // メディアにタグ追加
     const addTagToMedia = useCallback(async (mediaId: number, tagId: number) => {
@@ -355,7 +357,7 @@ export function useLibrary() {
         } catch (error) {
             console.error('Failed to update last played:', error)
         }
-    }, [loadMediaFiles])
+    }, [loadMediaFiles, activeLibrary, activeRemoteLibrary])
 
     // メディアインポート
     const importMedia = useCallback(async (filePaths: string[]) => {
@@ -622,19 +624,21 @@ export function useLibrary() {
 
     // ライブラリ切り替え
     const switchLibrary = useCallback(async (libraryPath: string) => {
+        // 既にアクティブなら何もしない (またはリロードのみ)
+        if (activeLibrary?.path === libraryPath && !activeRemoteLibrary) {
+            return
+        }
+
         try {
             await window.electronAPI.setActiveLibrary(libraryPath)
             const library = await window.electronAPI.getActiveLibrary()
             setActiveLibrary(library)
-
-            // データをリロード
-            await loadMediaFiles()
-            await loadTags()
-            await loadGenres()
+            setActiveRemoteLibrary(null)
+            // loadMediaFiles等はuseEffectで自動的に呼ばれる
         } catch (error) {
             console.error('Failed to switch library:', error)
         }
-    }, [loadMediaFiles, loadTags, loadGenres])
+    }, [activeLibrary, activeRemoteLibrary])
 
     // ライブラリ統計
     const libraryStats = useMemo(() => {
@@ -656,31 +660,29 @@ export function useLibrary() {
 
     // リモートライブラリへの切り替え
     const switchToRemoteLibrary = useCallback((lib: RemoteLibrary) => {
+        if (activeRemoteLibrary?.id === lib.id && !activeLibrary) {
+            return
+        }
+
         setActiveLibrary(null)
         setActiveRemoteLibrary(lib)
-        setMediaFiles([]) // クリア
+        setMediaFiles([]) // クリアしてもuseEffectが走るのでOK
         setTags([])
         setGenres([])
-        // リモートライブラリの場合、activeRemoteLibraryが変わるとloadMediaFiles等はuseEffectで反応するはずだが、
-        // activeRemoteLibraryを設定するだけでは即座にrefreshされない場合があるので確認が必要。
-        // useEffect[activeRemoteLibrary] で loadMediaFiles などが呼ばれる構造になっているか？
-        // loadMediaFilesは依存配列に activeRemoteLibrary を持っているので、次回のレンダリングで新しい関数が生成される。
-        // そして useEffect で loadMediaFiles を呼んでいれば更新される。
-        // line 172: }, [activeRemoteLibrary, transformRemoteMedia]) -> これだけだと自動実行されない
-        // line 697: useEffect(..., [..., loadMediaFiles, ...]) -> loadMediaFilesが変われば実行される
-        // なので、setActiveRemoteLibraryするだけでOKなはず。
-    }, [])
+    }, [activeRemoteLibrary, activeLibrary])
 
     // ローカルライブラリへの切り替え
     const switchToLocalLibrary = useCallback((lib: Library) => {
+        if (activeLibrary?.path === lib.path && !activeRemoteLibrary) {
+            return
+        }
+
         window.electronAPI.setActiveLibrary(lib.path).then(async () => {
             setActiveLibrary(lib)
             setActiveRemoteLibrary(null)
-            await loadMediaFiles()
-            await loadTags()
-            await loadGenres()
+            // useEffectにより自動リロード
         })
-    }, [loadMediaFiles, loadTags, loadGenres])
+    }, [activeLibrary, activeRemoteLibrary])
 
     // ライブラリ作成
     const createLibrary = useCallback(async (name: string, parentPath: string) => {
@@ -730,9 +732,9 @@ export function useLibrary() {
         loadGenres()
     }, [loadMediaFiles, loadTags, loadTagFolders, loadGenres])
 
-    return {
+    return useMemo(() => ({
         mediaFiles: filteredMediaFiles,
-        allMediaFiles: mediaFiles,  // フィルタリング前のメディアファイル一覧（フォルダーフィルター用）
+        allMediaFiles: mediaFiles,
         tags,
         tagFolders,
         genres,
@@ -770,5 +772,13 @@ export function useLibrary() {
         switchToLocalLibrary,
         openLibrary,
         myUserToken
-    }
+    }), [
+        filteredMediaFiles, mediaFiles, tags, tagFolders, genres, libraries, loading, activeLibrary,
+        filterOptions, setFilterOptions, createLibrary, switchLibrary, selectAndScanFolder,
+        createTag, deleteTag, createGenre, deleteGenre, addTagToMedia, removeTagFromMedia,
+        addGenreToMedia, removeGenreFromMedia, moveToTrash, restoreFromTrash, deletePermanently,
+        updateLastPlayed, importMedia, updateRating, renameMedia, updateArtist, libraryStats,
+        loadMediaFiles, loadGenres, renameGenre, activeRemoteLibrary, switchToRemoteLibrary,
+        switchToLocalLibrary, openLibrary, myUserToken
+    ])
 }

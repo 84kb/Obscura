@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { AppSettings } from '../types'
+import { AppSettings, Library } from '../types'
 import './SettingsModal.css'
 
 interface SettingsModalProps {
@@ -141,7 +141,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
     useEffect(() => {
         if (window.electronAPI) {
-            window.electronAPI.getAppVersion().then(setAppVersion)
+            (window.electronAPI as any).getAppVersion().then((v: string) => setAppVersion(v))
         }
     }, [])
 
@@ -178,6 +178,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     const [myUserToken, setMyUserToken] = useState<string>('')
     const [isServerRunning, setIsServerRunning] = useState<boolean>(false)
     const [activeTab, setActiveTab] = useState<'host' | 'client'>('host')
+    const [libraries, setLibraries] = useState<Library[]>([])
 
     // === クライアント設定 State ===
     const [clientConfig, setClientConfig] = useState<any>(null)
@@ -298,6 +299,9 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                     // クライアント用トークン (自分のマシン用)
                     const token = await window.electronAPI.generateUserToken()
                     setMyUserToken(token)
+                    // ライブラリ一覧を取得
+                    const libs = await window.electronAPI.getLibraries()
+                    setLibraries(libs)
                 } catch (e) {
                     console.error('Failed to load network settings:', e)
                 }
@@ -420,7 +424,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
         let newPermissions: any[]
         const currentPermissions = user.permissions || []
         if (currentPermissions.includes(permission)) {
-            newPermissions = currentPermissions.filter(p => p !== permission)
+            newPermissions = currentPermissions.filter((p: any) => p !== permission)
         } else {
             newPermissions = [...currentPermissions, permission]
         }
@@ -473,16 +477,16 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         <p style={{ fontSize: '13px', color: '#888', margin: 0 }}>
                             ユーザーから受け取ったトークンを入力し、アクセストークンを発行してください。
                         </p>
-                        <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
+                        <div style={{ display: 'flex', gap: '8px', width: '100%', alignItems: 'center' }}>
                             <input
                                 type="text"
                                 placeholder="ユーザートークンを入力"
                                 value={inputUserToken}
                                 onChange={e => setInputUserToken(e.target.value)}
                                 className="settings-input"
-                                style={{ flex: 1 }}
+                                style={{ flex: 1, minWidth: 0 }}
                             />
-                            <button className="settings-button" onClick={handleAddUser} disabled={!inputUserToken.trim()}>
+                            <button className="btn btn-primary btn-small" onClick={handleAddUser} disabled={!inputUserToken.trim()} style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>
                                 発行
                             </button>
                         </div>
@@ -495,8 +499,8 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                         if (window.electronAPI) window.electronAPI.copyToClipboard(newAccessToken)
                                         setNewAccessToken(null)
                                     }}
-                                    className="settings-button"
-                                    style={{ fontSize: '12px', padding: '4px 8px' }}
+                                    className="btn btn-outline btn-small"
+                                    style={{ marginTop: '8px' }}
                                 >
                                     コピーして閉じる
                                 </button>
@@ -533,8 +537,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                             {visibleTokens[u.id] === 'user' && (
                                                 <button
                                                     onClick={() => window.electronAPI?.copyToClipboard(u.userToken)}
-                                                    className="settings-button"
-                                                    style={{ fontSize: '10px', padding: '2px 8px' }}
+                                                    className="btn btn-outline btn-small"
                                                 >
                                                     コピー
                                                 </button>
@@ -553,8 +556,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                             {visibleTokens[u.id] === 'access' && (
                                                 <button
                                                     onClick={() => window.electronAPI?.copyToClipboard(u.accessToken)}
-                                                    className="settings-button"
-                                                    style={{ fontSize: '10px', padding: '2px 8px' }}
+                                                    className="btn btn-outline btn-small"
                                                 >
                                                     コピー
                                                 </button>
@@ -575,7 +577,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     <div style={{ marginTop: '12px', borderTop: '1px solid #2a2a2c', paddingTop: '10px' }}>
                                         <span style={{ fontSize: '11px', color: '#666', marginBottom: '6px', display: 'block' }}>権限設定:</span>
                                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                                            {(['READ_ONLY', 'DOWNLOAD', 'UPLOAD', 'EDIT', 'FULL'] as any[]).map(p => (
+                                            {(['READ_ONLY', 'DOWNLOAD', 'UPLOAD', 'EDIT', 'FULL'] as any[]).map((p: any) => (
                                                 <button
                                                     key={p}
                                                     onClick={() => handleTogglePermission(u.id, p)}
@@ -725,7 +727,6 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     </div>
                                     <div className="input-with-button">
                                         <input
-
                                             type="number"
                                             value={serverConfig.port}
                                             onChange={(e) => {
@@ -737,6 +738,36 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                             className="settings-input"
                                             style={{ width: '100px' }}
                                         />
+                                    </div>
+                                </div>
+
+                                <div className="settings-row">
+                                    <div className="settings-info">
+                                        <span className="settings-label">公開するライブラリ</span>
+                                        <span className="settings-description">
+                                            外部に公開するライブラリを選択します。
+                                        </span>
+                                    </div>
+                                    <div className="input-with-button">
+                                        <select
+                                            value={serverConfig.publishLibraryPath || ''}
+                                            onChange={(e) => {
+                                                const val = e.target.value || undefined
+                                                const updates = { publishLibraryPath: val }
+                                                setServerConfig({ ...serverConfig, ...updates })
+                                                if (window.electronAPI) window.electronAPI.updateServerConfig(updates)
+                                            }}
+                                            className="settings-input"
+                                            style={{ width: '200px', height: '32px' }}
+                                            disabled={isServerRunning}
+                                        >
+                                            <option value="">(表示中のライブラリ)</option>
+                                            {libraries.map(lib => (
+                                                <option key={lib.path} value={lib.path}>
+                                                    {lib.name}
+                                                </option>
+                                            ))}
+                                        </select>
                                     </div>
                                 </div>
                             </div>
@@ -757,16 +788,16 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                             指定したIPアドレスからのアクセスのみを許可します。リストが空の場合はすべてのIPからのアクセスを許可します。
                                         </span>
                                     </div>
-                                    <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
+                                    <div style={{ display: 'flex', gap: '8px', width: '100%', alignItems: 'center' }}>
                                         <input
                                             type="text"
                                             placeholder="例: 192.168.1.50"
                                             value={newAllowedIP}
                                             onChange={e => setNewAllowedIP(e.target.value)}
                                             className="settings-input"
-                                            style={{ flex: 1 }}
+                                            style={{ flex: 1, minWidth: 0 }}
                                         />
-                                        <button className="settings-button" onClick={handleAddIP} disabled={!newAllowedIP}>
+                                        <button className="btn btn-primary btn-small" onClick={handleAddIP} disabled={!newAllowedIP} style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>
                                             追加
                                         </button>
                                     </div>
@@ -826,7 +857,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                                     style={{ flex: 1, fontSize: '12px', color: '#aaa' }}
                                                     placeholder="ファイルを選択してください"
                                                 />
-                                                <button className="settings-button" onClick={handleSelectCert}>選択</button>
+                                                <button className="btn btn-outline btn-small" onClick={handleSelectCert}>選択</button>
                                             </div>
                                         </div>
                                         <div style={{ width: '100%' }}>
@@ -840,7 +871,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                                     style={{ flex: 1, fontSize: '12px', color: '#aaa' }}
                                                     placeholder="ファイルを選択してください"
                                                 />
-                                                <button className="settings-button" onClick={handleSelectKey}>選択</button>
+                                                <button className="btn btn-outline btn-small" onClick={handleSelectKey}>選択</button>
                                             </div>
                                         </div>
                                         <p style={{ fontSize: '11px', color: '#eab308', marginTop: '4px' }}>
@@ -874,7 +905,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                             {myUserToken || 'トークン生成中...'}
                                         </code>
                                         <button
-                                            className="settings-button"
+                                            className="btn btn-outline btn-small"
                                             onClick={() => {
                                                 if (window.electronAPI && myUserToken) {
                                                     window.electronAPI.copyToClipboard(myUserToken)
@@ -932,7 +963,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
                                     <div style={{ display: 'flex', gap: '12px', marginTop: '8px', alignItems: 'center' }}>
                                         <button
-                                            className="settings-button"
+                                            className="btn btn-outline btn-small"
                                             onClick={handleTestConnection}
                                             disabled={!remoteUrl || !remoteKey || connectionStatus === 'testing'}
                                         >
@@ -1217,7 +1248,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
                         <div style={{ width: '100%' }}>
                             {updateStatus === 'idle' && (
-                                <button className="settings-button" onClick={handleCheckForUpdates}>
+                                <button className="btn btn-outline btn-small" onClick={handleCheckForUpdates}>
                                     アップデートを確認
                                 </button>
                             )}
@@ -1295,7 +1326,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     className="settings-input"
                                     style={{ flex: 1, color: '#aaa', cursor: 'not-allowed' }}
                                 />
-                                <button className="settings-button" onClick={handleSelectDownloadPath}>
+                                <button className="btn btn-outline btn-small" onClick={handleSelectDownloadPath}>
                                     変更
                                 </button>
                             </div>

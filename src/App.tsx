@@ -113,6 +113,12 @@ export default function App() {
         return DEFAULT_SETTINGS
     })
     const [showSettingsModal, setShowSettingsModal] = useState(false)
+    const [showLibraryModal, setShowLibraryModal] = useState(false)
+    const [isDragging, setIsDragging] = useState(false)
+    const isInternalDrag = useRef(false)
+    const dragCounter = useRef(0)
+    const [gridSize, setGridSize] = useState<number>(settings.gridSize)
+    const [viewMode, setViewMode] = useState<'grid' | 'list'>(settings.viewMode)
 
     // ドラッグ＆ドロップ状態のグローバル管理
     useEffect(() => {
@@ -201,12 +207,37 @@ export default function App() {
         }
 
         // Window全体にリスナーを設定（冒頭で阻害されるのを防ぐ）
+        const handleMouseDown = () => {
+            // マウスクリックが発生した＝ファイルドラッグ中ではないはずなので
+            // 念のためドラッグ状態をリセットする
+            if (dragCounter.current !== 0 || isDragging) {
+                console.log('[Global D&D] Manual reset via mousedown')
+                dragCounter.current = 0
+                setIsDragging(false)
+                isInternalDrag.current = false
+                document.body.classList.remove('dragging-file')
+            }
+        }
+
+        const handleFocusReset = () => {
+            // ウィンドウにフォーカスが戻った時（タブ切り替えなど）に状態が残っていたらリセット
+            if (dragCounter.current !== 0 || isDragging) {
+                console.log('[Global] Focus recovered, resetting states')
+                dragCounter.current = 0
+                setIsDragging(false)
+                isInternalDrag.current = false
+                document.body.classList.remove('dragging-file')
+            }
+        }
+
         window.addEventListener('dragenter', handleGlobalDragEnter)
         window.addEventListener('dragover', handleGlobalDragOver)
         window.addEventListener('dragleave', handleGlobalDragLeave)
         window.addEventListener('drop', handleGlobalDrop)
         window.addEventListener('dragend', handleGlobalDragEnd)
         window.addEventListener('mouseup', handleGlobalDragEnd)
+        window.addEventListener('mousedown', handleMouseDown)
+        window.addEventListener('focus', handleFocusReset)
 
         return () => {
             window.removeEventListener('dragenter', handleGlobalDragEnter)
@@ -215,12 +246,10 @@ export default function App() {
             window.removeEventListener('drop', handleGlobalDrop)
             window.removeEventListener('dragend', handleGlobalDragEnd)
             window.removeEventListener('mouseup', handleGlobalDragEnd)
+            window.removeEventListener('mousedown', handleMouseDown)
+            window.removeEventListener('focus', handleFocusReset)
         }
-    }, [hasActiveLibrary, activeRemoteLibrary, importMedia])
-
-    const [gridSize, setGridSize] = useState<number>(settings.gridSize)
-    const dragCounter = useRef(0)
-    const [viewMode, setViewMode] = useState<'grid' | 'list'>(settings.viewMode)
+    }, [hasActiveLibrary, activeRemoteLibrary, importMedia, isDragging])
 
     // 表示設定
     const [viewSettings, setViewSettings] = useState<ViewSettings>(() => {
@@ -317,13 +346,6 @@ export default function App() {
         setShowProfileSetup(false)
     }
 
-    // ライブラリモーダルの表示状態
-    const [showLibraryModal, setShowLibraryModal] = useState(false)
-
-    // ドラッグ中の状態
-    const [isDragging, setIsDragging] = useState(false)
-    // 内部ドラッグかどうかを追跡するためのref
-    const isInternalDrag = useRef(false)
 
     // コンテキストメニュー
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; media: MediaFile } | null>(null)
@@ -624,6 +646,7 @@ export default function App() {
                     tags={tags}
                     onCreateTag={createTag}
                     onDeleteTag={deleteTag}
+                    disabled={!hasActiveLibrary && !activeRemoteLibrary}
                 />
             )
         }
@@ -754,7 +777,7 @@ export default function App() {
                     isInternalDrag.current = true
                 }}
                 onInternalDragEnd={() => {
-                    // 同上
+                    isInternalDrag.current = false
                 }}
             />
 
