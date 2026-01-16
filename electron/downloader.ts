@@ -8,7 +8,7 @@ import path from 'path'
  * @param defaultFilename デフォルトのファイル名 (URLから取得できない場合に使用)
  * @returns 保存されたファイルのフルパス
  */
-export async function downloadFile(url: string, saveDir: string, defaultFilename: string): Promise<string> {
+export async function downloadFile(url: string, saveDir: string, defaultFilename: string, onProgress?: (received: number, total: number) => void): Promise<string> {
     try {
         const response = await fetch(url)
         if (!response.ok) {
@@ -16,7 +16,6 @@ export async function downloadFile(url: string, saveDir: string, defaultFilename
         }
 
         // ファイル名を決定
-        // Content-Dispositionヘッダーがあればそこから取得、なければURLの最後、それもなければデフォルト
         let filename = defaultFilename
         const disposition = response.headers.get('content-disposition')
         if (disposition && disposition.includes('filename=')) {
@@ -24,14 +23,9 @@ export async function downloadFile(url: string, saveDir: string, defaultFilename
             if (match && match[1]) {
                 filename = match[1]
             }
-        } else {
-            // URLからファイル名抽出を試みる (http://host/stream/123 -> 123.mp4 とは限らない)
-            // Obscuraの場合は /api/stream/:id なので、ファイル名はメタデータから決まる...
-            // しかしここではURLしか渡されないので、呼び出し元からファイル名を渡してもらう方が安全。
-            // 引数の defaultFilename を優先して使う設計にする。
         }
 
-        // 重複チェック: 数字を付加して回避
+        // 重複チェック
         let savePath = path.join(saveDir, filename)
         let counter = 1
         const ext = path.extname(filename)
@@ -42,18 +36,34 @@ export async function downloadFile(url: string, saveDir: string, defaultFilename
             counter++
         }
 
-        // ディレクトリ生成
         if (!fs.existsSync(saveDir)) {
             fs.mkdirSync(saveDir, { recursive: true })
         }
 
-        // ストリームで保存 (Node.js Stream)
-        // fetchのbodyはWeb Streamなので、Node Streamに変換が必要、またはarrayBufferを使う
-        // Electron Main Process (Node) なので、bodyは ReadableStream (Web API)
-        const arrayBuffer = await response.arrayBuffer()
-        const buffer = Buffer.from(arrayBuffer)
+        // Content-Length 取得
+        const contentLength = response.headers.get('content-length')
+        const totalLength = contentLength ? parseInt(contentLength, 10) : 0
+        let receivedLength = 0
 
-        await fs.promises.writeFile(savePath, buffer)
+        // Node.js Writable Stream
+        const fileStream = fs.createWriteStream(savePath)
+
+        // Web Stream (response.body) を Node Stream にパイプしつつ進捗計測
+        // @ts-ignore: Readable.fromWeb is available in newer Node versions (Electron uses Node 18+)
+        const { Readable } = require('stream')
+        const readableWebStream = Readable.fromWeb(response.body)
+
+        readableWebStream.on('data', (chunk: any) => {
+            receivedLength += chunk.length
+            if (onProgress) onProgress(receivedLength, totalLength)
+        })
+
+        await new Promise((resolve, reject) => {
+            readableWebStream.pipe(fileStream)
+            readableWebStream.on('error', reject)
+            fileStream.on('finish', () => resolve(null))
+            fileStream.on('error', reject)
+        })
 
         return savePath
     } catch (error) {

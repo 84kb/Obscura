@@ -43,12 +43,14 @@ export function useLibrary() {
             updateProgress(data.id, data.progress)
         }
 
-        const removeListener = window.electronAPI.on('upload-progress', handleProgress)
+        const removeUploadListener = window.electronAPI.on('upload-progress', handleProgress)
+        const removeDownloadListener = window.electronAPI.on('download-progress', handleProgress)
+
         return () => {
             // @ts-ignore
-            if (removeListener) {
-                (removeListener as any)()
-            }
+            if (removeUploadListener) (removeUploadListener as any)()
+            // @ts-ignore
+            if (removeDownloadListener) (removeDownloadListener as any)()
         }
     }, [updateProgress])
 
@@ -873,6 +875,23 @@ export function useLibrary() {
         loadGenres()
     }, [loadMediaFiles, loadTags, loadTagFolders, loadGenres])
 
+    // 全データの一括更新
+    const refreshAll = useCallback(async () => {
+        setLoading(true)
+        try {
+            await Promise.all([
+                loadMediaFiles(),
+                loadTags(),
+                loadTagFolders(),
+                loadGenres()
+            ])
+        } catch (e) {
+            console.error('Failed to refresh library:', e)
+        } finally {
+            setLoading(false)
+        }
+    }, [loadMediaFiles, loadTags, loadTagFolders, loadGenres])
+
     return useMemo(() => ({
         mediaFiles: filteredMediaFiles,
         allMediaFiles: mediaFiles,
@@ -908,7 +927,7 @@ export function useLibrary() {
         renameMedia,
         updateArtist,
         libraryStats,
-        refreshLibrary: loadMediaFiles,
+        refreshLibrary: refreshAll,
         loadGenres,
         renameGenre,
         activeRemoteLibrary,

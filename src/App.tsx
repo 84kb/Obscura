@@ -69,6 +69,8 @@ export default function App() {
         myUserToken
     } = useLibrary()
 
+    const { addNotification, removeNotification, updateProgress } = useNotification()
+
 
     // Socket.io 接続 (リモートライブラリ選択時のみ)
     const { isConnected: isSocketConnected, subscribe } = useSocket({
@@ -116,7 +118,6 @@ export default function App() {
     }, [isSocketConnected, subscribe, refreshLibrary])
 
     // アップデート通知
-    const { addNotification } = useNotification()
     useEffect(() => {
         if (!window.electronAPI) return
         const removeListener = window.electronAPI.onUpdateStatus((data) => {
@@ -865,6 +866,7 @@ export default function App() {
                 onSwitchLibrary={switchToLocalLibrary}
                 onSwitchRemoteLibrary={switchToRemoteLibrary}
                 onOpenSettings={() => setShowSettingsModal(true)}
+                onRefreshLibrary={refreshLibrary}
                 hasActiveLibrary={hasActiveLibrary}
                 onRefreshGenres={loadGenres}
                 onDropFileOnGenre={handleDropOnGenre}
@@ -958,30 +960,50 @@ export default function App() {
                     onMoveToTrash={handleMoveToTrash}
                     onDownload={activeRemoteLibrary ? async () => {
                         if (!contextMenu?.media || !window.electronAPI) return
-
-                        // 型安全性のため確認 (anyキャストしているので実行時エラー回避も兼ねて)
-                        if (!(window.electronAPI as any).downloadRemoteMedia) {
-                            alert('ダウンロード機能はサポートされていません。')
-                            return
-                        }
-
                         const media = contextMenu.media
                         const downloadUrl = media.file_path
-                        // file_name を使用し、無ければデフォルト名を指定
                         const filename = media.file_name || 'download.mp4'
 
-                        console.log('Downloading:', downloadUrl, filename)
+                        // 通知ID生成 (addNotificationの戻り値を使用)
+                        const notificationId = addNotification({
+                            title: 'ダウンロード中...',
+                            message: filename,
+                            type: 'progress',
+                            progress: 0
+                        })
+
+                        closeContextMenu()
+
                         try {
-                            const result = await (window.electronAPI as any).downloadRemoteMedia(downloadUrl, filename)
+                            const result = await (window.electronAPI as any).downloadRemoteMedia(downloadUrl, filename, { notificationId })
+
+                            // 完了後、プログレス通知を消して結果通知を表示
+                            removeNotification(notificationId)
+
                             if (result.success) {
-                                alert(`ダウンロード完了: ${result.path}`)
+                                addNotification({
+                                    title: 'ダウンロード完了',
+                                    message: filename,
+                                    type: 'success',
+                                    duration: 3000
+                                })
                             } else {
-                                alert(`ダウンロード失敗: ${result.message}`)
+                                addNotification({
+                                    title: 'ダウンロード失敗',
+                                    message: result.message || '不明なエラー',
+                                    type: 'error',
+                                    duration: 5000
+                                })
                             }
                         } catch (e: any) {
-                            alert(`エラー: ${e.message}`)
+                            removeNotification(notificationId)
+                            addNotification({
+                                title: 'エラー',
+                                message: e.message,
+                                type: 'error',
+                                duration: 5000
+                            })
                         }
-                        closeContextMenu()
                     } : undefined}
                 />
             )}

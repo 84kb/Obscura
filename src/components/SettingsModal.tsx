@@ -9,7 +9,7 @@ interface SettingsModalProps {
 }
 
 // 削除された定義
-type Category = 'general' | 'sidebar' | 'controls' | 'viewer' | 'screenshot' | 'shortcuts' | 'notification' | 'password' | 'import' | 'network' | 'developer'
+type Category = 'general' | 'sidebar' | 'controls' | 'viewer' | 'screenshot' | 'shortcuts' | 'notification' | 'password' | 'import' | 'network' | 'developer' | 'media-engine'
 
 interface ApiEndpoint {
     method: 'GET' | 'POST' | 'PUT' | 'DELETE'
@@ -136,7 +136,7 @@ const PERMISSION_LABELS: Record<string, string> = {
 }
 
 export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsModalProps) {
-    const [activeCategory, setActiveCategory] = useState<Category>('viewer')
+    const [activeCategory, setActiveCategory] = useState<Category | 'media-engine'>('viewer')
     const [appVersion, setAppVersion] = useState<string>('Unknown')
 
     useEffect(() => {
@@ -156,6 +156,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
         { id: 'notification', label: '通知', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg> },
         { id: 'password', label: 'パスワード', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg> },
         { id: 'import', label: '自動インポート', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> },
+        { id: 'media-engine', label: 'メディアエンジン', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> },
         { id: 'developer', label: '開発者', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg> },
     ]
 
@@ -225,6 +226,136 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
             unsubscribe()
         }
     }, [])
+
+    // === Media Engine Settings ===
+    const [ffmpegInfo, setFfmpegInfo] = useState<{ version: string; path: string } | null>(null)
+    const [ffmpegUpdateStatus, setFfmpegUpdateStatus] = useState<'idle' | 'checking' | 'up-to-date' | 'available' | 'updating' | 'error'>('idle')
+    const [ffmpegUpdateProgress, setFfmpegUpdateProgress] = useState(0)
+
+    useEffect(() => {
+        if (activeCategory === 'media-engine' && window.electronAPI) {
+            (window.electronAPI as any).getFFmpegInfo().then((info: any) => setFfmpegInfo(info))
+        }
+    }, [activeCategory])
+
+    useEffect(() => {
+        if (!window.electronAPI) return
+        // @ts-ignore
+        const removeListener = window.electronAPI.onFFmpegUpdateProgress((progress) => {
+            setFfmpegUpdateProgress(progress)
+        })
+        return () => {
+            // @ts-ignore
+            if (removeListener) removeListener()
+        }
+    }, [])
+
+    const handleCheckFFmpegUpdate = async () => {
+        if (!window.electronAPI) return
+        setFfmpegUpdateStatus('checking')
+        try {
+            const result = await (window.electronAPI as any).checkFFmpegUpdate()
+            if (result.available) {
+                setFfmpegUpdateStatus('available')
+            } else {
+                setFfmpegUpdateStatus('up-to-date')
+            }
+        } catch (e) {
+            console.error(e)
+            setFfmpegUpdateStatus('error')
+        }
+    }
+
+    const handleUpdateFFmpeg = async () => {
+        if (!window.electronAPI) return
+        setFfmpegUpdateStatus('updating')
+        setFfmpegUpdateProgress(0)
+        try {
+            // Mock URL for now, or real one if implemented
+            await (window.electronAPI as any).updateFFmpeg('latest')
+            setFfmpegUpdateStatus('idle')
+            // Refresh info
+            const info = await (window.electronAPI as any).getFFmpegInfo()
+            setFfmpegInfo(info)
+            alert('FFmpeg update completed!')
+        } catch (e: any) {
+            console.error(e)
+            setFfmpegUpdateStatus('error')
+            alert('Update failed: ' + e.message)
+        }
+    }
+
+    const renderMediaEngineSettings = () => {
+        return (
+            <div className="settings-page">
+                <h3 className="settings-page-title">メディアエンジン</h3>
+                <section className="settings-section">
+                    <h4 className="section-title">FFmpeg 設定</h4>
+                    <div className="settings-card">
+                        <div className="settings-row">
+                            <div className="settings-info">
+                                <span className="settings-label">現在のバージョン</span>
+                                <span className="settings-description">
+                                    {ffmpegInfo?.version || '読み込み中...'}
+                                </span>
+                            </div>
+                            <button className="btn btn-secondary btn-sm" onClick={() => {
+                                if (ffmpegInfo?.path && window.electronAPI) {
+                                    window.electronAPI.copyToClipboard(ffmpegInfo.path)
+                                    alert('パスをコピーしました')
+                                }
+                            }}>
+                                パスをコピー
+                            </button>
+                        </div>
+                        <div className="settings-row">
+                            <div className="settings-info">
+                                <span className="settings-label">バイナリパス</span>
+                                <span className="settings-description" style={{ fontFamily: 'monospace', fontSize: '11px', wordBreak: 'break-all' }}>
+                                    {ffmpegInfo?.path || '...'}
+                                </span>
+                            </div>
+                        </div>
+                        <div className="settings-row">
+                            <div className="settings-info">
+                                <span className="settings-label">アップデート</span>
+                                <span className="settings-description">
+                                    {ffmpegUpdateStatus === 'checking' && '更新を確認中...'}
+                                    {ffmpegUpdateStatus === 'up-to-date' && '最新です'}
+                                    {ffmpegUpdateStatus === 'available' && '新しいバージョンが利用可能です'}
+                                    {ffmpegUpdateStatus === 'updating' && `更新中... ${ffmpegUpdateProgress}%`}
+                                    {ffmpegUpdateStatus === 'error' && 'エラーが発生しました'}
+                                    {ffmpegUpdateStatus === 'idle' && '手動で更新を確認できます'}
+                                </span>
+                            </div>
+                            <div>
+                                {ffmpegUpdateStatus === 'available' ? (
+                                    <button className="btn btn-primary btn-sm" onClick={handleUpdateFFmpeg}>
+                                        今すぐ更新
+                                    </button>
+                                ) : (
+                                    <button
+                                        className="btn btn-secondary btn-sm"
+                                        onClick={handleCheckFFmpegUpdate}
+                                        disabled={ffmpegUpdateStatus === 'checking' || ffmpegUpdateStatus === 'updating'}
+                                    >
+                                        更新を確認
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                        {ffmpegUpdateStatus === 'updating' && (
+                            <div style={{ padding: '0 20px 20px' }}>
+                                <div style={{ height: '4px', background: '#333', borderRadius: '2px', overflow: 'hidden' }}>
+                                    <div style={{ height: '100%', background: '#0ea5e9', width: `${ffmpegUpdateProgress}%`, transition: 'width 0.2s' }}></div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </section>
+            </div>
+        )
+    }
 
     const handleCheckForUpdates = async () => {
         if (!window.electronAPI) return
@@ -795,9 +926,11 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         <section className="settings-section" style={{ marginTop: '24px', borderTop: '1px solid #333', paddingTop: '16px' }}>
                             <h4 className="section-title">セキュリティ設定</h4>
 
+
                             {/* IP制限 */}
                             <div className="settings-card" style={{ marginBottom: '16px' }}>
                                 <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '12px' }}>
+
                                     <div className="settings-info">
                                         <span className="settings-label">IPアドレス制限 (ホワイトリスト)</span>
                                         <span className="settings-description">
@@ -1037,8 +1170,9 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                             </div>
                         </section>
                     </>
-                )}
-            </div>
+                )
+                }
+            </div >
         )
     }
 
@@ -1395,11 +1529,12 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         {activeCategory === 'general' ? renderGeneralSettings() :
                             activeCategory === 'viewer' ? renderViewerSettings() :
                                 activeCategory === 'network' ? renderNetworkSettings() :
-                                    activeCategory === 'developer' ? renderDeveloperSettings() : (
-                                        <div className="empty-state">
-                                            <p>このセクションの設定は準備中です。</p>
-                                        </div>
-                                    )}
+                                    activeCategory === 'media-engine' ? renderMediaEngineSettings() :
+                                        activeCategory === 'developer' ? renderDeveloperSettings() : (
+                                            <div className="empty-state">
+                                                <p>このセクションの設定は準備中です。</p>
+                                            </div>
+                                        )}
                     </div>
 
                     <footer className="main-footer">

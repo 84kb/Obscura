@@ -210,7 +210,7 @@ export interface ElectronAPI {
     selectDownloadDirectory: () => Promise<string | null>
     testConnection: (url: string, token: string) => Promise<{ success: boolean; message?: string }>
     addRemoteLibrary: (name: string, url: string, token: string) => Promise<any>
-    downloadRemoteMedia: (url: string, filename: string) => Promise<{ success: boolean; path?: string; message?: string }>
+    downloadRemoteMedia: (url: string, filename: string, options?: { notificationId?: string }) => Promise<{ success: boolean; path?: string; message?: string }>
     uploadRemoteMedia: (url: string, token: string, filePaths: string[], options?: { notificationId?: string }) => Promise<{ success: boolean; results?: any[]; message?: string }>
     renameRemoteMedia: (url: string, token: string, id: number, newName: string) => Promise<any>
     deleteRemoteMedia: (url: string, token: string, id: number) => Promise<any>
@@ -231,6 +231,12 @@ export interface ElectronAPI {
 
     // アプリケーション情報
     getAppVersion: () => Promise<string>
+
+    // FFmpeg
+    getFFmpegInfo: () => Promise<{ version: string; path: string }>
+    checkFFmpegUpdate: () => Promise<{ available: boolean; version?: string; url?: string }>
+    updateFFmpeg: (url: string) => Promise<boolean>
+    onFFmpegUpdateProgress: (callback: (progress: number) => void) => () => void
 }
 
 export interface RemoteLibrary {

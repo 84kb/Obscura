@@ -275,32 +275,42 @@ export function startServer(port: number): Promise<void> {
             })
 
             expressApp.post('/api/upload', authMiddleware, requirePermission('UPLOAD'), upload.array('files'), async (req: AuthenticatedRequest, res) => {
-                const tempFiles: string[] = []
+                const tempDirs: string[] = []
                 try {
                     const files = req.files as Express.Multer.File[]
                     if (!files || files.length === 0) return res.status(400).send()
 
-                    // 拡張子がないとDB側でスキップされるため、元の拡張子を付与する
                     const pathsToImport = files.map(f => {
-                        const ext = path.extname(f.originalname)
-                        if (ext) {
-                            const newPath = f.path + ext
-                            fs.renameSync(f.path, newPath)
-                            tempFiles.push(newPath)
-                            return newPath
-                        }
-                        tempFiles.push(f.path)
-                        return f.path
+                        // 文字化け対策: multerがファイル名を正しくデコードできていない場合の補正
+                        // Latin1で解釈されてしまっているUTF-8バイト列を復元する
+                        const originalName = Buffer.from(f.originalname, 'latin1').toString('utf8')
+
+                        // ユニークな一時ディレクトリを作成して、そこに元のファイル名で移動する
+                        // これにより、インポート時に正しいファイル名が使用され、metadata取得も安定する
+                        const uniqueDir = path.join(path.dirname(f.path), `upload_${Date.now()}_${Math.random().toString(36).substring(7)}`)
+                        fs.mkdirSync(uniqueDir, { recursive: true })
+                        tempDirs.push(uniqueDir)
+
+                        const newPath = path.join(uniqueDir, originalName)
+                        fs.renameSync(f.path, newPath)
+                        return newPath
                     })
 
                     const imported = await library.importMediaFiles(pathsToImport)
                     res.status(201).json(imported)
+                    if (io) io.emit('library-updated')
                 } catch (e) {
                     console.error('Upload error:', e)
                     res.status(500).send()
                 } finally {
-                    // クリーンアップ
-                    tempFiles.forEach(p => { if (fs.existsSync(p)) fs.unlinkSync(p) })
+                    // クリーンアップ: 一時ディレクトリごと削除
+                    tempDirs.forEach(d => {
+                        try {
+                            if (fs.existsSync(d)) fs.rmSync(d, { recursive: true, force: true })
+                        } catch (e) {
+                            console.error('Failed to cleanup temp dir:', d, e)
+                        }
+                    })
                 }
             })
 
@@ -318,6 +328,7 @@ export function startServer(port: number): Promise<void> {
                         library.updateFileName(id, fileName)
                     }
                     res.json({ success: true })
+                    if (io) io.emit('library-updated')
                 } catch (e) { res.status(500).send() }
             })
 

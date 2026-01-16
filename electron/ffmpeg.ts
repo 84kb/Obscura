@@ -1,6 +1,7 @@
 import { spawn } from 'child_process'
 import * as path from 'path'
 import * as fs from 'fs-extra'
+import { getFFmpegPath, getFFprobePath } from './ffmpeg-path'
 
 /**
  * 動画ファイルからプレビュー画像を生成する
@@ -32,7 +33,8 @@ export async function generatePreviewImages(videoPath: string, outputDir: string
         console.log(`[ffmpeg] Generating previews for: ${videoPath}`)
         console.log(`[ffmpeg] Command: ffmpeg ${args.join(' ')}`)
 
-        const ffmpeg = spawn('ffmpeg', args)
+        const ffmpegPath = getFFmpegPath()
+        const ffmpeg = spawn(ffmpegPath, args)
 
         ffmpeg.stdout.on('data', (_data) => {
             // console.log(`[ffmpeg stdout] ${_data}`)
@@ -80,7 +82,8 @@ export async function getMediaMetadata(filePath: string): Promise<{ width?: numb
             filePath
         ]
 
-        const ffprobe = spawn('ffprobe', args)
+        const ffprobePath = getFFprobePath()
+        const ffprobe = spawn(ffprobePath, args)
         let outputData = ''
 
         ffprobe.stdout.on('data', (data) => {

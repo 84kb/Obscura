@@ -130,7 +130,7 @@ try {
         selectDownloadDirectory: () => ipcRenderer.invoke('select-download-directory'),
         testConnection: (url, token) => ipcRenderer.invoke('test-connection', { url, token }),
         addRemoteLibrary: (name, url, token) => ipcRenderer.invoke('add-remote-library', { name, url, token }),
-        downloadRemoteMedia: (url, filename) => ipcRenderer.invoke('download-remote-media', url, filename),
+        downloadRemoteMedia: (url, filename, options) => ipcRenderer.invoke('download-remote-media', url, filename, options),
         uploadRemoteMedia: (url, token, filePaths, options) => ipcRenderer.invoke('upload-remote-media', { url, token, filePaths, options }),
         renameRemoteMedia: (url, token, id, newName) => ipcRenderer.invoke('rename-remote-media', { url, token, id, newName }),
         deleteRemoteMedia: (url, token, id) => ipcRenderer.invoke('delete-remote-media', { url, token, id }),
@@ -146,6 +146,16 @@ try {
             return () => ipcRenderer.off('update-status', subscription);
         },
         getAppVersion: () => ipcRenderer.invoke('get-app-version'), // バージョン情報取得
+
+        // === FFmpeg ===
+        getFFmpegInfo: () => ipcRenderer.invoke('ffmpeg-get-info'),
+        checkFFmpegUpdate: () => ipcRenderer.invoke('ffmpeg-check-update'),
+        updateFFmpeg: (url) => ipcRenderer.invoke('ffmpeg-update', url),
+        onFFmpegUpdateProgress: (callback) => {
+            const subscription = (_event, progress) => callback(progress);
+            ipcRenderer.on('ffmpeg-update-progress', subscription);
+            return () => ipcRenderer.off('ffmpeg-update-progress', subscription);
+        },
 
         // ウィンドウ操作
         minimizeWindow: () => ipcRenderer.invoke('window-minimize'),

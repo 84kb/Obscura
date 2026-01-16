@@ -1213,11 +1213,20 @@ ipcMain.handle('select-download-directory', async () => {
     return null
 })
 
-ipcMain.handle('download-remote-media', async (_event, url: string, filename: string) => {
+ipcMain.handle('download-remote-media', async (event, url: string, filename: string, options?: { notificationId?: string }) => {
     try {
         const config = getClientConfig()
         const saveDir = config.downloadPath || app.getPath('downloads')
-        const savedPath = await downloadFile(url, saveDir, filename)
+        const notificationId = options?.notificationId
+
+        const onProgress = (received: number, total: number) => {
+            if (notificationId && total > 0) {
+                const progress = Math.round((received / total) * 100)
+                event.sender.send('download-progress', { id: notificationId, progress })
+            }
+        }
+
+        const savedPath = await downloadFile(url, saveDir, filename, onProgress)
         return { success: true, path: savedPath }
     } catch (error: any) {
         return { success: false, message: error.message }
@@ -1375,3 +1384,24 @@ async function callRemoteApi(baseUrl: string, token: string, path: string, metho
         throw e
     }
 }
+
+// === FFmpeg Update Handlers ===
+import { getCurrentFFmpegVersion, checkForAppUpdates, updateFFmpeg } from './ffmpeg-updater'
+import { getFFmpegPath } from './ffmpeg-path'
+
+ipcMain.handle('ffmpeg-get-info', async () => {
+    const version = await getCurrentFFmpegVersion()
+    const path = getFFmpegPath()
+    return { version, path }
+})
+
+ipcMain.handle('ffmpeg-check-update', async () => {
+    return await checkForAppUpdates()
+})
+
+ipcMain.handle('ffmpeg-update', async (event, url: string) => {
+    const onProgress = (progress: number) => {
+        event.sender.send('ffmpeg-update-progress', progress)
+    }
+    return await updateFFmpeg(url, onProgress)
+})
