@@ -19,6 +19,7 @@ interface MediaCardProps extends React.HTMLAttributes<HTMLDivElement> {
     isRenaming?: boolean
     onRenameSubmit?: (newName: string) => void
     onRenameCancel?: () => void
+    thumbnailMode?: 'speed' | 'quality'
 }
 
 export function MediaCard({
@@ -37,14 +38,31 @@ export function MediaCard({
     isRenaming = false,
     onRenameSubmit,
     onRenameCancel,
+    thumbnailMode = 'speed',
     ...props
 }: MediaCardProps) {
-    const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(
-        media.thumbnail_path ? toMediaUrl(media.thumbnail_path) : null
-    )
+    const getInitialThumbnailUrl = () => {
+        if (!media.thumbnail_path) return null
+        const url = toMediaUrl(media.thumbnail_path)
+        if (thumbnailMode === 'speed') {
+            return `${url}?width=250`
+        }
+        return url
+    }
 
-    // サムネイルがない場合は自動生成をトリガー
+    const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(getInitialThumbnailUrl())
+
+    // サムネイルがない場合は自動生成をトリガー（品質優先モードの場合のみ）
     useEffect(() => {
+        // propが変わったときにURLを更新
+        if (media.thumbnail_path) {
+            const url = toMediaUrl(media.thumbnail_path)
+            setThumbnailUrl(thumbnailMode === 'speed' ? `${url}?width=250` : url)
+        }
+
+        // speedモードの場合は生成をスキップ (既存のサムネイルがあれば利用される)
+        if (thumbnailMode === 'speed') return
+
         if (!media.thumbnail_path && media.file_type === 'video' && window.electronAPI) {
             window.electronAPI.generateThumbnail(media.id, media.file_path)
                 .then((path: string | null) => {
@@ -54,7 +72,7 @@ export function MediaCard({
                 })
                 .catch((err: Error) => console.error('Thumbnail generation failed:', err))
         }
-    }, [media.id, media.file_path, media.thumbnail_path, media.file_type])
+    }, [media.id, media.file_path, media.thumbnail_path, media.file_type, thumbnailMode])
 
     // ファイルタイプに応じたアイコン
     const getIcon = () => {
@@ -189,7 +207,12 @@ export function MediaCard({
                 )}
 
                 {thumbnailUrl ? (
-                    <img src={thumbnailUrl} alt={media.file_name} />
+                    <img
+                        src={thumbnailUrl}
+                        alt={media.file_name}
+                        loading="lazy"
+                        decoding="async"
+                    />
                 ) : (
                     <div className="media-card-placeholder">
                         {getIcon()}

@@ -1,6 +1,9 @@
 import path from 'path'
 import { app } from 'electron'
-import { generatePreviewImages, getMediaMetadata } from './ffmpeg'
+
+
+import { getMediaMetadata, createThumbnail } from './ffmpeg'
+import { getThumbnailPath } from './utils'
 import crypto from 'crypto'
 const fs = require('fs-extra')
 
@@ -193,7 +196,6 @@ export class MediaLibrary {
           if (meta.duration) duration = meta.duration
           artist = meta.artist || null
           description = meta.description || null
-          // Use comment as URL if available
           if (meta.comment) {
             url = meta.comment
           }
@@ -201,13 +203,32 @@ export class MediaLibrary {
           console.error(`Failed to get ${fileType} metadata:`, e)
         }
 
+        // アーティスト情報を分割
+        let artists: string[] = []
+        if (artist) {
+          artists = artist.split(/[,，;/\\]/).map(a => a.trim()).filter(a => a.length > 0)
+          // 重複排除
+          artists = Array.from(new Set(artists))
+        }
+
         const mediaFile = {
           id, uniqueId, file_path: destPath, file_name: fileName, file_type: fileType,
           file_size: stats.size, duration, width, height, rating: 0,
           created_date: stats.birthtime.toISOString(), modified_date: stats.mtime.toISOString(),
-          thumbnail_path: null, created_at: new Date().toISOString(), is_deleted: false,
-          last_played_at: null, artist, description, url
+          thumbnail_path: null as string | null, created_at: new Date().toISOString(), is_deleted: false,
+          last_played_at: null, artist, artists, description, url
         }
+
+        // サムネイル生成を強制実行
+        try {
+          const thumbPath = await getThumbnailPath(this.path, id, destPath)
+          if (await createThumbnail(destPath, thumbPath)) {
+            mediaFile.thumbnail_path = thumbPath
+          }
+        } catch (e) {
+          console.error(`Failed to generate initial thumbnail for ${fileName}:`, e)
+        }
+
         this.db.mediaFiles.push(mediaFile)
         importedFiles.push(mediaFile)
       } catch (error) { console.error(`Failed to import file: ${srcPath}`, error) }
@@ -227,7 +248,7 @@ export class MediaLibrary {
       width: options.width, height: options.height, rating: 0,
       created_date: stats.birthtime.toISOString(), modified_date: stats.mtime.toISOString(),
       thumbnail_path: null, created_at: new Date().toISOString(), is_deleted: false,
-      last_played_at: null, artist: null, description: null,
+      last_played_at: null, artist: null, artists: [], description: null,
     })
     this.save()
     return id
@@ -441,7 +462,16 @@ export class MediaLibrary {
   }
 
   // ジャンル
-  public getAllGenres() { return this.db.genres.sort((a, b) => a.name.localeCompare(b.name)) }
+  public getAllGenres() {
+    return [...this.db.genres].sort((a, b) => {
+      // まずorderIndexで比較
+      const orderA = a.orderIndex || 0
+      const orderB = b.orderIndex || 0
+      if (orderA !== orderB) return orderA - orderB
+      // 同じなら名前で比較
+      return a.name.localeCompare(b.name)
+    })
+  }
   public createGenre(name: string, parentId: number | null = null) {
     const existing = this.db.genres.find((g) => g.name === name && g.parentId === parentId)
     if (existing) return existing
@@ -452,8 +482,9 @@ export class MediaLibrary {
     return genre
   }
   public deleteGenre(id: number) {
-    this.db.genres = this.db.genres.filter((g) => g.id !== id)
-    this.db.mediaGenres = this.db.mediaGenres.filter((mg) => mg.genreId !== id)
+    const targetId = Number(id)
+    this.db.genres = this.db.genres.filter((g) => Number(g.id) !== targetId)
+    this.db.mediaGenres = this.db.mediaGenres.filter((mg) => Number(mg.genreId) !== targetId)
     this.save()
   }
   public addGenreToMedia(mediaId: number, genreId: number) {
@@ -465,13 +496,20 @@ export class MediaLibrary {
     this.save()
   }
   public renameGenre(id: number, newName: string) {
-    const genre = this.db.genres.find((g) => g.id === id)
+    const targetId = Number(id)
+    const genre = this.db.genres.find((g) => Number(g.id) === targetId)
     if (genre) { genre.name = newName; this.save() }
   }
-  public updateGenreStructure(updates: { id: number; parentId: number | null; orderIndex: number }[]) {
+  public updateGenreStructure(updates: { id: any; parentId: any; orderIndex: number }[]) {
     updates.forEach((update) => {
-      const genre = this.db.genres.find((g) => g.id === update.id)
-      if (genre) { genre.parentId = update.parentId; genre.orderIndex = update.orderIndex }
+      const targetId = update.id === null || update.id === undefined ? null : Number(update.id)
+      const targetParentId = update.parentId === null || update.parentId === undefined ? null : Number(update.parentId)
+
+      const genre = this.db.genres.find((g) => Number(g.id) === targetId)
+      if (genre) {
+        genre.parentId = targetParentId
+        genre.orderIndex = Number(update.orderIndex)
+      }
     })
     this.save()
   }

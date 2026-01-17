@@ -201,8 +201,12 @@ export function MainHeader({
         const counts: Map<string, number> = new Map()
         allMediaFiles.forEach(media => {
             if (media.is_deleted) return
-            const artist = media.artist || '未設定'
-            counts.set(artist, (counts.get(artist) || 0) + 1)
+            const artists = (media.artists && media.artists.length > 0) ? media.artists : [media.artist || '未設定']
+
+            artists.forEach(artist => {
+                const name = artist || '未設定'
+                counts.set(name, (counts.get(name) || 0) + 1)
+            })
         })
 
         return Array.from(counts.entries()).map(([name, count]) => ({
@@ -245,17 +249,17 @@ export function MainHeader({
 
                 <div className="header-center">
                     <div className="size-slider-container">
-                        <span className="slider-icon plus">+</span>
+                        <span className="slider-icon minus">-</span>
                         <input
                             type="range"
                             min="1"
-                            max="6"
+                            max="10"
                             step="1"
                             value={gridSize}
                             onChange={(e) => onGridSizeChange(Number(e.target.value))}
                             className="size-slider"
                         />
-                        <span className="slider-icon minus">-</span>
+                        <span className="slider-icon plus">+</span>
                     </div>
                 </div>
 
@@ -315,10 +319,12 @@ export function MainHeader({
                                             onChange={(e) => onFilterChange({ ...filterOptions, sortOrder: e.target.value as any })}
                                             className="dropdown-select"
                                         >
-                                            <option value="name">名前</option>
+                                            <option value="name">タイトル</option>
                                             <option value="date">追加日</option>
-                                            <option value="size">サイズ</option>
-                                            <option value="duration">長さ</option>
+                                            <option value="modified">変更日</option>
+                                            <option value="size">ファイルサイズ</option>
+                                            <option value="rating">評価</option>
+                                            <option value="duration">再生時間</option>
                                             <option value="last_played">再生日</option>
                                         </select>
                                         <button

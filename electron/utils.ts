@@ -9,7 +9,7 @@ import * as fs from 'fs-extra'
  * @returns サムネイルの保存先フルパス
  */
 export async function getThumbnailPath(libraryPath: string, mediaId: number, originalFilePath: string): Promise<string> {
-    const fileName = path.basename(originalFilePath)
+
     const baseName = path.basename(originalFilePath, path.extname(originalFilePath))
 
     // メディアファイルが既に images/ 配下のフォルダにあるかチェック (インポート済み)

@@ -23,8 +23,8 @@ export function useLibrary() {
         folderFilterMode: 'or',
         filterType: 'all',
         fileType: 'all',
-        sortOrder: 'name',
-        sortDirection: 'desc',
+        sortOrder: (localStorage.getItem('sort_order') as any) || 'name',
+        sortDirection: (localStorage.getItem('sort_direction') as any) || 'desc',
         selectedRatings: [],
         selectedExtensions: [],
         excludedExtensions: [],
@@ -352,6 +352,12 @@ export function useLibrary() {
         }
     }, [loadMediaFiles])
 
+    // ソート設定保存
+    useEffect(() => {
+        localStorage.setItem('sort_order', filterOptions.sortOrder)
+        localStorage.setItem('sort_direction', filterOptions.sortDirection)
+    }, [filterOptions.sortOrder, filterOptions.sortDirection])
+
     const restoreFromTrash = useCallback(async (id: number) => {
         try {
             await window.electronAPI.restoreFromTrash(id)
@@ -640,16 +646,20 @@ export function useLibrary() {
         if ((filterOptions.selectedArtists && filterOptions.selectedArtists.length > 0) ||
             (filterOptions.excludedArtists && filterOptions.excludedArtists.length > 0)) {
             result = result.filter(m => {
-                const artist = m.artist || '未設定'
+                const artists = (m.artists && m.artists.length > 0) ? m.artists : [m.artist || '未設定']
 
                 // 除外チェック
-                if (filterOptions.excludedArtists.includes(artist)) {
-                    return false
+                if (filterOptions.excludedArtists.length > 0) {
+                    // 除外リストにあるアーティストが1つでも含まれていれば除外
+                    if (artists.some(a => filterOptions.excludedArtists.includes(a))) {
+                        return false
+                    }
                 }
 
                 // 選択チェック (選択されているものがある場合のみ)
                 if (filterOptions.selectedArtists.length > 0) {
-                    return filterOptions.selectedArtists.includes(artist)
+                    // 選択リストにあるアーティストが1つでも含まれていれば許可
+                    return artists.some(a => filterOptions.selectedArtists.includes(a))
                 }
 
                 return true
@@ -716,6 +726,14 @@ export function useLibrary() {
                     const dateA = a.last_played_at ? new Date(a.last_played_at).getTime() : 0
                     const dateB = b.last_played_at ? new Date(b.last_played_at).getTime() : 0
                     comparison = dateA - dateB
+                    break
+                case 'rating':
+                    comparison = (a.rating || 0) - (b.rating || 0)
+                    break
+                case 'modified':
+                    const modA = a.modified_date ? new Date(a.modified_date).getTime() : 0
+                    const modB = b.modified_date ? new Date(b.modified_date).getTime() : 0
+                    comparison = modA - modB
                     break
             }
             return filterOptions.sortDirection === 'asc' ? comparison : -comparison
@@ -935,7 +953,8 @@ export function useLibrary() {
         switchToLocalLibrary,
         openLibrary,
         myUserToken,
-        updateDescription
+        updateDescription,
+        setMediaFiles
     }), [
         filteredMediaFiles, mediaFiles, tags, tagFolders, genres, libraries, loading, activeLibrary,
         filterOptions, setFilterOptions, createLibrary, switchLibrary, selectAndScanFolder,

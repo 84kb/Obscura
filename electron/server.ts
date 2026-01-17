@@ -8,7 +8,7 @@ import { createServer } from 'http'
 import { libraryRegistry, libraryDB } from './database'
 import { sharedUserDB, auditLogDB, Permission, serverConfigDB } from './shared-library'
 import { validateUserToken, validateAccessToken } from './crypto-utils'
-import { logError, logWarning } from './error-logger'
+import { logError } from './error-logger'
 import fs from 'fs'
 import path from 'path'
 import multer from 'multer'
@@ -235,7 +235,7 @@ export function startServer(port: number): Promise<void> {
             })
 
             expressApp.get('/api/thumbnails/:id', authMiddleware, (req, res) => {
-                const id = req.params.id ? parseInt(req.params.id) : NaN
+                const id = req.params.id ? parseInt(String(req.params.id)) : NaN
                 if (isNaN(id)) return res.status(400).send()
                 const media = library.get(id)
                 if (!media || !media.thumbnail_path || !fs.existsSync(media.thumbnail_path)) return res.status(404).send()
@@ -244,7 +244,7 @@ export function startServer(port: number): Promise<void> {
 
             expressApp.get('/api/stream/:id', authMiddleware, (req: AuthenticatedRequest, res) => {
                 try {
-                    const id = req.params.id ? parseInt(req.params.id) : NaN
+                    const id = req.params.id ? parseInt(String(req.params.id)) : NaN
                     if (isNaN(id)) return res.status(400).send()
                     const media = library.get(id)
                     if (!media || !fs.existsSync(media.file_path)) return res.status(404).send()
@@ -267,7 +267,7 @@ export function startServer(port: number): Promise<void> {
             })
 
             expressApp.get('/api/download/:id', authMiddleware, requirePermission('DOWNLOAD'), (req: AuthenticatedRequest, res) => {
-                const id = req.params.id ? parseInt(req.params.id) : NaN
+                const id = req.params.id ? parseInt(String(req.params.id)) : NaN
                 if (isNaN(id)) return res.status(400).send()
                 const media = library.get(id)
                 if (!media || !fs.existsSync(media.file_path)) return res.status(404).send()
@@ -316,7 +316,7 @@ export function startServer(port: number): Promise<void> {
 
             expressApp.put('/api/media/:id', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res) => {
                 try {
-                    const id = req.params.id ? parseInt(req.params.id) : NaN
+                    const id = req.params.id ? parseInt(String(req.params.id)) : NaN
                     if (isNaN(id)) return res.status(400).send()
                     const { rating, artist, description, fileName } = req.body
                     if (rating !== undefined) library.updateRating(id, rating)
@@ -333,7 +333,7 @@ export function startServer(port: number): Promise<void> {
             })
 
             expressApp.delete('/api/media/:id', authMiddleware, requirePermission('FULL'), (req, res) => {
-                const id = req.params.id ? parseInt(req.params.id) : NaN
+                const id = req.params.id ? parseInt(String(req.params.id)) : NaN
                 if (isNaN(id)) return res.status(400).send()
                 library.moveToTrash(id)
                 res.json({ success: true })

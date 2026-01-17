@@ -18,6 +18,7 @@ export interface MediaFile {
     genres?: Genre[]
     comments?: MediaComment[]
     artist?: string | null
+    artists?: string[]
     description?: string | null
     url?: string | null
 }
@@ -66,7 +67,7 @@ export interface FilterOptions {
     folderFilterMode: 'and' | 'or'
     filterType: 'all' | 'uncategorized' | 'untagged' | 'recent' | 'random' | 'trash' | 'tag_manager'
     fileType: 'all' | 'video' | 'audio' // 内部フィルタリング用として残す
-    sortOrder: 'name' | 'date' | 'size' | 'duration' | 'last_played'
+    sortOrder: 'name' | 'date' | 'size' | 'duration' | 'last_played' | 'rating' | 'modified'
     sortDirection: 'asc' | 'desc'
     selectedRatings: number[] // 0-5, 0 は「評価なし」
     selectedExtensions: string[]
@@ -174,6 +175,7 @@ export interface ElectronAPI {
     updateArtist: (mediaId: number, artist: string | null) => Promise<void>
     updateDescription: (mediaId: number, description: string | null) => Promise<void>
     updateUrl: (mediaId: number, url: string | null) => Promise<void>
+    exportMedia: (mediaId: number, options?: { notificationId?: string }) => Promise<{ success: boolean; message?: string }>
 
     // タグフォルダー操作
     getTagFolders: () => Promise<TagFolder[]>
@@ -249,12 +251,20 @@ export interface RemoteLibrary {
     lastConnectedAt?: string
 }
 
+
+export interface AutoImportConfig {
+    enabled: boolean
+    watchPath: string
+    targetLibraryId?: string
+}
+
 export interface ClientConfig {
     downloadPath: string
     theme: 'dark' | 'light' | 'system'
     language: 'ja' | 'en'
     remoteLibraries: RemoteLibrary[]
     myUserToken?: string
+    autoImport: AutoImportConfig
 }
 
 export interface AppSettings {

@@ -11,12 +11,19 @@ export interface RemoteLibrary {
     lastConnectedAt?: string
 }
 
+export interface AutoImportConfig {
+    enabled: boolean
+    watchPath: string
+    targetLibraryId?: string
+}
+
 export interface ClientConfig {
     downloadPath: string
     theme: 'dark' | 'light' | 'system'
     language: 'ja' | 'en'
     remoteLibraries: RemoteLibrary[]
     myUserToken?: string  // 自分のマシン用ユーザートークン（一度生成したら変更しない）
+    autoImport: AutoImportConfig
 }
 
 const defaultConfig: ClientConfig = {
@@ -24,7 +31,11 @@ const defaultConfig: ClientConfig = {
     theme: 'dark',
     language: 'ja',
     remoteLibraries: [],
-    myUserToken: undefined
+    myUserToken: undefined,
+    autoImport: {
+        enabled: false,
+        watchPath: ''
+    }
 }
 
 const configDir = path.join(app.getPath('home'), '.obscura')

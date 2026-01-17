@@ -3,11 +3,16 @@
     background: var(--bg-card);
     border-radius: var(--radius-md);
     overflow: hidden;
-    transition: all 0.2s ease;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
     cursor: pointer;
     position: relative;
     display: flex;
     flex-direction: column;
+    width: 100%;
+    height: 100%;
+    /* Transition base for outline */
+    outline: 2px solid transparent;
+    outline-offset: 2px;
 }
 
 .media-card:hover {
@@ -16,8 +21,7 @@
 }
 
 .media-card.selected {
-    outline: 2px solid var(--primary);
-    outline-offset: 2px;
+    outline-color: var(--primary);
 }
 
 /* サムネイルエリア */
@@ -29,6 +33,7 @@
     justify-content: center;
     overflow: hidden;
     position: relative;
+    flex-shrink: 0;
 }
 
 .media-card-thumbnail img {
@@ -90,6 +95,8 @@
     text-overflow: ellipsis;
     white-space: normal;
     word-break: break-word;
+    min-height: 38px;
+    /* 常に2行分の高さを確保 */
 }
 
 /* 再生時間 */

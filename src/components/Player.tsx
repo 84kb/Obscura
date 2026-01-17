@@ -120,6 +120,39 @@ export const Player: React.FC<PlayerProps> = ({
         }
     }, [media]) // mediaが変更された時のみ実行
 
+    // Buffered Time State
+    const [bufferedTime, setBufferedTime] = useState(0)
+
+    // Monitor buffering progress
+    useEffect(() => {
+        const mediaElement = videoRef.current || audioRef.current
+        if (!mediaElement) return
+
+        const handleProgress = () => {
+            if (mediaElement.buffered.length > 0) {
+                // Find the buffered range that covers the current time
+                for (let i = 0; i < mediaElement.buffered.length; i++) {
+                    if (mediaElement.buffered.start(i) <= mediaElement.currentTime && mediaElement.buffered.end(i) >= mediaElement.currentTime) {
+                        setBufferedTime(mediaElement.buffered.end(i))
+                        break
+                    }
+                    // Fallback: just take the last buffered end if we haven't started playing or seeked yet
+                    if (i === mediaElement.buffered.length - 1 && mediaElement.currentTime === 0) {
+                        setBufferedTime(mediaElement.buffered.end(i))
+                    }
+                }
+            }
+        }
+
+        mediaElement.addEventListener('progress', handleProgress)
+        mediaElement.addEventListener('timeupdate', handleProgress) // Check on timeupdate too for smoother updates
+
+        return () => {
+            mediaElement.removeEventListener('progress', handleProgress)
+            mediaElement.removeEventListener('timeupdate', handleProgress)
+        }
+    }, [media])
+
     // ループと自動再生の連携
     useEffect(() => {
         const mediaElement = videoRef.current || audioRef.current
@@ -140,7 +173,8 @@ export const Player: React.FC<PlayerProps> = ({
         const rect = e.currentTarget.getBoundingClientRect()
         const x = e.clientX - rect.left
         const width = rect.width
-        const hoverTime = (x / width) * duration
+        // 0以上duration以下にクランプ
+        const hoverTime = Math.max(0, Math.min(duration, (x / width) * duration))
 
         setPreviewTime(hoverTime)
         setPreviewX(x)
@@ -458,6 +492,21 @@ export const Player: React.FC<PlayerProps> = ({
                         </div>
                     )}
 
+                    {/* Visual Track Background */}
+                    <div className="player-seek-track-bg" />
+
+                    {/* Buffered Progress Bar */}
+                    <div
+                        className="buffered-progress-bar"
+                        style={{ width: `${(bufferedTime / (duration || 1)) * 100}%` }}
+                    />
+
+                    {/* Play Progress Bar */}
+                    <div
+                        className="player-seek-progress-bar"
+                        style={{ width: `${progress}%` }}
+                    />
+
                     <input
                         type="range"
                         min="0"
@@ -466,7 +515,6 @@ export const Player: React.FC<PlayerProps> = ({
                         value={currentTime}
                         onChange={(e) => seek(parseFloat(e.target.value))}
                         className="player-seek-slider"
-                        style={{ backgroundSize: `${progress}% 100%` }}
                     />
                 </div>
 

@@ -244,22 +244,16 @@
 .volume-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: white;
-    cursor: pointer;
+    width: 0;
+    height: 0;
     opacity: 0;
-    transform: scale(0.5);
-    /* 通常時は小さく */
-    transition: all 0.2s ease;
-    box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+    background: transparent;
+    border: none;
+    box-shadow: none;
 }
 
 .volume-control-group:hover .volume-slider::-webkit-slider-thumb {
-    opacity: 1;
-    transform: scale(1);
-    /* ホバー時に元のサイズに */
+    opacity: 0;
 }
 
 /* 時間表示 */
@@ -278,51 +272,98 @@
     flex: 1;
     height: 48px;
     /* ホバー領域を確保 */
+    position: relative;
+    /* display: flex; を削除して相対配置のみにするか、center配置を維持しつつ絶対配置で重ねる */
     display: flex;
     align-items: center;
-    position: relative;
     margin: 0 16px;
     cursor: pointer;
 }
 
+/* Base track background */
+.player-seek-track-bg {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    transform: translateY(-50%);
+    border-radius: 2px;
+    z-index: 0;
+}
+
+/* Buffered Bar */
+.buffered-progress-bar {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    transform: translateY(-50%);
+    height: 4px;
+    background-color: rgba(255, 255, 255, 0.4);
+    border-radius: 2px;
+    z-index: 1;
+    pointer-events: none;
+    transition: width 0.2s linear;
+}
+
+/* Play Progress Bar */
+.player-seek-progress-bar {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    transform: translateY(-50%);
+    height: 4px;
+    background-color: var(--primary);
+    border-radius: 2px;
+    z-index: 2;
+    pointer-events: none;
+}
+
 .player-seek-slider {
-    width: 100%;
-    height: 6px;
     -webkit-appearance: none;
     appearance: none;
-    background-color: rgba(255, 255, 255, 0.15);
-    background-image: linear-gradient(var(--primary), var(--primary));
-    background-repeat: no-repeat;
-    border-radius: 3px;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    /* Fill the container height (48px) */
+    background: transparent;
+    border-radius: 0;
     outline: none;
-    position: relative;
-    z-index: 2;
-    transition: height 0.2s ease;
+    cursor: pointer;
+    z-index: 10;
+    /* Topmost to capture clicks */
+    margin: 0;
+    padding: 0;
 }
 
-.player-seek-container:hover .player-seek-slider {
-    height: 8px;
-    /* ホバー時に少し太く */
+/* 削除: .player-seek-container::before は不要になったのでスタイル定義から削除 */
+
+/* Hover effects for visual bars */
+.player-seek-container:hover .player-seek-track-bg,
+.player-seek-container:hover .buffered-progress-bar,
+.player-seek-container:hover .player-seek-progress-bar {
+    height: 6px;
+    transition: height 0.1s ease;
 }
 
+/* Slider Thumb Styles */
+/* Slider Thumb Styles */
 .player-seek-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: white;
-    box-shadow: 0 0 12px rgba(0, 0, 0, 0.6);
-    /* 影を少し強調 */
-    cursor: pointer;
+    width: 0;
+    height: 0;
     opacity: 0;
-    transform: scale(0.6);
-    transition: all 0.2s ease;
+    background: transparent;
+    border: none;
+    box-shadow: none;
 }
 
 .player-seek-container:hover .player-seek-slider::-webkit-slider-thumb {
-    opacity: 1;
-    transform: scale(1);
+    opacity: 0;
 }
 
 /* プレビューツールチップ */

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { useNotification } from './contexts/NotificationContext'
 import { LibraryGrid } from './components/LibraryGrid'
@@ -66,7 +66,8 @@ export default function App() {
         switchToRemoteLibrary,
         switchToLocalLibrary,
         openLibrary,
-        myUserToken
+        myUserToken,
+        setMediaFiles
     } = useLibrary()
 
     const { addNotification, removeNotification, updateProgress } = useNotification()
@@ -191,13 +192,18 @@ export default function App() {
     useEffect(() => {
         const handleGlobalDragEnter = (e: DragEvent) => {
             e.preventDefault()
-            e.stopPropagation()
             dragCounter.current++
-            console.log('[Global D&D] DragEnter:', dragCounter.current, e.dataTransfer?.types)
+            console.log('[Global D&D] DragEnter:', dragCounter.current, 'isInternal:', isInternalDrag.current)
 
             if (dragCounter.current === 1) {
+                // 内部ドラッグ中はオーバーレイを表示しない
+                if (isInternalDrag.current) {
+                    console.log('[Global D&D] Internal drag detected, suppressing overlay')
+                    return
+                }
+
                 const hasFiles = Array.from(e.dataTransfer?.types || []).some(t => t.toLowerCase() === 'files')
-                if ((hasActiveLibraryRef.current || activeRemoteLibraryRef.current) && hasFiles && !isInternalDrag.current) {
+                if ((hasActiveLibraryRef.current || activeRemoteLibraryRef.current) && hasFiles) {
                     console.log('[Global D&D] Showing overlay')
                     setIsDragging(true)
                     document.body.classList.add('dragging-file')
@@ -207,14 +213,14 @@ export default function App() {
 
         const handleGlobalDragOver = (e: DragEvent) => {
             e.preventDefault()
-            e.stopPropagation()
             if (e.dataTransfer) {
-                // ドロップ効果を設定（これがないと「禁止マーク」になる場合がある）
                 e.dataTransfer.dropEffect = 'copy'
             }
 
-            // 万が一 enter で漏れた場合、または移動エリアからの復帰時の補完
-            if (!isDraggingRef.current && !isInternalDrag.current) {
+            // 内部ドラッグ中なら何もしない
+            if (isInternalDrag.current) return
+
+            if (!isDraggingRef.current) {
                 const hasFiles = Array.from(e.dataTransfer?.types || []).some(t => t.toLowerCase() === 'files')
                 if ((hasActiveLibraryRef.current || activeRemoteLibraryRef.current) && hasFiles) {
                     console.log('[Global D&D] Delayed overlay trigger')
@@ -226,44 +232,46 @@ export default function App() {
 
         const handleGlobalDragLeave = (e: DragEvent) => {
             e.preventDefault()
-            e.stopPropagation()
             dragCounter.current--
             console.log('[Global D&D] DragLeave:', dragCounter.current)
 
             if (dragCounter.current <= 0) {
                 dragCounter.current = 0
-                console.log('[Global D&D] Hiding overlay')
-                setIsDragging(false)
-                document.body.classList.remove('dragging-file')
-                // 内部ドラッグのフラグもクリア
-                isInternalDrag.current = false
+                if (isDraggingRef.current) {
+                    console.log('[Global D&D] Hiding overlay')
+                    setIsDragging(false)
+                    document.body.classList.remove('dragging-file')
+                }
             }
         }
 
         const handleGlobalDrop = async (e: DragEvent) => {
-            e.preventDefault()
-            e.stopPropagation()
-            console.log('[Global D&D] Drop detected')
+            // dropイベントはバブリングで受ける (Sidebar等のstopPropagationを優先)
+            console.log('[Global D&D] Global Drop detected, isInternal:', isInternalDrag.current)
+
             const wasInternal = isInternalDrag.current
 
             // 状態リセット
             dragCounter.current = 0
             setIsDragging(false)
-            isInternalDrag.current = false
             document.body.classList.remove('dragging-file')
+            // Drop後に確実にリセット
+            isInternalDrag.current = false
 
             if (wasInternal) {
-                console.log('[Global D&D] Internal drop, ignoring')
+                console.log('[Global D&D] Internal drop caught at global level, ignore file import')
                 return
             }
+
+            e.preventDefault()
+
             if (!hasActiveLibraryRef.current && !activeRemoteLibraryRef.current) {
-                console.log('[Global D&D] No active library, ignoring')
                 return
             }
 
             const files = Array.from(e.dataTransfer?.files || [])
             const filePaths = files.map(file => (file as any).path)
-            console.log('[Global D&D] Dropped paths:', filePaths)
+            console.log('[Global D&D] Global Dropped paths:', filePaths)
 
             if (filePaths.length > 0) {
                 await importMedia(filePaths)
@@ -271,16 +279,14 @@ export default function App() {
         }
 
         const handleGlobalDragEnd = () => {
+            console.log('[Global D&D] Global DragEnd')
             dragCounter.current = 0
             setIsDragging(false)
             isInternalDrag.current = false
             document.body.classList.remove('dragging-file')
         }
 
-        // Window全体にリスナーを設定（冒頭で阻害されるのを防ぐ）
         const handleMouseDown = () => {
-            // マウスクリックが発生した＝ファイルドラッグ中ではないはずなので
-            // 念のためドラッグ状態をリセットする
             if (dragCounter.current !== 0 || isDraggingRef.current) {
                 console.log('[Global D&D] Manual reset via mousedown')
                 dragCounter.current = 0
@@ -291,7 +297,6 @@ export default function App() {
         }
 
         const handleFocusReset = () => {
-            // ウィンドウにフォーカスが戻った時（タブ切り替えなど）に状態が残っていたらリセット
             if (dragCounter.current !== 0 || isDraggingRef.current) {
                 console.log('[Global] Focus recovered, resetting states')
                 dragCounter.current = 0
@@ -301,29 +306,28 @@ export default function App() {
             }
         }
 
-        // capture: true を指定して、バブリングフェーズより前にイベントを捕捉し、
-        // 確実に preventDefault できるようにする
-        window.addEventListener('dragenter', handleGlobalDragEnter, { capture: true })
-        window.addEventListener('dragover', handleGlobalDragOver, { capture: true })
-        window.addEventListener('dragleave', handleGlobalDragLeave, { capture: true })
-        window.addEventListener('drop', handleGlobalDrop, { capture: true })
-        window.addEventListener('dragend', handleGlobalDragEnd, { capture: true })
-        window.addEventListener('mouseup', handleGlobalDragEnd, { capture: true })
-        window.addEventListener('mousedown', handleMouseDown, { capture: true })
-        // window.removeEventListener('focus', handleFocusReset) // focusでリセットすると誤爆する場合があるので一旦外すか、必要なら残す
+        // 基本的に capture: true で preventDefault を確実に行う
+        // ただし内部要素が handleDrop で stopPropagation() した場合にグローバル側で走らないよう、
+        // drop だけは bubbling (capture: false) で登録する
+        // バブリングフェーズで登録し、個別のコンポーネントでの stopPropagation を優先させる
+        window.addEventListener('dragenter', handleGlobalDragEnter, { capture: false })
+        window.addEventListener('dragover', handleGlobalDragOver, { capture: false })
+        window.addEventListener('dragleave', handleGlobalDragLeave, { capture: false })
+        window.addEventListener('drop', handleGlobalDrop, { capture: false })
+        window.addEventListener('dragend', handleGlobalDragEnd, { capture: false })
+        window.addEventListener('mousedown', handleMouseDown, { capture: false })
         window.addEventListener('focus', handleFocusReset)
 
         return () => {
-            window.removeEventListener('dragenter', handleGlobalDragEnter, { capture: true })
-            window.removeEventListener('dragover', handleGlobalDragOver, { capture: true })
-            window.removeEventListener('dragleave', handleGlobalDragLeave, { capture: true })
-            window.removeEventListener('drop', handleGlobalDrop, { capture: true })
-            window.removeEventListener('dragend', handleGlobalDragEnd, { capture: true })
-            window.removeEventListener('mouseup', handleGlobalDragEnd, { capture: true })
-            window.removeEventListener('mousedown', handleMouseDown, { capture: true })
+            window.removeEventListener('dragenter', handleGlobalDragEnter, { capture: false })
+            window.removeEventListener('dragover', handleGlobalDragOver, { capture: false })
+            window.removeEventListener('dragleave', handleGlobalDragLeave, { capture: false })
+            window.removeEventListener('drop', handleGlobalDrop, { capture: false })
+            window.removeEventListener('dragend', handleGlobalDragEnd, { capture: false })
+            window.removeEventListener('mousedown', handleMouseDown, { capture: false })
             window.removeEventListener('focus', handleFocusReset)
         }
-    }, [importMedia]) // 依存配列からStateを削除し、importMediaのみにする（importMediaはuseCallbackされている前提）
+    }, [importMedia])
 
     useEffect(() => {
         const handleTriggerImport = (_: any, filePaths: string[]) => {
@@ -334,19 +338,53 @@ export default function App() {
             }
         }
 
+        const handleAutoImportComplete = (_: any, files: string[]) => {
+            console.log('[App] Auto-import completed:', files.length)
+            refreshLibrary()
+            addNotification({
+                type: 'success',
+                title: '自動インポート完了',
+                message: `${files.length} 件のファイルをインポートしました`,
+                duration: 5000
+            })
+        }
+
         // イベントリスナー登録
-        let unsubscribe: (() => void) | undefined
+        let unsubscribeTrigger: (() => void) | undefined
+        let unsubscribeAutoImport: (() => void) | undefined
+        let unsubscribeExportProgress: (() => void) | undefined
+
         if (window.electronAPI && window.electronAPI.on) {
-            unsubscribe = window.electronAPI.on('trigger-import', handleTriggerImport)
+            unsubscribeTrigger = window.electronAPI.on('trigger-import', handleTriggerImport) as any
+            unsubscribeAutoImport = window.electronAPI.on('auto-import-complete', handleAutoImportComplete) as any
+            unsubscribeExportProgress = window.electronAPI.on('export-progress', (_e: any, data: { id: string, progress: number }) => {
+                // eはeventオブジェクトだが、preloadでどうラップしたかによる
+                // preloadの実装: callback(_event, ...args)
+                // dataは第一引数（event除く）
+
+                // preloadの実装を確認すると:
+                // callback(_event, ...args)
+                // App側の受け取り: (e, data) => ...
+                // もし data が直接来るなら (data) => ...
+
+                // preload:
+                // const subscription = (_event, ...args) => callback(_event, ...args);
+
+                // なので、第一引数は event object.
+                // data comes as second argument.
+                if (data && data.id) {
+                    updateProgress(data.id, data.progress)
+                }
+            }) as any
         }
 
         // クリーンアップ
         return () => {
-            if (unsubscribe) {
-                unsubscribe()
-            }
+            if (unsubscribeTrigger) unsubscribeTrigger()
+            if (unsubscribeAutoImport) unsubscribeAutoImport()
+            if (unsubscribeExportProgress) unsubscribeExportProgress()
         }
-    }, [importMedia])
+    }, [importMedia, refreshLibrary, addNotification])
 
     // 表示設定
     const [viewSettings, setViewSettings] = useState<ViewSettings>(() => {
@@ -579,6 +617,52 @@ export default function App() {
         closeContextMenu()
     }
 
+    const handleExport = async (media: MediaFile) => {
+        closeContextMenu()
+
+        // 通知IDを生成してプログレス通知を表示（Progress=0）
+        const notificationId = addNotification({
+            type: 'progress',
+            title: 'エクスポート中',
+            message: `${media.file_name} のメタデータを埋め込み中...`,
+            progress: 0,
+            duration: 0
+        })
+
+        try {
+            const result = await window.electronAPI.exportMedia(media.id, { notificationId })
+
+            // 完了したら通知を削除
+            removeNotification(notificationId)
+
+            if (result.success) {
+                addNotification({
+                    type: 'success',
+                    title: 'エクスポート完了',
+                    message: `${media.file_name} を保存しました`,
+                    duration: 5000
+                })
+            } else if (result.message === 'Cancelled') {
+                // キャンセルされた場合は何もしない（通知は削除済み）
+            } else {
+                addNotification({
+                    type: 'error',
+                    title: 'エクスポート失敗',
+                    message: result.message || '不明なエラーが発生しました',
+                    duration: 5000
+                })
+            }
+        } catch (e: any) {
+            removeNotification(notificationId)
+            addNotification({
+                type: 'error',
+                title: 'エクスポート失敗',
+                message: e.message,
+                duration: 5000
+            })
+        }
+    }
+
     const handleAddToGenre = async (genreId: number) => {
         if (contextMenu?.media) {
             await addGenreToMedia(contextMenu.media.id, genreId)
@@ -680,65 +764,64 @@ export default function App() {
     }
 
     const renderMainContent = () => {
-        // プレイヤー再生中はプレイヤーを表示
-        if (playingMedia) {
-            const currentIndex = mediaFiles.findIndex(m => m.id === playingMedia.id)
-            const hasNext = currentIndex !== -1 && currentIndex < mediaFiles.length - 1
-            const hasPrev = currentIndex !== -1 && currentIndex > 0
-
-            const handleNextMedia = () => {
-                if (hasNext) {
-                    const nextMedia = mediaFiles[currentIndex + 1]
-                    setPlayingMedia(nextMedia)
-                    setSelectedMediaIds([nextMedia.id])
-                    setLastSelectedId(nextMedia.id)
-                    updateLastPlayed(nextMedia.id)
-                }
-            }
-
-            const handlePrevMedia = () => {
-                if (hasPrev) {
-                    const prevMedia = mediaFiles[currentIndex - 1]
-                    setPlayingMedia(prevMedia)
-                    setSelectedMediaIds([prevMedia.id])
-                    setLastSelectedId(prevMedia.id)
-                    updateLastPlayed(prevMedia.id)
-                }
-            }
-
-            const handlePlayFirstMedia = () => {
-                if (mediaFiles.length > 0) {
-                    const firstMedia = mediaFiles[0]
-                    setPlayingMedia(firstMedia)
-                    setSelectedMediaIds([firstMedia.id])
-                    setLastSelectedId(firstMedia.id)
-                    updateLastPlayed(firstMedia.id)
-                }
-            }
-
-            const toggleAutoPlay = () => {
-                setSettings(prev => ({ ...prev, autoPlay: !prev.autoPlay }))
-            }
-
-            return (
+        // プレイヤー再生中: オーバーレイとして表示
+        const playerOverlay = playingMedia ? (
+            <div className="player-overlay-container">
                 <Player
                     media={playingMedia}
                     onBack={handleClosePlayer}
-                    onNext={handleNextMedia}
-                    onPrev={handlePrevMedia}
-                    hasNext={hasNext}
-                    hasPrev={hasPrev}
+                    onNext={() => {
+                        const currentIndex = mediaFiles.findIndex(m => m.id === playingMedia.id)
+                        const hasNext = currentIndex !== -1 && currentIndex < mediaFiles.length - 1
+                        if (hasNext) {
+                            const nextMedia = mediaFiles[currentIndex + 1]
+                            setPlayingMedia(nextMedia)
+                            setSelectedMediaIds([nextMedia.id])
+                            setLastSelectedId(nextMedia.id)
+                            updateLastPlayed(nextMedia.id)
+                        }
+                    }}
+                    onPrev={() => {
+                        const currentIndex = mediaFiles.findIndex(m => m.id === playingMedia.id)
+                        const hasPrev = currentIndex !== -1 && currentIndex > 0
+                        if (hasPrev) {
+                            const prevMedia = mediaFiles[currentIndex - 1]
+                            setPlayingMedia(prevMedia)
+                            setSelectedMediaIds([prevMedia.id])
+                            setLastSelectedId(prevMedia.id)
+                            updateLastPlayed(prevMedia.id)
+                        }
+                    }}
+                    hasNext={(() => {
+                        const currentIndex = mediaFiles.findIndex(m => m.id === playingMedia.id)
+                        return currentIndex !== -1 && currentIndex < mediaFiles.length - 1
+                    })()}
+                    hasPrev={(() => {
+                        const currentIndex = mediaFiles.findIndex(m => m.id === playingMedia.id)
+                        return currentIndex !== -1 && currentIndex > 0
+                    })()}
                     autoPlayEnabled={settings.autoPlay}
-                    onToggleAutoPlay={toggleAutoPlay}
-                    onPlayFirst={handlePlayFirstMedia}
+                    onToggleAutoPlay={() => {
+                        setSettings(prev => ({ ...prev, autoPlay: !prev.autoPlay }))
+                    }}
+                    onPlayFirst={() => {
+                        if (mediaFiles.length > 0) {
+                            const firstMedia = mediaFiles[0]
+                            setPlayingMedia(firstMedia)
+                            setSelectedMediaIds([firstMedia.id])
+                            setLastSelectedId(firstMedia.id)
+                            updateLastPlayed(firstMedia.id)
+                        }
+                    }}
                     activeRemoteLibrary={activeRemoteLibrary}
                     myUserToken={myUserToken}
                 />
-            )
-        }
+            </div>
+        ) : null
 
+        let mainContent = null
         if (filterOptions.filterType === 'tag_manager') {
-            return (
+            mainContent = (
                 <TagManager
                     tags={tags}
                     onCreateTag={createTag}
@@ -746,88 +829,95 @@ export default function App() {
                     disabled={!hasActiveLibrary && !activeRemoteLibrary}
                 />
             )
+        } else {
+            mainContent = (
+                <div
+                    className={`content-container ${isDragging ? 'dragging' : ''}`}
+                    onClick={(e) => {
+                        if (e.target === e.currentTarget) {
+                            setSelectedMediaIds([])
+                            setLastSelectedId(null)
+                        }
+                    }}
+                >
+                    <MainHeader
+                        title={getHeaderTitle()}
+                        filterOptions={filterOptions}
+                        onFilterChange={setFilterOptions}
+                        gridSize={gridSize}
+                        onGridSizeChange={setGridSize}
+                        viewMode={viewMode}
+                        onViewModeChange={setViewMode}
+                        tags={tags}
+                        tagFolders={tagFolders}
+                        allMediaFiles={allMediaFiles}
+                        viewSettings={viewSettings}
+                        onViewSettingsChange={setViewSettings}
+                        genres={genres}
+                    />
+                    {/* サブフォルダー表示 */}
+                    {filterOptions.selectedGenres.length > 0 && (
+                        <SubfolderGrid
+                            subfolders={genres.filter(g => g.parentId === filterOptions.selectedGenres[0])}
+                            onSelectFolder={(genreId) => {
+                                setFilterOptions(prev => ({ ...prev, selectedGenres: [genreId] }))
+                            }}
+                            getMediaCount={(genreId) => {
+                                // TODO: 実際のメディアカウントを計算
+                                return mediaFiles.filter(m => m.genres?.some(g => g.id === genreId)).length
+                            }}
+                        />
+                    )}
+
+                    {/* 内容ヘッダー */}
+                    {filterOptions.selectedGenres.length > 0 && genres.filter(g => g.parentId === filterOptions.selectedGenres[0]).length > 0 && (
+                        <div className="content-section-header">
+                            <span>内容 ({mediaFiles.length})</span>
+                        </div>
+                    )}
+
+                    <LibraryGrid
+                        mediaFiles={mediaFiles}
+                        onMediaClick={handleMediaClick}
+                        onMediaDoubleClick={handleMediaDoubleClick}
+                        onMediaContextMenu={handleContextMenu}
+                        gridSize={gridSize}
+                        viewMode={viewMode}
+                        selectedMediaIds={selectedMediaIds}
+                        viewSettings={viewSettings}
+                        onClearSelection={() => {
+                            setSelectedMediaIds([])
+                            setLastSelectedId(null)
+                        }}
+                        onSelectionChange={(ids) => {
+                            setSelectedMediaIds(ids)
+                            if (ids.length > 0) setLastSelectedId(ids[ids.length - 1])
+                        }}
+                        onInternalDragStart={() => {
+                            isInternalDrag.current = true
+                        }}
+                        onInternalDragEnd={() => {
+                            // Global dragend でケアするため、ここでは何もしないか、
+                            // 脱落防止に短いタイマーを置く程度にする
+                        }}
+                        renamingMediaId={renamingMediaId}
+                        onRenameSubmit={async (id, newName) => {
+                            // DB更新
+                            await window.electronAPI.renameMedia(id, newName)
+                            setRenamingMediaId(null)
+                            refreshLibrary()
+                        }}
+                        onRenameCancel={() => setRenamingMediaId(null)}
+                    />
+                </div>
+            )
         }
 
         return (
-            <div
-                className={`content-container ${isDragging ? 'dragging' : ''}`}
-                onClick={(e) => {
-                    if (e.target === e.currentTarget) {
-                        setSelectedMediaIds([])
-                        setLastSelectedId(null)
-                    }
-                }}
-            >
-                <MainHeader
-                    title={getHeaderTitle()}
-                    filterOptions={filterOptions}
-                    onFilterChange={setFilterOptions}
-                    gridSize={gridSize}
-                    onGridSizeChange={setGridSize}
-                    viewMode={viewMode}
-                    onViewModeChange={setViewMode}
-                    tags={tags}
-                    tagFolders={tagFolders}
-                    allMediaFiles={allMediaFiles}
-                    viewSettings={viewSettings}
-                    onViewSettingsChange={setViewSettings}
-                    genres={genres}
-                />
-                {/* サブフォルダー表示 */}
-                {filterOptions.selectedGenres.length > 0 && (
-                    <SubfolderGrid
-                        subfolders={genres.filter(g => g.parentId === filterOptions.selectedGenres[0])}
-                        onSelectFolder={(genreId) => {
-                            setFilterOptions(prev => ({ ...prev, selectedGenres: [genreId] }))
-                        }}
-                        getMediaCount={(genreId) => {
-                            // TODO: 実際のメディアカウントを計算
-                            return mediaFiles.filter(m => m.genres?.some(g => g.id === genreId)).length
-                        }}
-                    />
-                )}
-
-                {/* 内容ヘッダー */}
-                {filterOptions.selectedGenres.length > 0 && genres.filter(g => g.parentId === filterOptions.selectedGenres[0]).length > 0 && (
-                    <div className="content-section-header">
-                        <span>内容 ({mediaFiles.length})</span>
-                    </div>
-                )}
-
-                <LibraryGrid
-                    mediaFiles={mediaFiles}
-                    onMediaClick={handleMediaClick}
-                    onMediaDoubleClick={handleMediaDoubleClick}
-                    onMediaContextMenu={handleContextMenu}
-                    gridSize={gridSize}
-                    viewMode={viewMode}
-                    selectedMediaIds={selectedMediaIds}
-                    viewSettings={viewSettings}
-                    onClearSelection={() => {
-                        setSelectedMediaIds([])
-                        setLastSelectedId(null)
-                    }}
-                    onSelectionChange={(ids) => {
-                        setSelectedMediaIds(ids)
-                        if (ids.length > 0) setLastSelectedId(ids[ids.length - 1])
-                    }}
-                    onInternalDragStart={() => {
-                        isInternalDrag.current = true
-                    }}
-                    onInternalDragEnd={() => {
-                        // Global dragend でケアするため、ここでは何もしないか、
-                        // 脱落防止に短いタイマーを置く程度にする
-                    }}
-                    renamingMediaId={renamingMediaId}
-                    onRenameSubmit={async (id, newName) => {
-                        // DB更新
-                        await window.electronAPI.renameMedia(id, newName)
-                        setRenamingMediaId(null)
-                        refreshLibrary()
-                    }}
-                    onRenameCancel={() => setRenamingMediaId(null)}
-                />
-            </div>
+            <>
+                {mainContent}
+                {playerOverlay}
+            </>
         )
     }
 
@@ -959,6 +1049,7 @@ export default function App() {
                     onCopy={handleCopy}
                     onCopyPath={handleCopyPath}
                     onMoveToTrash={handleMoveToTrash}
+                    onExport={!activeRemoteLibrary ? handleExport : undefined}
                     onDownload={activeRemoteLibrary ? async () => {
                         if (!contextMenu?.media || !window.electronAPI) return
                         const media = contextMenu.media

@@ -88,6 +88,7 @@ try {
         updateArtist: (mediaId, artist) => ipcRenderer.invoke('update-artist', mediaId, artist),
         updateDescription: (mediaId, description) => ipcRenderer.invoke('update-description', mediaId, description),
         updateUrl: (mediaId, url) => ipcRenderer.invoke('update-url', mediaId, url),
+        exportMedia: (mediaId) => ipcRenderer.invoke('export-media', mediaId),
 
         // キャプチャ
         onTriggerFrameCapture: (callback) => {
@@ -165,7 +166,7 @@ try {
 
         // 汎用イベントリスナー (ホワイトリスト形式)
         on: (channel, callback) => {
-            const validChannels = ['trigger-import'];
+            const validChannels = ['trigger-import', 'auto-import-complete', 'export-progress', 'download-progress'];
             if (validChannels.includes(channel)) {
                 // 自動的に購読解除できるようにラッパーを返すか、あるいは単純にonするか
                 // App.tsxの実装を見ると removeListener は使っていないようなので、

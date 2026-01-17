@@ -445,6 +445,11 @@ export const mockElectronAPI = {
         }
     },
 
+    exportMedia: async (mediaId: number, options?: { notificationId?: string }): Promise<{ success: boolean; message?: string }> => {
+        console.log('[Mock] exportMedia called', mediaId, options)
+        return { success: true }
+    },
+
     // タグフォルダー操作
     getTagFolders: async (): Promise<TagFolder[]> => {
         return storage.get<TagFolder[]>(STORAGE_KEYS.TAG_FOLDERS, [])
@@ -488,7 +493,28 @@ export const mockElectronAPI = {
 
     // Missing methods
     startDrag: (_filePaths: string[]) => { },
-    updateDescription: async (_mediaId: number, _description: string | null) => { },
+    updateDescription: async (mediaId: number, description: string | null) => {
+        const files = storage.get<MediaFile[]>(STORAGE_KEYS.MEDIA_FILES, [])
+        const file = files.find(f => f.id === mediaId)
+        if (file) {
+            file.description = description ?? undefined
+            storage.set(STORAGE_KEYS.MEDIA_FILES, files)
+        }
+    },
+
+    updateUrl: async (mediaId: number, url: string | null) => {
+        const files = storage.get<MediaFile[]>(STORAGE_KEYS.MEDIA_FILES, [])
+        const file = files.find(f => f.id === mediaId)
+        if (file) {
+            file.url = url ?? undefined
+            storage.set(STORAGE_KEYS.MEDIA_FILES, files)
+        }
+    },
+
+    getClientConfig: async () => ({
+        remoteLibraries: [],
+        myUserToken: 'mock-user-token'
+    }),
 
     // === ネットワーク共有 (Mock) ===
     getServerConfig: async () => ({
@@ -531,7 +557,14 @@ export const mockElectronAPI = {
     minimizeWindow: async () => { console.log('[Mock] minimizeWindow') },
     maximizeWindow: async () => { console.log('[Mock] maximizeWindow') },
     closeWindow: async () => { console.log('[Mock] closeWindow') },
+
+    // Update Status (Mock)
+    onUpdateStatus: (_callback: (data: any) => void) => {
+        console.log('[Mock] onUpdateStatus listener added');
+        return () => console.log('[Mock] onUpdateStatus listener removed');
+    },
 }
+
 
 // グローバル型定義の拡張
 declare global {

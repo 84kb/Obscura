@@ -58,7 +58,12 @@ const buildGenreTree = (genres: Genre[]): GenreWithChildren[] => {
 
     // orderIndexでソート
     const sortNodes = (nodes: GenreWithChildren[]) => {
-        nodes.sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0))
+        nodes.sort((a, b) => {
+            const orderA = a.orderIndex || 0
+            const orderB = b.orderIndex || 0
+            if (orderA !== orderB) return orderA - orderB
+            return a.name.localeCompare(b.name)
+        })
         nodes.forEach(n => sortNodes(n.children))
     }
     sortNodes(roots)
@@ -282,13 +287,27 @@ export function Sidebar({
         e.stopPropagation()
         setDraggedGenreId(genreId)
         e.dataTransfer.effectAllowed = 'move'
-        e.dataTransfer.setData('application/json', JSON.stringify({ type: 'genre', id: genreId }))
+        e.dataTransfer.dropEffect = 'move'
+        const data = JSON.stringify({ type: 'genre', id: genreId })
+        e.dataTransfer.setData('application/json', data)
+        // ブラウザ互換性のためのプレーンテキスト
+        e.dataTransfer.setData('text/plain', data)
     }
 
     const handleDragEnd = () => {
         setDraggedGenreId(null)
         setDropTarget(null)
         onInternalDragEnd?.()
+    }
+
+    const getDropPosition = (e: React.DragEvent, element: HTMLElement): 'top' | 'middle' | 'bottom' => {
+        const rect = element.getBoundingClientRect()
+        const y = e.clientY - rect.top
+        const height = rect.height
+
+        if (y < height * 0.35) return 'top'
+        if (y > height * 0.65) return 'bottom'
+        return 'middle'
     }
 
     const handleDragOver = (e: React.DragEvent, targetId: number) => {
@@ -311,38 +330,66 @@ export function Sidebar({
             return
         }
 
-        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-        const y = e.clientY - rect.top
-        const height = rect.height
+        // 内部ドラッグの場合は move を明示
+        e.dataTransfer.dropEffect = 'move'
 
-        let position: 'top' | 'middle' | 'bottom' = 'middle'
-        if (y < height * 0.25) position = 'top'
-        else if (y > height * 0.75) position = 'bottom'
-
+        const position = getDropPosition(e, e.currentTarget as HTMLElement)
         setDropTarget({ id: targetId, position })
     }
 
-    const handleDragLeave = (_e: React.DragEvent) => {
+    const handleDragLeave = (e: React.DragEvent) => {
+        // 子要素への移動でも発火するので、currentTargetの外に出た場合のみクリアする
+        if (e.currentTarget.contains(e.relatedTarget as Node)) {
+            return
+        }
         setDropTarget(null)
+    }
+
+    // IDの正規化と比較（null, undefined, 0, 文字列の混在に対応）
+    const normalizeId = (id: any): number | null => {
+        if (id === null || id === undefined || id === '' || id === 0) return null
+        const num = Number(id)
+        return isNaN(num) ? null : num
     }
 
     const handleDrop = async (e: React.DragEvent, targetId: number) => {
         e.preventDefault()
         e.stopPropagation()
-        const currentDropTarget = dropTarget
+
+        // 常に最新のドロップ位置を使用
+        const position = getDropPosition(e, e.currentTarget as HTMLElement)
+        const currentDropTarget = { id: targetId, position }
+
         setDropTarget(null)
 
+        // ドラッグ中のIDを取得（ステート優先、バックアップとしてdataTransferも確認）
+        let effectiveDraggedId = normalizeId(draggedGenreId)
+
+        if (effectiveDraggedId === null) {
+            try {
+                const data = e.dataTransfer.getData('application/json')
+                if (data) {
+                    const parsed = JSON.parse(data)
+                    if (parsed.type === 'genre') {
+                        effectiveDraggedId = normalizeId(parsed.id)
+                    }
+                }
+            } catch (err) {
+                console.error("Failed to parse drag data", err)
+            }
+        }
+
         // ファイルドロップの処理
-        if (draggedGenreId === null) {
+        if (effectiveDraggedId === null) {
             if (e.dataTransfer.types.includes('Files') && onDropFileOnGenre) {
                 onDropFileOnGenre(targetId, e.dataTransfer.files)
-                // ドロップ先のフォルダーを展開
                 setExpandedFolders(prev => new Set(prev).add(targetId))
             }
             return
         }
 
-        if (draggedGenreId === targetId || !currentDropTarget) {
+        const normalizedTargetId = normalizeId(targetId)
+        if (effectiveDraggedId === normalizedTargetId || normalizedTargetId === null) {
             return
         }
 
@@ -351,28 +398,38 @@ export function Sidebar({
         let newParentId: number | null = null
         let newOrderIndex = 0
 
-        const targetGenre = genres.find(g => g.id === targetId)
+        const targetGenre = genres.find(g => normalizeId(g.id) === normalizedTargetId)
         if (!targetGenre) return
 
         if (currentDropTarget.position === 'middle') {
             // 子にする
-            newParentId = targetId
+            newParentId = normalizedTargetId
             // 末尾に追加（現在の子供の最大orderIndex + 1）
-            const children = genres.filter(g => g.parentId === targetId)
+            const children = genres.filter(g => normalizeId(g.parentId) === normalizedTargetId)
             const maxOrder = children.reduce((max, c) => Math.max(max, c.orderIndex || 0), 0)
             newOrderIndex = maxOrder + 100
 
             // 親フォルダーを展開する
-            setExpandedFolders(prev => new Set(prev).add(targetId))
+            setExpandedFolders(prev => new Set(prev).add(normalizedTargetId))
         } else {
             // 兄弟にする
-            newParentId = targetGenre.parentId || null
+            newParentId = normalizeId(targetGenre.parentId)
 
-            const siblings = genres.filter(g => g.parentId === newParentId && g.id !== draggedGenreId).sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0))
-            const targetIndex = siblings.findIndex(s => s.id === targetId)
+            // 兄弟を抽出（正規化したIDで比較）
+            const siblings = genres.filter(g =>
+                normalizeId(g.parentId) === newParentId &&
+                normalizeId(g.id) !== effectiveDraggedId
+            ).sort((a, b) => {
+                const orderA = a.orderIndex || 0
+                const orderB = b.orderIndex || 0
+                if (orderA !== orderB) return orderA - orderB
+                return a.name.localeCompare(b.name)
+            })
+
+            const targetIndex = siblings.findIndex(s => normalizeId(s.id) === normalizedTargetId)
 
             const newSiblings = [...siblings]
-            const draggedGenre = genres.find(g => g.id === draggedGenreId)!
+            const draggedGenre = genres.find(g => normalizeId(g.id) === effectiveDraggedId)!
 
             if (currentDropTarget.position === 'top') {
                 newSiblings.splice(targetIndex, 0, draggedGenre)
@@ -391,13 +448,14 @@ export function Sidebar({
 
         if (currentDropTarget.position === 'middle') {
             updates.push({
-                id: draggedGenreId,
+                id: effectiveDraggedId,
                 parentId: newParentId,
                 orderIndex: newOrderIndex
             })
         }
 
         if (updates.length > 0) {
+            console.log('[Sidebar] Sending updateGenreStructure:', updates)
             await window.electronAPI.updateGenreStructure(updates)
             if (onRefreshGenres) {
                 onRefreshGenres()
@@ -405,6 +463,21 @@ export function Sidebar({
         }
 
         setDraggedGenreId(null)
+    }
+
+    const handleContainerDragOver = (e: React.DragEvent) => {
+        e.preventDefault()
+        // 少なくともサイドバーの上にいる間はドロップ可とする
+        if (draggedGenreId !== null) {
+            e.dataTransfer.dropEffect = 'move'
+        }
+    }
+
+    const handleContainerDrop = (e: React.DragEvent) => {
+        // 子要素（renderGenreNode）でキャッチされなかったドロップを処理
+        // 何もせずに dragEnd に任せるか、必要なら末尾への移動などを検討
+        console.log('[Sidebar] Container drop (ignored or fallback)')
+        setDropTarget(null)
     }
 
     // 再帰レンダリング関数
@@ -498,7 +571,11 @@ export function Sidebar({
     }
 
     return (
-        <div className="sidebar">
+        <div
+            className="sidebar"
+            onDragOver={handleContainerDragOver}
+            onDrop={handleContainerDrop}
+        >
             <div className="sidebar-header">
                 {activeRemoteLibrary && (
                     <div className="sidebar-remote-status">

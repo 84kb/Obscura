@@ -61,6 +61,7 @@
 .inspector-content {
     flex: 1;
     overflow-y: auto;
+    scrollbar-gutter: stable;
     padding-bottom: 32px;
 }
 
@@ -669,6 +670,7 @@
 .section-header {
     padding: 6px var(--spacing-md) !important;
 }
+
 /* URL field styles */
 .url-input-container {
     margin-top: 4px;

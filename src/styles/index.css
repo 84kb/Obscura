@@ -68,17 +68,23 @@ textarea,
 .main-content {
   flex: 1;
   height: 100%;
-  overflow-y: auto;
+  overflow-y: hidden;
   padding: 0;
   /* paddingを0にしてドラッグ領域を最大化 */
   scroll-behavior: smooth;
   transition: padding 0.3s ease;
+  min-width: 0;
+  /* Important for flex shrinking */
 }
 
 .content-container {
-  min-height: 100%;
+  height: 100%;
+  overflow: hidden;
+  /* Ensure inner scrollers work */
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  /* Important for flex shrinking */
 }
 
 .main-content.is-playing {
@@ -181,4 +187,22 @@ textarea,
   font-size: 13px;
   font-weight: 500;
   color: var(--text-muted);
+}
+
+/* Player Overlay */
+.player-overlay-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: var(--bg-dark);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Ensure main-content is relative for absolute positioning of player */
+.main-content {
+  position: relative;
 }

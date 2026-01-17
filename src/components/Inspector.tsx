@@ -47,8 +47,8 @@ export function Inspector({
     onRemoveGenre,
     onCreateGenre,
     onPlay,
-    onMoveToTrash,
-    onMoveFilesToTrash,
+
+
     onRestore,
     onRestoreFiles,
     onDeletePermanently,
@@ -81,6 +81,9 @@ export function Inspector({
 
     // URL編集用
     const [url, setUrl] = useState('')
+
+    // 説明欄の展開状態
+    const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
 
     // ポップオーバー位置
     const [tagPickerPos, setTagPickerPos] = useState<{ top: number; right: number } | null>(null)
@@ -119,6 +122,8 @@ export function Inspector({
             setCurrentRating(media[0].rating || 0)
             setArtistName(media[0].artist || '')
             setUrl(media[0].url || '')
+            // メディア変更時に説明欄を閉じる
+            setIsDescriptionExpanded(false)
         } else if (media.length > 1) {
             setFileName('')
             // 共通の評価を確認
@@ -135,6 +140,8 @@ export function Inspector({
             const urls = media.map(m => m.url || '')
             const allSameUrl = urls.every(u => u === urls[0])
             setUrl(allSameUrl ? urls[0] : '')
+
+            setIsDescriptionExpanded(false)
         }
     }, [media])
 
@@ -344,19 +351,8 @@ export function Inspector({
             const saved = localStorage.getItem('inspector_layout_order_v2')
             if (saved) {
                 const parsed = JSON.parse(saved) as string[]
-                // initialOrderに含まれていて、保存されたリストに含まれていない項目を追加
                 const missing = initialOrder.filter(item => !parsed.includes(item))
                 if (missing.length > 0) {
-                    // artistの後にdescriptionを追加したいなどの要望があるが、
-                    // 既存の並び順を壊さないように、デフォルト位置（配列の特定位置）に挿入するのは難しい。
-                    // 単純に不足分を末尾に追加、または初期順序に基づいて再構築する
-
-                    // 戦略: 初期順序を維持しつつ、保存された順序を優先する...は複雑。
-                    // シンプルに: 保存された配列にないものは、initialOrderの登場順で、とりあえずartistの後ろあたり（もしあれば）あるいは末尾に追加する。
-
-                    // 今回はシンプルに末尾に追加ではなく、
-                    // もし 'description' が足りないなら 'artist' の後ろに入れる、などの配慮をしたいが、
-                    // 汎用的に「不足しているものは initialOrder の順序で末尾に追加」とする。
                     return [...parsed, ...missing]
                 }
                 return parsed
@@ -392,7 +388,7 @@ export function Inspector({
     const sensors = useSensors(
         useSensor(PointerSensor, {
             activationConstraint: {
-                distance: 5 // 5px movement required to start drag, prevents accidental drags on click
+                distance: 5
             }
         }),
         useSensor(KeyboardSensor, {
@@ -411,30 +407,7 @@ export function Inspector({
         }
     }
 
-    // --- Render Helpers ---
-
-
-
-    // ... logic for handlers ...
-
-    // --- Sections Map ---
-    // We render content conditionally.
-
-    // Need imports
-    // import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core'
-    // import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
-    // import { InspectorSection, InfoSectionContent, CommentSectionContent, PlaylistSectionContent } from './InspectorSections'
-
-
     if (media.length === 0) {
-        // ... empty state (same as before) ...
-        // (Copied existing empty state logic below in full implementation)
-        const displayMedia = playingMedia
-        if (displayMedia) {
-            // プレイヤー再生中のみ表示する場合のロジック（オプション）
-            // ここでは一旦統計にするか、playingMediaがあればそれを表示するように戻す
-            // ただし App.tsx で media={selectedMediaIds...} としているので、空なら統計。
-        }
         return (
             <div className="inspector slide-in-right">
                 <div className="inspector-header">
@@ -509,7 +482,6 @@ export function Inspector({
             </div>
 
             <div className="inspector-content">
-                {/* Preview Section (Static) */}
                 <div className="inspector-preview">
                     {media.length === 1 ? (
                         <div className="preview-container" onDoubleClick={() => onPlay(media[0])}>
@@ -573,7 +545,6 @@ export function Inspector({
                     </div>
                 )}
 
-                {/* Draggable Sections */}
                 <DndContext
                     sensors={sensors}
                     collisionDetection={closestCenter}
@@ -664,8 +635,10 @@ export function Inspector({
                                             isOpen={isOpen}
                                             onToggle={() => toggleSection(sectionId)}
                                         >
+
                                             <textarea
-                                                className="artist-input"
+                                                key={media.length === 1 ? media[0].id : 'multi'}
+                                                className={`artist-input ${isDescriptionExpanded ? 'expanded' : ''}`}
                                                 placeholder="説明を入力..."
                                                 rows={3}
                                                 style={{
@@ -674,21 +647,34 @@ export function Inspector({
                                                     fontFamily: 'inherit',
                                                     lineHeight: '1.5',
                                                     width: '100%',
-                                                    boxSizing: 'border-box'
+                                                    boxSizing: 'border-box',
+                                                    height: isDescriptionExpanded ? 'auto' : undefined,
+                                                    overflow: isDescriptionExpanded ? 'hidden' : 'auto'
                                                 }}
                                                 value={media.length === 1 ? (media[0].description || '') : ''}
+                                                onClick={() => {
+                                                    if (!isDescriptionExpanded) {
+                                                        setIsDescriptionExpanded(true)
+                                                        // 次のレンダリング後に高さを調整するためにsetTimeoutを使用
+                                                        setTimeout(() => {
+                                                            const el = document.activeElement as HTMLTextAreaElement
+                                                            if (el && el.tagName === 'TEXTAREA') {
+                                                                el.style.height = 'auto'
+                                                                el.style.height = el.scrollHeight + 'px'
+                                                            }
+                                                        }, 0)
+                                                    }
+                                                }}
                                                 onChange={(e) => {
                                                     const val = e.target.value
                                                     if (media.length === 1 && onUpdateDescription) {
                                                         onUpdateDescription(media[0].id, val)
                                                     }
-                                                    // 高さ自動調整
-                                                    e.target.style.height = 'auto'
-                                                    e.target.style.height = e.target.scrollHeight + 'px'
-                                                }}
-                                                onFocus={(e) => {
-                                                    e.target.style.height = 'auto'
-                                                    e.target.style.height = e.target.scrollHeight + 'px'
+                                                    // 高さ自動調整 (展開時のみ)
+                                                    if (isDescriptionExpanded) {
+                                                        e.target.style.height = 'auto'
+                                                        e.target.style.height = e.target.scrollHeight + 'px'
+                                                    }
                                                 }}
                                                 disabled={media.length !== 1}
                                             />
@@ -809,187 +795,195 @@ export function Inspector({
                                     return null
                             }
                         })}
-                    </SortableContext>
-                </DndContext>
+                    </SortableContext >
+                </DndContext >
 
                 {/* Modals/Popovers from original code... */}
-                {showTagInput && tagPickerPos && createPortal(
-                    // ... existing tag picker code ...
-                    <div
-                        ref={tagPickerRef}
-                        className="picker-popover-fixed"
-                        style={{ top: tagPickerPos.top, right: tagPickerPos.right }}
-                    >
-                        <div className="picker-popover-header">
-                            <input
-                                type="text"
-                                placeholder="タグを検索..."
-                                value={tagInput}
-                                onChange={(e) => setTagInput(e.target.value)}
-                                onKeyDown={handleTagInputKeyDown}
-                                className="picker-popover-search"
-                                autoFocus
-                            />
-                        </div>
-                        <div className="picker-popover-list">
-                            {allTags.filter(t => t.name.toLowerCase().includes(tagInput.toLowerCase())).map(tag => {
-                                const isAdded = commonTags.some(ct => ct.id === tag.id)
-                                const isPartial = !isAdded && media.some(m => m.tags?.some(mt => mt.id === tag.id))
+                {
+                    showTagInput && tagPickerPos && createPortal(
+                        // ... existing tag picker code ...
+                        <div
+                            ref={tagPickerRef}
+                            className="picker-popover-fixed"
+                            style={{ top: tagPickerPos.top, right: tagPickerPos.right }}
+                        >
+                            <div className="picker-popover-header">
+                                <input
+                                    type="text"
+                                    placeholder="タグを検索..."
+                                    value={tagInput}
+                                    onChange={(e) => setTagInput(e.target.value)}
+                                    onKeyDown={handleTagInputKeyDown}
+                                    className="picker-popover-search"
+                                    autoFocus
+                                />
+                            </div>
+                            <div className="picker-popover-list">
+                                {allTags.filter(t => t.name.toLowerCase().includes(tagInput.toLowerCase())).map(tag => {
+                                    const isAdded = commonTags.some(ct => ct.id === tag.id)
+                                    const isPartial = !isAdded && media.some(m => m.tags?.some(mt => mt.id === tag.id))
 
-                                return (
-                                    <div
-                                        key={tag.id}
-                                        className={`picker-popover-item ${isAdded ? 'added' : ''} ${isPartial ? 'partial' : ''}`}
-                                        onClick={(e) => {
-                                            e.stopPropagation()
-                                            if (isAdded) {
-                                                media.forEach(m => onRemoveTag(m.id, tag.id))
-                                            } else {
-                                                media.forEach(m => onAddTag(m.id, tag.id))
-                                            }
-                                        }}
-                                    >
-                                        <span className="picker-checkbox">
-                                            {isAdded && (
-                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                                                    <polyline points="20 6 9 17 4 12" />
-                                                </svg>
-                                            )}
-                                            {isPartial && (
-                                                <div className="partial-mark"></div>
-                                            )}
-                                        </span>
-                                        <span>{tag.name}</span>
-                                    </div>
-                                )
-                            })}
-                            {tagInput.trim() && !allTags.some(t => t.name.toLowerCase() === tagInput.trim().toLowerCase()) && (
-                                <button className="picker-popover-create-btn" onClick={handleCreateTag}>
-                                    <span className="create-plus">+</span>
-                                    <span className="create-label">作成</span>
-                                    <span className="create-name">"{tagInput.trim()}"</span>
+                                    return (
+                                        <div
+                                            key={tag.id}
+                                            className={`picker-popover-item ${isAdded ? 'added' : ''} ${isPartial ? 'partial' : ''}`}
+                                            onClick={(e) => {
+                                                e.stopPropagation()
+                                                if (isAdded) {
+                                                    media.forEach(m => onRemoveTag(m.id, tag.id))
+                                                } else {
+                                                    media.forEach(m => onAddTag(m.id, tag.id))
+                                                }
+                                            }}
+                                        >
+                                            <span className="picker-checkbox">
+                                                {isAdded && (
+                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                                                        <polyline points="20 6 9 17 4 12" />
+                                                    </svg>
+                                                )}
+                                                {isPartial && (
+                                                    <div className="partial-mark"></div>
+                                                )}
+                                            </span>
+                                            <span>{tag.name}</span>
+                                        </div>
+                                    )
+                                })}
+                                {tagInput.trim() && !allTags.some(t => t.name.toLowerCase() === tagInput.trim().toLowerCase()) && (
+                                    <button className="picker-popover-create-btn" onClick={handleCreateTag}>
+                                        <span className="create-plus">+</span>
+                                        <span className="create-label">作成</span>
+                                        <span className="create-name">"{tagInput.trim()}"</span>
+                                    </button>
+                                )}
+                                {tagInput.trim() === '' && allTags.length === 0 && (
+                                    <div className="picker-popover-empty">タグがありません</div>
+                                )}
+                            </div>
+                            <div className="picker-popover-footer">
+                                <button className="picker-close-btn" onClick={() => { setShowTagInput(false); setTagInput(''); }}>
+                                    閉じる ESC
                                 </button>
-                            )}
-                            {tagInput.trim() === '' && allTags.length === 0 && (
-                                <div className="picker-popover-empty">タグがありません</div>
-                            )}
-                        </div>
-                        <div className="picker-popover-footer">
-                            <button className="picker-close-btn" onClick={() => { setShowTagInput(false); setTagInput(''); }}>
-                                閉じる ESC
-                            </button>
-                        </div>
-                    </div>,
-                    document.body
-                )}
+                            </div>
+                        </div>,
+                        document.body
+                    )
+                }
 
-                {showGenreInput && genrePickerPos && createPortal(
-                    // ... existing genre picker code ...
-                    <div
-                        ref={genrePickerRef}
-                        className="picker-popover-fixed"
-                        style={{ top: genrePickerPos.top, right: genrePickerPos.right }}
-                    >
-                        <div className="picker-popover-header">
-                            <input
-                                type="text"
-                                placeholder="フォルダーを検索..."
-                                value={genreInput}
-                                onChange={(e) => setGenreInput(e.target.value)}
-                                onKeyDown={handleGenreInputKeyDown}
-                                className="picker-popover-search"
-                                autoFocus
-                            />
-                        </div>
-                        <div className="picker-popover-list">
-                            {allGenres.filter(g => g.name.toLowerCase().includes(genreInput.toLowerCase())).map(genre => {
-                                const isAdded = commonGenres.some(cg => cg.id === genre.id)
-                                const isPartial = !isAdded && media.some(m => m.genres?.some(mg => mg.id === genre.id))
+                {
+                    showGenreInput && genrePickerPos && createPortal(
+                        // ... existing genre picker code ...
+                        <div
+                            ref={genrePickerRef}
+                            className="picker-popover-fixed"
+                            style={{ top: genrePickerPos.top, right: genrePickerPos.right }}
+                        >
+                            <div className="picker-popover-header">
+                                <input
+                                    type="text"
+                                    placeholder="フォルダーを検索..."
+                                    value={genreInput}
+                                    onChange={(e) => setGenreInput(e.target.value)}
+                                    onKeyDown={handleGenreInputKeyDown}
+                                    className="picker-popover-search"
+                                    autoFocus
+                                />
+                            </div>
+                            <div className="picker-popover-list">
+                                {allGenres.filter(g => g.name.toLowerCase().includes(genreInput.toLowerCase())).map(genre => {
+                                    const isAdded = commonGenres.some(cg => cg.id === genre.id)
+                                    const isPartial = !isAdded && media.some(m => m.genres?.some(mg => mg.id === genre.id))
 
-                                return (
-                                    <div
-                                        key={genre.id}
-                                        className={`picker-popover-item ${isAdded ? 'added' : ''} ${isPartial ? 'partial' : ''}`}
-                                        onClick={(e) => {
-                                            e.stopPropagation()
-                                            if (isAdded) {
-                                                media.forEach(m => onRemoveGenre(m.id, genre.id))
-                                            } else {
-                                                media.forEach(m => onAddGenre(m.id, genre.id))
-                                            }
-                                        }}
-                                    >
-                                        <span className="picker-checkbox">
-                                            {isAdded && (
-                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                                                    <polyline points="20 6 9 17 4 12" />
-                                                </svg>
-                                            )}
-                                            {isPartial && (
-                                                <div className="partial-mark"></div>
-                                            )}
-                                        </span>
-                                        <span>{genre.name}</span>
-                                    </div>
-                                )
-                            })}
-                            {genreInput.trim() && !allGenres.some(g => g.name.toLowerCase() === genreInput.trim().toLowerCase()) && (
-                                <button className="picker-popover-create-btn" onClick={handleCreateGenre}>
-                                    <span className="create-plus">+</span>
-                                    <span className="create-label">作成</span>
-                                    <span className="create-name">"{genreInput.trim()}"</span>
+                                    return (
+                                        <div
+                                            key={genre.id}
+                                            className={`picker-popover-item ${isAdded ? 'added' : ''} ${isPartial ? 'partial' : ''}`}
+                                            onClick={(e) => {
+                                                e.stopPropagation()
+                                                if (isAdded) {
+                                                    media.forEach(m => onRemoveGenre(m.id, genre.id))
+                                                } else {
+                                                    media.forEach(m => onAddGenre(m.id, genre.id))
+                                                }
+                                            }}
+                                        >
+                                            <span className="picker-checkbox">
+                                                {isAdded && (
+                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                                                        <polyline points="20 6 9 17 4 12" />
+                                                    </svg>
+                                                )}
+                                                {isPartial && (
+                                                    <div className="partial-mark"></div>
+                                                )}
+                                            </span>
+                                            <span>{genre.name}</span>
+                                        </div>
+                                    )
+                                })}
+                                {genreInput.trim() && !allGenres.some(g => g.name.toLowerCase() === genreInput.trim().toLowerCase()) && (
+                                    <button className="picker-popover-create-btn" onClick={handleCreateGenre}>
+                                        <span className="create-plus">+</span>
+                                        <span className="create-label">作成</span>
+                                        <span className="create-name">"{genreInput.trim()}"</span>
+                                    </button>
+                                )}
+                                {genreInput.trim() === '' && allGenres.length === 0 && (
+                                    <div className="picker-popover-empty">フォルダーがありません</div>
+                                )}
+                            </div>
+                            <div className="picker-popover-footer">
+                                <button className="picker-close-btn" onClick={() => { setShowGenreInput(false); setGenreInput(''); }}>
+                                    閉じる ESC
                                 </button>
-                            )}
-                            {genreInput.trim() === '' && allGenres.length === 0 && (
-                                <div className="picker-popover-empty">フォルダーがありません</div>
-                            )}
-                        </div>
-                        <div className="picker-popover-footer">
-                            <button className="picker-close-btn" onClick={() => { setShowGenreInput(false); setGenreInput(''); }}>
-                                閉じる ESC
-                            </button>
-                        </div>
-                    </div>,
-                    document.body
-                )}
+                            </div>
+                        </div>,
+                        document.body
+                    )
+                }
 
-                {(media.length === 1 && media[0].is_deleted) && (
-                    <div className="actions-section">
-                        <div className="trash-actions">
-                            <button className="btn btn-primary btn-full btn-small" onClick={() => onRestore(media[0].id)}>元に戻す</button>
-                            <button
-                                className="btn btn-danger btn-full btn-small"
-                                onClick={() => {
-                                    if (confirm('ファイルをデバイスから完全に削除しますか？\nこの操作は取り消せません。')) {
-                                        onDeletePermanently(media[0].id)
-                                        onClose()
-                                    }
-                                }}
-                            >
-                                完全に削除
-                            </button>
+                {
+                    (media.length === 1 && media[0].is_deleted) && (
+                        <div className="actions-section">
+                            <div className="trash-actions">
+                                <button className="btn btn-primary btn-full btn-small" onClick={() => onRestore(media[0].id)}>元に戻す</button>
+                                <button
+                                    className="btn btn-danger btn-full btn-small"
+                                    onClick={() => {
+                                        if (confirm('ファイルをデバイスから完全に削除しますか？\nこの操作は取り消せません。')) {
+                                            onDeletePermanently(media[0].id)
+                                            onClose()
+                                        }
+                                    }}
+                                >
+                                    完全に削除
+                                </button>
+                            </div>
                         </div>
-                    </div>
-                )}
-                {(media.length > 1 && media.every(m => m.is_deleted)) && (
-                    <div className="actions-section">
-                        <div className="trash-actions">
-                            <button className="btn btn-primary btn-full btn-small" onClick={() => onRestoreFiles(media.map(m => m.id))}>すべて元に戻す</button>
-                            <button
-                                className="btn btn-danger btn-full btn-small"
-                                onClick={() => {
-                                    if (confirm(`${media.length}個のファイルをデバイスから完全に削除しますか？\nこの操作は取り消せません。`)) {
-                                        onDeleteFilesPermanently(media.map(m => m.id))
-                                        onClose()
-                                    }
-                                }}
-                            >
-                                すべて完全に削除
-                            </button>
+                    )
+                }
+                {
+                    (media.length > 1 && media.every(m => m.is_deleted)) && (
+                        <div className="actions-section">
+                            <div className="trash-actions">
+                                <button className="btn btn-primary btn-full btn-small" onClick={() => onRestoreFiles(media.map(m => m.id))}>すべて元に戻す</button>
+                                <button
+                                    className="btn btn-danger btn-full btn-small"
+                                    onClick={() => {
+                                        if (confirm(`${media.length}個のファイルをデバイスから完全に削除しますか？\nこの操作は取り消せません。`)) {
+                                            onDeleteFilesPermanently(media.map(m => m.id))
+                                            onClose()
+                                        }
+                                    }}
+                                >
+                                    すべて完全に削除
+                                </button>
+                            </div>
                         </div>
-                    </div>
-                )}
-            </div>
+                    )
+                }
+            </div >
         </div >
     )
 }

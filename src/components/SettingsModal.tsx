@@ -435,7 +435,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                 } catch (e) {
                     console.error('Failed to load network settings:', e)
                 }
-            } else if (activeCategory === 'general' && window.electronAPI) {
+            } else if ((activeCategory === 'general' || activeCategory === 'import') && window.electronAPI) {
                 try {
                     const config = await (window.electronAPI as any).getClientConfig()
                     setClientConfig(config)
@@ -1453,6 +1453,75 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
         )
     }
 
+    const renderImportSettings = () => {
+        if (!clientConfig) return <div className="loading">読み込み中...</div>
+
+        return (
+            <div className="settings-page">
+                <h3 className="settings-page-title">自動インポート</h3>
+                <section className="settings-section">
+                    <div className="settings-card">
+                        <div className="settings-row">
+                            <div className="settings-info">
+                                <span className="settings-label">自動インポートを有効にする</span>
+                                <span className="settings-description">
+                                    指定したフォルダを監視し、新しいファイルを自動的にインポートします。
+                                    <br />
+                                    <span style={{ color: '#ef4444', fontSize: '11px' }}>注意: インポート完了後、元のファイルは完全に削除されます。</span>
+                                </span>
+                            </div>
+                            <label className="toggle-switch">
+                                <input
+                                    type="checkbox"
+                                    checked={clientConfig?.autoImport?.enabled || false}
+                                    onChange={(e) => {
+                                        const newConfig = {
+                                            ...clientConfig,
+                                            autoImport: {
+                                                ...(clientConfig.autoImport || { watchPath: '' }),
+                                                enabled: e.target.checked
+                                            }
+                                        }
+                                        setClientConfig(newConfig)
+                                        if (window.electronAPI) (window.electronAPI as any).updateClientConfig(newConfig)
+                                    }}
+                                />
+                                <span className="slider"></span>
+                            </label>
+                        </div>
+
+                        <div className="settings-row">
+                            <div className="settings-info">
+                                <span className="settings-label">監視フォルダ</span>
+                                <span className="settings-description">
+                                    {clientConfig?.autoImport?.watchPath || '未設定'}
+                                </span>
+                            </div>
+                            <button className="btn btn-secondary btn-sm" onClick={async () => {
+                                if (window.electronAPI) {
+                                    const path = await (window.electronAPI as any).selectFolder()
+                                    if (path) {
+                                        const newConfig = {
+                                            ...clientConfig,
+                                            autoImport: {
+                                                ...(clientConfig.autoImport || { enabled: false }),
+                                                watchPath: path
+                                            }
+                                        }
+                                        setClientConfig(newConfig);
+                                        (window.electronAPI as any).updateClientConfig(newConfig)
+                                    }
+                                }
+                            }}>
+                                フォルダを選択
+                            </button>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        )
+    }
+
     const renderGeneralSettings = () => {
         if (!clientConfig) return <div className="loading">読み込み中...</div>
 
@@ -1526,14 +1595,15 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
                     <div className="main-content">
                         {activeCategory === 'general' ? renderGeneralSettings() :
-                            activeCategory === 'viewer' ? renderViewerSettings() :
-                                activeCategory === 'network' ? renderNetworkSettings() :
-                                    activeCategory === 'media-engine' ? renderMediaEngineSettings() :
-                                        activeCategory === 'developer' ? renderDeveloperSettings() : (
-                                            <div className="empty-state">
-                                                <p>このセクションの設定は準備中です。</p>
-                                            </div>
-                                        )}
+                            activeCategory === 'import' ? renderImportSettings() :
+                                activeCategory === 'viewer' ? renderViewerSettings() :
+                                    activeCategory === 'network' ? renderNetworkSettings() :
+                                        activeCategory === 'media-engine' ? renderMediaEngineSettings() :
+                                            activeCategory === 'developer' ? renderDeveloperSettings() : (
+                                                <div className="empty-state">
+                                                    <p>このセクションの設定は準備中です。</p>
+                                                </div>
+                                            )}
                     </div>
 
                     <footer className="main-footer">
