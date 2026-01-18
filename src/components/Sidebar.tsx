@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { FilterOptions, Genre, Library } from '../types'
+import { FilterOptions, Folder, Library } from '../types'
 import './Sidebar.css'
 
 import { RemoteLibrary } from '../types'
@@ -8,47 +8,47 @@ import { ConfirmModal } from './ConfirmModal'
 interface SidebarProps {
     filterOptions: FilterOptions
     onFilterChange: (options: FilterOptions) => void
-    genres: Genre[]
+    folders: Folder[]
     libraries: Library[]
     remoteLibraries: RemoteLibrary[] // Added
     activeLibrary: Library | null
     activeRemoteLibrary: RemoteLibrary | null // Added
-    onCreateGenre: (name: string, parentId?: number | null) => Promise<Genre | null>
-    onDeleteGenre: (id: number) => Promise<void>
-    onRenameGenre: (id: number, newName: string) => void
+    onCreateFolder: (name: string, parentId?: number | null) => Promise<Folder | null>
+    onDeleteFolder: (id: number) => Promise<void>
+    onRenameFolder: (id: number, newName: string) => void
     onOpenLibraryModal: () => void
     onOpenLibrary: () => Promise<any>
     onSwitchLibrary: (lib: Library) => void
     onSwitchRemoteLibrary: (lib: RemoteLibrary) => void
     onOpenSettings: () => void
     hasActiveLibrary: boolean
-    onRefreshGenres?: () => void
-    onDropFileOnGenre?: (genreId: number, files: FileList) => void
+    onRefreshFolders?: () => void
+    onDropFileOnFolder?: (folderId: number, files: FileList) => void
     onInternalDragStart?: () => void
     onInternalDragEnd?: () => void
 }
 
 // サブフォルダー対応のためのヘルパー型と関数
-interface GenreWithChildren extends Genre {
-    children: GenreWithChildren[]
+interface FolderWithChildren extends Folder {
+    children: FolderWithChildren[]
     level: number
 }
 
 // フラットなリストをツリー構造に変換
-const buildGenreTree = (genres: Genre[]): GenreWithChildren[] => {
-    const genreMap = new Map<number, GenreWithChildren>()
-    const roots: GenreWithChildren[] = []
+const buildFolderTree = (folders: Folder[]): FolderWithChildren[] => {
+    const folderMap = new Map<number, FolderWithChildren>()
+    const roots: FolderWithChildren[] = []
 
-    // まず全てのジャンルをマップに登録
-    genres.forEach(g => {
-        genreMap.set(g.id, { ...g, children: [], level: 0 })
+    // まず全てのフォルダーをマップに登録
+    folders.forEach(f => {
+        folderMap.set(f.id, { ...f, children: [], level: 0 })
     })
 
     // 親子関係を構築
-    genres.forEach(g => {
-        const node = genreMap.get(g.id)!
-        if (g.parentId && genreMap.has(g.parentId)) {
-            const parent = genreMap.get(g.parentId)!
+    folders.forEach(f => {
+        const node = folderMap.get(f.id)!
+        if (f.parentId && folderMap.has(f.parentId)) {
+            const parent = folderMap.get(f.parentId)!
             node.level = parent.level + 1
             parent.children.push(node)
         } else {
@@ -57,7 +57,7 @@ const buildGenreTree = (genres: Genre[]): GenreWithChildren[] => {
     })
 
     // orderIndexでソート
-    const sortNodes = (nodes: GenreWithChildren[]) => {
+    const sortNodes = (nodes: FolderWithChildren[]) => {
         nodes.sort((a, b) => {
             const orderA = a.orderIndex || 0
             const orderB = b.orderIndex || 0
@@ -139,37 +139,37 @@ function RenameInput({
 export function Sidebar({
     filterOptions,
     onFilterChange,
-    genres,
+    folders,
     libraries,
     remoteLibraries,
     activeLibrary,
     activeRemoteLibrary,
-    onCreateGenre,
-    onDeleteGenre,
-    onRenameGenre,
+    onCreateFolder,
+    onDeleteFolder,
+    onRenameFolder,
     onOpenLibraryModal,
     onOpenLibrary,
     onSwitchLibrary,
     onSwitchRemoteLibrary,
     onOpenSettings,
     hasActiveLibrary,
-    onRefreshGenres,
-    onDropFileOnGenre,
+    onRefreshFolders,
+    onDropFileOnFolder,
     onInternalDragStart,
     onInternalDragEnd
 }: SidebarProps) {
-    const [renamingGenreId, setRenamingGenreId] = useState<number | null>(null)
+    const [renamingFolderId, setRenamingFolderId] = useState<number | null>(null)
     const [renamingName, setRenamingName] = useState("")
     const [isLibraryMenuOpen, setIsLibraryMenuOpen] = useState(false)
     const [expandedFolders, setExpandedFolders] = useState<Set<number>>(new Set())
-    const [draggedGenreId, setDraggedGenreId] = useState<number | null>(null)
+    const [draggedFolderId, setDraggedFolderId] = useState<number | null>(null)
     const [dropTarget, setDropTarget] = useState<{ id: number; position: 'top' | 'middle' | 'bottom' } | null>(null)
-    const [contextMenu, setContextMenu] = useState<{ x: number; y: number; genreId: number } | null>(null)
-    const [genreToDelete, setGenreToDelete] = useState<number | null>(null)
+    const [contextMenu, setContextMenu] = useState<{ x: number; y: number; folderId: number } | null>(null)
+    const [folderToDelete, setFolderToDelete] = useState<number | null>(null)
     const libraryMenuRef = useRef<HTMLDivElement>(null)
 
-    // ジャンルツリーの構築 (メモ化)
-    const genreTree = useMemo(() => buildGenreTree(genres), [genres])
+    // フォルダーツリーの構築 (メモ化)
+    const folderTree = useMemo(() => buildFolderTree(folders), [folders])
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -189,66 +189,66 @@ export function Sidebar({
     const handleCreateClick = async (e: React.MouseEvent) => {
         e.preventDefault()
         try {
-            const newGenre = await onCreateGenre("無題")
-            if (newGenre) {
-                setRenamingGenreId(newGenre.id)
-                setRenamingName(newGenre.name)
+            const newFolder = await onCreateFolder("無題")
+            if (newFolder) {
+                setRenamingFolderId(newFolder.id)
+                setRenamingName(newFolder.name)
             }
         } catch (error) {
-            console.error("Failed to create genre", error)
+            console.error("Failed to create folder", error)
         }
     }
 
     const handleRenameSubmit = (id: number, newName: string) => {
         const trimmed = newName.trim()
-        const originalName = genres.find(g => g.id === id)?.name
+        const originalName = folders.find(f => f.id === id)?.name
         if (trimmed && trimmed !== "無題" && trimmed !== originalName) {
-            onRenameGenre(id, trimmed)
+            onRenameFolder(id, trimmed)
         }
-        setRenamingGenreId(null)
+        setRenamingFolderId(null)
         setRenamingName("")
     }
 
     // コンテキストメニュー関連
-    const handleContextMenu = (e: React.MouseEvent, genreId: number) => {
+    const handleContextMenu = (e: React.MouseEvent, folderId: number) => {
         e.preventDefault()
         e.stopPropagation()
-        setContextMenu({ x: e.clientX, y: e.clientY, genreId })
+        setContextMenu({ x: e.clientX, y: e.clientY, folderId })
     }
 
     const handleContextAction = async (action: 'delete' | 'rename' | 'new-folder' | 'new-subfolder') => {
         if (!contextMenu) return
-        const genreId = contextMenu.genreId
-        const genre = genres.find(g => g.id === genreId)
+        const folderId = contextMenu.folderId
+        const folder = folders.find(f => f.id === folderId)
         setContextMenu(null)
 
-        if (!genre) return
+        if (!folder) return
 
         if (action === 'delete') {
-            setGenreToDelete(genreId)
+            setFolderToDelete(folderId)
         } else if (action === 'rename') {
-            setRenamingGenreId(genreId)
-            setRenamingName(genre.name)
+            setRenamingFolderId(folderId)
+            setRenamingName(folder.name)
         } else if (action === 'new-folder') {
             // 兄弟を作成 (同じparentId)
             try {
-                const newGenre = await onCreateGenre("無題", genre.parentId)
-                if (newGenre) {
-                    setRenamingGenreId(newGenre.id)
-                    setRenamingName(newGenre.name)
+                const newFolder = await onCreateFolder("無題", folder.parentId)
+                if (newFolder) {
+                    setRenamingFolderId(newFolder.id)
+                    setRenamingName(newFolder.name)
                 }
             } catch (error) {
                 console.error("Failed to create sibling folder", error)
             }
         } else if (action === 'new-subfolder') {
-            // 子を作成 (parentId = genreId)
+            // 子を作成 (parentId = folderId)
             try {
                 // 親を展開
-                setExpandedFolders(prev => new Set(prev).add(genreId))
-                const newGenre = await onCreateGenre("無題", genreId)
-                if (newGenre) {
-                    setRenamingGenreId(newGenre.id)
-                    setRenamingName(newGenre.name)
+                setExpandedFolders(prev => new Set(prev).add(folderId))
+                const newFolder = await onCreateFolder("無題", folderId)
+                if (newFolder) {
+                    setRenamingFolderId(newFolder.id)
+                    setRenamingName(newFolder.name)
                 }
             } catch (error) {
                 console.error("Failed to create subfolder", error)
@@ -257,14 +257,14 @@ export function Sidebar({
     }
 
     const setFilterType = (type: FilterOptions['filterType']) => {
-        onFilterChange({ ...filterOptions, filterType: type, selectedGenres: [] })
+        onFilterChange({ ...filterOptions, filterType: type, selectedFolders: [] })
     }
 
-    const toggleGenreFilter = (genreId: number) => {
-        const currentGenres = filterOptions.selectedGenres
-        const isSelected = currentGenres.includes(genreId)
-        const newGenres = isSelected ? [] : [genreId]
-        onFilterChange({ ...filterOptions, filterType: 'all', selectedGenres: newGenres })
+    const toggleFolderFilter = (folderId: number) => {
+        const currentFolders = filterOptions.selectedFolders
+        const isSelected = currentFolders.includes(folderId)
+        const newFolders = isSelected ? [] : [folderId]
+        onFilterChange({ ...filterOptions, filterType: 'all', selectedFolders: newFolders })
     }
 
     // フォルダーの開閉
@@ -282,20 +282,20 @@ export function Sidebar({
     }
 
     // D&D ハンドラー
-    const handleDragStart = (e: React.DragEvent, genreId: number) => {
+    const handleDragStart = (e: React.DragEvent, folderId: number) => {
         onInternalDragStart?.()
         e.stopPropagation()
-        setDraggedGenreId(genreId)
+        setDraggedFolderId(folderId)
         e.dataTransfer.effectAllowed = 'move'
         e.dataTransfer.dropEffect = 'move'
-        const data = JSON.stringify({ type: 'genre', id: genreId })
+        const data = JSON.stringify({ type: 'folder', id: folderId })
         e.dataTransfer.setData('application/json', data)
         // ブラウザ互換性のためのプレーンテキスト
         e.dataTransfer.setData('text/plain', data)
     }
 
     const handleDragEnd = () => {
-        setDraggedGenreId(null)
+        setDraggedFolderId(null)
         setDropTarget(null)
         onInternalDragEnd?.()
     }
@@ -319,8 +319,8 @@ export function Sidebar({
             e.stopPropagation()
         }
 
-        if (draggedGenreId === null && !isFileDrag) return
-        if (draggedGenreId === targetId) return
+        if (draggedFolderId === null && !isFileDrag) return
+        if (draggedFolderId === targetId) return
 
         if (isFileDrag) {
             // ファイルドラッグの場合は常に「中に入れる」扱いにする
@@ -363,14 +363,14 @@ export function Sidebar({
         setDropTarget(null)
 
         // ドラッグ中のIDを取得（ステート優先、バックアップとしてdataTransferも確認）
-        let effectiveDraggedId = normalizeId(draggedGenreId)
+        let effectiveDraggedId = normalizeId(draggedFolderId)
 
         if (effectiveDraggedId === null) {
             try {
                 const data = e.dataTransfer.getData('application/json')
                 if (data) {
                     const parsed = JSON.parse(data)
-                    if (parsed.type === 'genre') {
+                    if (parsed.type === 'folder') {
                         effectiveDraggedId = normalizeId(parsed.id)
                     }
                 }
@@ -381,8 +381,8 @@ export function Sidebar({
 
         // ファイルドロップの処理
         if (effectiveDraggedId === null) {
-            if (e.dataTransfer.types.includes('Files') && onDropFileOnGenre) {
-                onDropFileOnGenre(targetId, e.dataTransfer.files)
+            if (e.dataTransfer.types.includes('Files') && onDropFileOnFolder) {
+                onDropFileOnFolder(targetId, e.dataTransfer.files)
                 setExpandedFolders(prev => new Set(prev).add(targetId))
             }
             return
@@ -398,14 +398,14 @@ export function Sidebar({
         let newParentId: number | null = null
         let newOrderIndex = 0
 
-        const targetGenre = genres.find(g => normalizeId(g.id) === normalizedTargetId)
-        if (!targetGenre) return
+        const targetFolder = folders.find(f => normalizeId(f.id) === normalizedTargetId)
+        if (!targetFolder) return
 
         if (currentDropTarget.position === 'middle') {
             // 子にする
             newParentId = normalizedTargetId
             // 末尾に追加（現在の子供の最大orderIndex + 1）
-            const children = genres.filter(g => normalizeId(g.parentId) === normalizedTargetId)
+            const children = folders.filter(f => normalizeId(f.parentId) === normalizedTargetId)
             const maxOrder = children.reduce((max, c) => Math.max(max, c.orderIndex || 0), 0)
             newOrderIndex = maxOrder + 100
 
@@ -413,12 +413,12 @@ export function Sidebar({
             setExpandedFolders(prev => new Set(prev).add(normalizedTargetId))
         } else {
             // 兄弟にする
-            newParentId = normalizeId(targetGenre.parentId)
+            newParentId = normalizeId(targetFolder.parentId)
 
             // 兄弟を抽出（正規化したIDで比較）
-            const siblings = genres.filter(g =>
-                normalizeId(g.parentId) === newParentId &&
-                normalizeId(g.id) !== effectiveDraggedId
+            const siblings = folders.filter(f =>
+                normalizeId(f.parentId) === newParentId &&
+                normalizeId(f.id) !== effectiveDraggedId
             ).sort((a, b) => {
                 const orderA = a.orderIndex || 0
                 const orderB = b.orderIndex || 0
@@ -429,12 +429,12 @@ export function Sidebar({
             const targetIndex = siblings.findIndex(s => normalizeId(s.id) === normalizedTargetId)
 
             const newSiblings = [...siblings]
-            const draggedGenre = genres.find(g => normalizeId(g.id) === effectiveDraggedId)!
+            const draggedFolder = folders.find(f => normalizeId(f.id) === effectiveDraggedId)!
 
             if (currentDropTarget.position === 'top') {
-                newSiblings.splice(targetIndex, 0, draggedGenre)
+                newSiblings.splice(targetIndex, 0, draggedFolder)
             } else {
-                newSiblings.splice(targetIndex + 1, 0, draggedGenre)
+                newSiblings.splice(targetIndex + 1, 0, draggedFolder)
             }
 
             newSiblings.forEach((s, index) => {
@@ -455,37 +455,37 @@ export function Sidebar({
         }
 
         if (updates.length > 0) {
-            console.log('[Sidebar] Sending updateGenreStructure:', updates)
-            await window.electronAPI.updateGenreStructure(updates)
-            if (onRefreshGenres) {
-                onRefreshGenres()
+            console.log('[Sidebar] Sending updateFolderStructure:', updates)
+            await window.electronAPI.updateFolderStructure(updates)
+            if (onRefreshFolders) {
+                onRefreshFolders()
             }
         }
 
-        setDraggedGenreId(null)
+        setDraggedFolderId(null)
     }
 
     const handleContainerDragOver = (e: React.DragEvent) => {
         e.preventDefault()
         // 少なくともサイドバーの上にいる間はドロップ可とする
-        if (draggedGenreId !== null) {
+        if (draggedFolderId !== null) {
             e.dataTransfer.dropEffect = 'move'
         }
     }
 
     const handleContainerDrop = (e: React.DragEvent) => {
-        // 子要素（renderGenreNode）でキャッチされなかったドロップを処理
+        // 子要素（renderFolderNode）でキャッチされなかったドロップを処理
         // 何もせずに dragEnd に任せるか、必要なら末尾への移動などを検討
         console.log('[Sidebar] Container drop (ignored or fallback)')
         setDropTarget(null)
     }
 
     // 再帰レンダリング関数
-    const renderGenreNode = (node: GenreWithChildren) => {
-        const isSelected = filterOptions.selectedGenres.includes(node.id)
+    const renderFolderNode = (node: FolderWithChildren) => {
+        const isSelected = filterOptions.selectedFolders.includes(node.id)
         const isExpanded = expandedFolders.has(node.id)
         const isDropTarget = dropTarget?.id === node.id
-        const isRenaming = renamingGenreId === node.id
+        const isRenaming = renamingFolderId === node.id
 
         let dropClass = ''
         if (isDropTarget && dropTarget) {
@@ -501,7 +501,7 @@ export function Sidebar({
                 <div
                     className={`sidebar-nav-item folder-tree-node ${isSelected ? 'active' : ''} ${dropClass}`}
                     onClick={() => {
-                        if (!isRenaming) toggleGenreFilter(node.id)
+                        if (!isRenaming) toggleFolderFilter(node.id)
                     }}
                     onContextMenu={(e) => handleContextMenu(e, node.id)}
                     draggable={!isRenaming}
@@ -551,7 +551,7 @@ export function Sidebar({
                             initialValue={renamingName}
                             onSubmit={(val) => handleRenameSubmit(node.id, val)}
                             onCancel={() => {
-                                setRenamingGenreId(null)
+                                setRenamingFolderId(null)
                                 setRenamingName("")
                             }}
                         />
@@ -563,7 +563,7 @@ export function Sidebar({
                 {/* 子要素（再帰） */}
                 {isExpanded && hasChildren && (
                     <div className="sidebar-sub-genres">
-                        {node.children.map(renderGenreNode)}
+                        {node.children.map(renderFolderNode)}
                     </div>
                 )}
             </div>
@@ -695,7 +695,7 @@ export function Sidebar({
             <div className="sidebar-section">
                 <div className="sidebar-nav">
                     <div
-                        className={`sidebar-nav-item ${filterOptions.filterType === 'all' && filterOptions.selectedGenres.length === 0 ? 'active' : ''}`}
+                        className={`sidebar-nav-item ${filterOptions.filterType === 'all' && filterOptions.selectedFolders.length === 0 ? 'active' : ''}`}
                         onClick={() => setFilterType('all')}
                     >
                         <Icons.All />
@@ -762,7 +762,7 @@ export function Sidebar({
                 </div>
 
                 <div className="sidebar-genre-list">
-                    {genreTree.map(renderGenreNode)}
+                    {folderTree.map(renderFolderNode)}
                 </div>
             </div>
 
@@ -800,7 +800,7 @@ export function Sidebar({
                 )
             }
             {
-                genreToDelete !== null && (
+                folderToDelete !== null && (
                     <ConfirmModal
                         title="フォルダーを削除"
                         message="このフォルダーを削除してもよろしいですか？"
@@ -808,11 +808,11 @@ export function Sidebar({
                         cancelLabel="キャンセル"
                         isDestructive={true}
                         onConfirm={async () => {
-                            const id = genreToDelete
-                            setGenreToDelete(null)
-                            await onDeleteGenre(id)
+                            const id = folderToDelete
+                            setFolderToDelete(null)
+                            await onDeleteFolder(id)
                         }}
-                        onCancel={() => setGenreToDelete(null)}
+                        onCancel={() => setFolderToDelete(null)}
                     />
                 )
             }

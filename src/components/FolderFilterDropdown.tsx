@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { FilterOptions } from '../types'
 import './FolderFilterDropdown.css'
 
-interface GenreFolderInfo {
+interface FolderInfo {
     id: number
     name: string
     count: number
@@ -10,7 +10,7 @@ interface GenreFolderInfo {
 }
 
 interface FolderFilterDropdownProps {
-    folders: GenreFolderInfo[]
+    folders: FolderInfo[]
     filterOptions: FilterOptions
     onFilterChange: (options: FilterOptions) => void
     onClose: () => void
@@ -63,20 +63,20 @@ export function FolderFilterDropdown({
 
     // フォルダーの選択/解除（左クリック）
     const toggleFolder = (folderId: number) => {
-        let newSelectedGenres = [...filterOptions.selectedGenres]
+        let newSelectedFolders = [...filterOptions.selectedFolders]
 
-        if (newSelectedGenres.includes(folderId)) {
-            newSelectedGenres = newSelectedGenres.filter(id => id !== folderId)
+        if (newSelectedFolders.includes(folderId)) {
+            newSelectedFolders = newSelectedFolders.filter(id => id !== folderId)
         } else {
             // 現在の仕様では単一選択または複数選択か確認が必要だが、Sidebarに合わせて複数選択可とする
             // ただしSidebarは通常単一選択挙動に近いことが多いが、FilterOptionsは配列。
             // ここではシンプルにトグルする。
-            newSelectedGenres.push(folderId)
+            newSelectedFolders.push(folderId)
         }
 
         onFilterChange({
             ...filterOptions,
-            selectedGenres: newSelectedGenres
+            selectedFolders: newSelectedFolders
         })
     }
 
@@ -89,27 +89,27 @@ export function FolderFilterDropdown({
     // すべて選択/解除
     const selectAll = () => {
         const visibleFolderIds = filteredFolders.map(f => f.id)
-        const isAllSelected = visibleFolderIds.length > 0 && visibleFolderIds.every(id => filterOptions.selectedGenres.includes(id))
+        const isAllSelected = visibleFolderIds.length > 0 && visibleFolderIds.every(id => filterOptions.selectedFolders.includes(id))
 
-        let newSelectedGenres = [...filterOptions.selectedGenres]
+        let newSelectedFolders = [...filterOptions.selectedFolders]
 
         if (isAllSelected) {
-            newSelectedGenres = newSelectedGenres.filter(id => !visibleFolderIds.includes(id))
+            newSelectedFolders = newSelectedFolders.filter(id => !visibleFolderIds.includes(id))
         } else {
             visibleFolderIds.forEach(id => {
-                if (!newSelectedGenres.includes(id)) {
-                    newSelectedGenres.push(id)
+                if (!newSelectedFolders.includes(id)) {
+                    newSelectedFolders.push(id)
                 }
             })
         }
 
         onFilterChange({
             ...filterOptions,
-            selectedGenres: newSelectedGenres
+            selectedFolders: newSelectedFolders
         })
     }
 
-    const isAllVisibleSelected = filteredFolders.length > 0 && filteredFolders.every(f => filterOptions.selectedGenres.includes(f.id))
+    const isAllVisibleSelected = filteredFolders.length > 0 && filteredFolders.every(f => filterOptions.selectedFolders.includes(f.id))
 
     return (
         <div className="folder-filter-dropdown" ref={dropdownRef}>
@@ -157,8 +157,8 @@ export function FolderFilterDropdown({
             {/* フォルダー一覧 */}
             <div className="folder-filter-list">
                 {filteredFolders.map(folder => {
-                    const isSelected = filterOptions.selectedGenres.includes(folder.id)
-                    // const isExcluded = filterOptions.excludedGenres.includes(folder.id) // 未対応
+                    const isSelected = filterOptions.selectedFolders.includes(folder.id)
+                    // const isExcluded = filterOptions.excludedFolders.includes(folder.id) // 未対応
                     return (
                         <div
                             key={folder.id}

@@ -5,7 +5,7 @@ import { fileURLToPath, URL } from 'node:url'
 import crypto from 'crypto'
 import http from 'node:http'
 import https from 'node:https'
-import { initDatabase, mediaDB, tagDB, tagFolderDB, genreDB, libraryDB, commentDB } from './database'
+import { initDatabase, mediaDB, tagDB, tagFolderDB, folderDB, libraryDB, commentDB } from './database'
 import { ServerConfig, RemoteLibrary } from '../src/types'
 import { getThumbnailPath } from './utils'
 import { generatePreviewImages, getMediaMetadata, createThumbnail, embedMetadata } from './ffmpeg'
@@ -622,6 +622,25 @@ ipcMain.handle('add-tag-to-media', async (_, mediaId: number, tagId: number) => 
     tagDB.addTagToMedia(mediaId, tagId)
 })
 
+ipcMain.handle('refresh-library', async (event) => {
+    try {
+        const win = BrowserWindow.fromWebContents(event.sender)
+        await mediaDB.refreshLibraryMetadata((current, total) => {
+            if (win && !win.isDestroyed()) {
+                win.webContents.send('refresh-progress', current, total)
+            }
+        })
+        return true
+    } catch (error) {
+        console.error('Failed to refresh library:', error)
+        throw error
+    }
+})
+
+ipcMain.handle('add-tags-to-media', async (_, mediaIds: number[], tagIds: number[]) => {
+    tagDB.addTagsToMedia(mediaIds, tagIds)
+})
+
 ipcMain.handle('remove-tag-from-media', async (_, mediaId: number, tagId: number) => {
     tagDB.removeTagFromMedia(mediaId, tagId)
 })
@@ -647,33 +666,33 @@ ipcMain.handle('rename-tag-folder', async (_, id: number, newName: string) => {
     tagFolderDB.renameTagFolder(id, newName)
 })
 
-// ジャンル操作
-ipcMain.handle('get-genres', async () => {
-    return genreDB.getAllGenres()
+// フォルダー操作
+ipcMain.handle('get-folders', async () => {
+    return folderDB.getAllFolders()
 })
 
-ipcMain.handle('create-genre', async (_, name: string, parentId?: number | null) => {
-    return genreDB.createGenre(name, parentId ?? null)
+ipcMain.handle('create-folder', async (_, name: string, parentId?: number | null) => {
+    return folderDB.createFolder(name, parentId ?? null)
 })
 
-ipcMain.handle('delete-genre', (_event, id) => {
-    genreDB.deleteGenre(id)
+ipcMain.handle('delete-folder', (_event, id) => {
+    folderDB.deleteFolder(id)
 })
 
-ipcMain.handle('rename-genre', (_event, id, newName) => {
-    genreDB.renameGenre(id, newName)
+ipcMain.handle('rename-folder', (_event, id, newName) => {
+    folderDB.renameFolder(id, newName)
 })
 
-ipcMain.handle('add-genre-to-media', async (_, mediaId: number, genreId: number) => {
-    genreDB.addGenreToMedia(mediaId, genreId)
+ipcMain.handle('add-folder-to-media', async (_, mediaId: number, folderId: number) => {
+    folderDB.addFolderToMedia(mediaId, folderId)
 })
 
-ipcMain.handle('remove-genre-from-media', (_event, mediaId: number, genreId: number) => {
-    genreDB.removeGenreFromMedia(mediaId, genreId)
+ipcMain.handle('remove-folder-from-media', (_event, mediaId: number, folderId: number) => {
+    folderDB.removeFolderFromMedia(mediaId, folderId)
 })
 
-ipcMain.handle('update-genre-structure', (_event, updates: { id: number; parentId: number | null; orderIndex: number }[]) => {
-    genreDB.updateGenreStructure(updates)
+ipcMain.handle('update-folder-structure', (_event, updates: { id: number; parentId: number | null; orderIndex: number }[]) => {
+    folderDB.updateFolderStructure(updates)
 })
 
 // サムネイル生成(ffmpegを使用)
@@ -695,7 +714,9 @@ ipcMain.handle('generate-thumbnail', async (_event, mediaId: number, filePath: s
 
         console.log(`[Thumbnail] Generating for: ${filePath}`)
 
-        const success = await createThumbnail(filePath, thumbnailPath)
+        const config = getClientConfig()
+        const mode = config.thumbnailMode || 'speed'
+        const success = await createThumbnail(filePath, thumbnailPath, mode)
         if (success) {
             mediaDB.updateThumbnail(mediaId, thumbnailPath)
             return thumbnailPath
@@ -745,6 +766,13 @@ ipcMain.handle('window-close', () => {
     mainWindow?.close()
 })
 
+ipcMain.handle('focus-window', () => {
+    if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore()
+        mainWindow.focus()
+    }
+})
+
 ipcMain.handle('get-app-version', () => app.getVersion())
 
 // コメント
@@ -790,6 +818,16 @@ ipcMain.handle('open-path', async (_event, filePath: string) => {
         await shell.openPath(filePath)
     } catch (error) {
         console.error('Failed to open path:', error)
+    }
+})
+
+
+// 外部URLを開く
+ipcMain.handle('open-external', async (_event, url: string) => {
+    try {
+        await shell.openExternal(url)
+    } catch (error) {
+        console.error('Failed to open external url:', error)
     }
 })
 
@@ -1249,7 +1287,7 @@ ipcMain.handle('export-media', async (event, mediaId: number, options?: { notifi
             title: media.title || media.file_name,
             description: media.description || undefined,
             artist: (media.artists && media.artists.length > 0) ? media.artists.join(', ') : (media.artist || undefined),
-            url: media.custom_url || undefined,
+            url: media.url || undefined,
             date: media.modified_date || undefined,
             thumbnailPath: thumbnailPath
         }
@@ -1458,8 +1496,9 @@ ipcMain.handle('rename-remote-media', async (_event, { url, token, id, newName }
     return callRemoteApi(url, token, `/api/media/${id}`, 'PUT', { fileName: newName })
 })
 
-ipcMain.handle('delete-remote-media', async (_event, { url, token, id }: { url: string; token: string; id: number }) => {
-    return callRemoteApi(url, token, `/api/media/${id}`, 'DELETE')
+ipcMain.handle('delete-remote-media', async (_event, { url, token, id, options }: { url: string; token: string; id: number, options?: { permanent?: boolean } }) => {
+    const permanent = options?.permanent ? 'true' : 'false'
+    return callRemoteApi(url, token, `/api/media/${id}?permanent=${permanent}`, 'DELETE')
 })
 
 ipcMain.handle('update-remote-media', async (_event, { url, token, id, updates }: { url: string; token: string; id: number; updates: any }) => {

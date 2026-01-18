@@ -12,7 +12,7 @@ import { ConfirmModal } from './components/ConfirmModal'
 import { SubfolderGrid } from './components/SubfolderGrid'
 import { ProfileSetupModal } from './components/ProfileSetupModal'
 import { useLibrary } from './hooks/useLibrary'
-import { MediaFile, AppSettings, RemoteLibrary, ViewSettings, defaultViewSettings } from './types'
+import { MediaFile, AppSettings, RemoteLibrary, ViewSettings, defaultViewSettings, ElectronAPI } from './types'
 import { MainHeader } from './components/MainHeader'
 import { useSocket } from './hooks/useSocket'
 import './styles/index.css'
@@ -22,7 +22,9 @@ const DEFAULT_SETTINGS: AppSettings = {
     autoPlay: true,
     allowUpscale: false,
     gridSize: 4,
-    viewMode: 'grid'
+    viewMode: 'grid',
+    enableRichText: false,
+    pipControlMode: 'navigation'
 }
 
 
@@ -34,16 +36,16 @@ export default function App() {
         setFilterOptions,
         tags,
         tagFolders,
-        genres,
+        folders,
         libraries,
         activeLibrary,
         createTag,
         deleteTag,
-        createGenre,
+        createFolder,
         addTagToMedia,
         removeTagFromMedia,
-        addGenreToMedia,
-        removeGenreFromMedia,
+        addFolderToMedia,
+        removeFolderFromMedia,
         moveToTrash,
         moveFilesToTrash,
         restoreFromTrash,
@@ -59,15 +61,17 @@ export default function App() {
         renameMedia,
         updateArtist,
         refreshLibrary,
-        loadGenres,
-        renameGenre,
-        deleteGenre,
+        loadFolders,
+        renameFolder,
+        deleteFolder,
         activeRemoteLibrary,
         switchToRemoteLibrary,
         switchToLocalLibrary,
         openLibrary,
         myUserToken,
-        setMediaFiles
+        addTagsToMedia,
+        setMediaFiles,
+        reloadLibrary
     } = useLibrary()
 
     const { addNotification, removeNotification, updateProgress } = useNotification()
@@ -86,7 +90,7 @@ export default function App() {
         const loadAll = async () => {
             try {
                 await refreshLibrary()
-                await loadGenres()
+                await loadFolders()
                 // 他のデータも必要に応じて
             } catch (e: any) {
                 if (activeRemoteLibrary) {
@@ -96,7 +100,7 @@ export default function App() {
             }
         }
         loadAll()
-    }, [refreshLibrary, loadGenres, activeRemoteLibrary])
+    }, [refreshLibrary, loadFolders, activeRemoteLibrary])
 
     // Socketイベントハンドリング
     useEffect(() => {
@@ -162,6 +166,31 @@ export default function App() {
         }
         return DEFAULT_SETTINGS
     })
+
+    // ライブラリ更新状態
+    const [isRefreshing, setIsRefreshing] = useState(false)
+    const [refreshProgress, setRefreshProgress] = useState({ current: 0, total: 0 })
+
+    useEffect(() => {
+        const api = window.electronAPI as unknown as ElectronAPI
+        if (!api?.onRefreshProgress) return
+        return api.onRefreshProgress((current: number, total: number) => {
+            setRefreshProgress({ current, total })
+        })
+    }, [])
+
+    const handleRefreshLibrary = async () => {
+        setIsRefreshing(true)
+        setRefreshProgress({ current: 0, total: 0 })
+        try {
+            await (window.electronAPI as unknown as ElectronAPI).refreshLibrary()
+        } catch (error) {
+            console.error('Refresh failed:', error)
+            alert('ライブラリの更新に失敗しました')
+        } finally {
+            setIsRefreshing(false)
+        }
+    }
     const [showSettingsModal, setShowSettingsModal] = useState(false)
     const [showLibraryModal, setShowLibraryModal] = useState(false)
     const [isDragging, setIsDragging] = useState(false)
@@ -663,14 +692,14 @@ export default function App() {
         }
     }
 
-    const handleAddToGenre = async (genreId: number) => {
+    const handleAddToFolder = async (folderId: number) => {
         if (contextMenu?.media) {
-            await addGenreToMedia(contextMenu.media.id, genreId)
+            await addFolderToMedia(contextMenu.media.id, folderId)
         }
         closeContextMenu()
     }
 
-    const handleDropOnGenre = async (genreId: number, files: FileList) => {
+    const handleDropOnFolder = async (folderId: number, files: FileList) => {
         if (!files || files.length === 0) return
 
         const filePaths = Array.from(files).map(f => (f as any).path)
@@ -695,7 +724,7 @@ export default function App() {
             const uniqueIds = Array.from(new Set(targetIds))
 
             for (const mediaId of uniqueIds) {
-                await addGenreToMedia(mediaId, genreId)
+                await addFolderToMedia(mediaId, folderId)
             }
         } else {
             // 外部ドラッグ：インポートしてから追加
@@ -703,13 +732,13 @@ export default function App() {
                 const importedFiles = await window.electronAPI.importMedia(filePaths)
                 if (importedFiles && importedFiles.length > 0) {
                     for (const media of importedFiles) {
-                        await addGenreToMedia(media.id, genreId)
+                        await addFolderToMedia(media.id, folderId)
                     }
                     // ライブラリをリフレッシュ
                     await refreshLibrary()
                 }
             } catch (error) {
-                console.error("Failed to import and add to genre:", error)
+                console.error("Failed to import and add to folder:", error)
             }
         }
     }
@@ -755,9 +784,9 @@ export default function App() {
         if (filterOptions.filterType === 'recent') return '最近使用'
         if (filterOptions.filterType === 'random') return 'ランダム'
 
-        if (filterOptions.selectedGenres.length > 0) {
-            const genre = genres.find(g => filterOptions.selectedGenres.includes(g.id))
-            return genre ? genre.name : 'すべて'
+        if (filterOptions.selectedFolders.length > 0) {
+            const folder = folders.find(f => filterOptions.selectedFolders.includes(f.id))
+            return folder ? folder.name : 'すべて'
         }
 
         return activeLibrary ? activeLibrary.name : 'すべて'
@@ -853,24 +882,26 @@ export default function App() {
                         allMediaFiles={allMediaFiles}
                         viewSettings={viewSettings}
                         onViewSettingsChange={setViewSettings}
-                        genres={genres}
+                        folders={folders}
+                        onRefreshLibrary={handleRefreshLibrary}
+                        onReload={reloadLibrary}
                     />
                     {/* サブフォルダー表示 */}
-                    {filterOptions.selectedGenres.length > 0 && (
+                    {filterOptions.selectedFolders.length > 0 && (
                         <SubfolderGrid
-                            subfolders={genres.filter(g => g.parentId === filterOptions.selectedGenres[0])}
-                            onSelectFolder={(genreId) => {
-                                setFilterOptions(prev => ({ ...prev, selectedGenres: [genreId] }))
+                            subfolders={folders.filter(f => f.parentId === filterOptions.selectedFolders[0])}
+                            onSelectFolder={(folderId) => {
+                                setFilterOptions(prev => ({ ...prev, selectedFolders: [folderId] }))
                             }}
-                            getMediaCount={(genreId) => {
+                            getMediaCount={(folderId) => {
                                 // TODO: 実際のメディアカウントを計算
-                                return mediaFiles.filter(m => m.genres?.some(g => g.id === genreId)).length
+                                return mediaFiles.filter(m => m.folders?.some(f => f.id === folderId)).length
                             }}
                         />
                     )}
 
                     {/* 内容ヘッダー */}
-                    {filterOptions.selectedGenres.length > 0 && genres.filter(g => g.parentId === filterOptions.selectedGenres[0]).length > 0 && (
+                    {filterOptions.selectedFolders.length > 0 && folders.filter(f => f.parentId === filterOptions.selectedFolders[0]).length > 0 && (
                         <div className="content-section-header">
                             <span>内容 ({mediaFiles.length})</span>
                         </div>
@@ -942,22 +973,22 @@ export default function App() {
             <Sidebar
                 filterOptions={filterOptions}
                 onFilterChange={setFilterOptions}
-                genres={genres}
+                folders={folders}
                 libraries={libraries}
                 remoteLibraries={remoteLibraries}
                 activeLibrary={activeLibrary}
                 activeRemoteLibrary={activeRemoteLibrary}
-                onCreateGenre={createGenre}
-                onRenameGenre={renameGenre}
-                onDeleteGenre={deleteGenre}
+                onCreateFolder={createFolder}
+                onRenameFolder={renameFolder}
+                onDeleteFolder={deleteFolder}
                 onOpenLibraryModal={() => setShowLibraryModal(true)}
                 onOpenLibrary={openLibrary}
                 onSwitchLibrary={switchToLocalLibrary}
                 onSwitchRemoteLibrary={switchToRemoteLibrary}
                 onOpenSettings={() => setShowSettingsModal(true)}
                 hasActiveLibrary={hasActiveLibrary}
-                onRefreshGenres={loadGenres}
-                onDropFileOnGenre={handleDropOnGenre}
+                onRefreshFolders={loadFolders}
+                onDropFileOnFolder={handleDropOnFolder}
                 // 内部ドラッグの通知を追加
                 onInternalDragStart={() => {
                     isInternalDrag.current = true
@@ -975,6 +1006,22 @@ export default function App() {
                 }
             }}>
                 {renderMainContent()}
+
+                {/* ライブラリ更新プログレスバー (メインコンテンツ下部固定) */}
+                {isRefreshing && (
+                    <div className="bottom-progress-bar-container">
+                        <div className="bottom-progress-info">
+                            <span className="scanning-text">ライブラリを更新中...</span>
+                            <span className="progress-count">{refreshProgress.current} / {refreshProgress.total}</span>
+                        </div>
+                        <div className="bottom-progress-track">
+                            <div
+                                className="bottom-progress-fill"
+                                style={{ width: `${(refreshProgress.current / Math.max(refreshProgress.total, 1)) * 100}%` }}
+                            ></div>
+                        </div>
+                    </div>
+                )}
             </main>
 
             {viewSettings.showInspector && (
@@ -982,13 +1029,15 @@ export default function App() {
                     media={selectedMediaIds.map(id => mediaFiles.find(m => m.id === id)).filter(Boolean) as MediaFile[]}
                     playingMedia={playingMedia}
                     allTags={tags}
-                    allGenres={genres}
+                    allFolders={folders}
                     onAddTag={addTagToMedia}
+                    onAddTags={addTagsToMedia}
                     onRemoveTag={removeTagFromMedia}
                     onCreateTag={createTag}
-                    onAddGenre={addGenreToMedia}
-                    onRemoveGenre={removeGenreFromMedia}
-                    onCreateGenre={createGenre}
+                    onAddFolder={addFolderToMedia}
+                    onRemoveFolder={removeFolderFromMedia}
+                    onCreateFolder={createFolder}
+                    enableRichText={settings.enableRichText}
                     onPlay={(media) => {
                         setPlayingMedia(media)
                         setSelectedMediaIds([media.id])
@@ -1025,7 +1074,10 @@ export default function App() {
             {showSettingsModal && (
                 <SettingsModal
                     settings={settings}
-                    onUpdateSettings={setSettings}
+                    onUpdateSettings={(newSettings) => {
+                        setSettings(newSettings)
+                        localStorage.setItem('app_settings', JSON.stringify(newSettings))
+                    }}
                     onClose={() => setShowSettingsModal(false)}
                 />
             )}
@@ -1036,12 +1088,12 @@ export default function App() {
                     x={contextMenu.x}
                     y={contextMenu.y}
                     media={contextMenu.media}
-                    genres={genres}
+                    folders={folders}
                     onClose={closeContextMenu}
                     onOpenDefault={handleOpenDefault}
                     onOpenWith={handleOpenWith}
                     onShowInExplorer={handleShowInExplorer}
-                    onAddToGenre={handleAddToGenre}
+                    onAddToFolder={handleAddToFolder}
                     onRename={() => {
                         setRenamingMediaId(contextMenu.media.id)
                         closeContextMenu()

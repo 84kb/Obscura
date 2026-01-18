@@ -11,10 +11,16 @@ export interface RemoteLibrary {
     lastConnectedAt?: string
 }
 
+export interface AutoImportPath {
+    id: string
+    path: string
+    targetLibraryId: string // This will be the library PATH
+    enabled: boolean
+}
+
 export interface AutoImportConfig {
     enabled: boolean
-    watchPath: string
-    targetLibraryId?: string
+    watchPaths: AutoImportPath[]
 }
 
 export interface ClientConfig {
@@ -22,30 +28,34 @@ export interface ClientConfig {
     theme: 'dark' | 'light' | 'system'
     language: 'ja' | 'en'
     remoteLibraries: RemoteLibrary[]
-    myUserToken?: string  // 自分のマシン用ユーザートークン（一度生成したら変更しない）
+    myUserToken?: string
     autoImport: AutoImportConfig
+    thumbnailMode: 'speed' | 'quality'
 }
 
 const defaultConfig: ClientConfig = {
-    downloadPath: '', // 初期化時に設定
+    downloadPath: '',
     theme: 'dark',
     language: 'ja',
     remoteLibraries: [],
     myUserToken: undefined,
     autoImport: {
         enabled: false,
-        watchPath: ''
-    }
+        watchPaths: []
+    },
+    thumbnailMode: 'speed'
 }
 
-const configDir = path.join(app.getPath('home'), '.obscura')
+const homeDir = app ? app.getPath('home') : '.'
+const configDir = path.join(homeDir, '.obscura')
 const configPath = path.join(configDir, 'client-config.json')
 
 let clientConfig: ClientConfig = { ...defaultConfig }
 
 // 初期化時にデフォルトのダウンロードパスを設定（app.getPathを使用するため）
 export function initClientSettings() {
-    defaultConfig.downloadPath = path.join(app.getPath('downloads'), 'Obscura')
+    const downloads = app ? app.getPath('downloads') : '.'
+    defaultConfig.downloadPath = path.join(downloads, 'Obscura')
     loadClientConfig()
 }
 
@@ -70,10 +80,22 @@ function loadClientConfig() {
             const loaded = JSON.parse(data)
 
             // マージ（新しい設定項目がある場合に対応）
-            clientConfig = { ...defaultConfig, ...loaded }
+            const loadedConfig = { ...defaultConfig, ...loaded }
 
-            // ダウンロードパスが存在しない場合はデフォルトに戻すか、再作成する
-            // ここではチェックのみ
+            // Migration: watchPath -> watchPaths
+            if (loaded.autoImport && loaded.autoImport.watchPath && (!loaded.autoImport.watchPaths || loaded.autoImport.watchPaths.length === 0)) {
+                loadedConfig.autoImport.watchPaths = []
+            } else if (loaded.autoImport && !loaded.autoImport.watchPaths) {
+                loadedConfig.autoImport.watchPaths = []
+            }
+
+            // Ensure thumbnailMode exists (if old config didn't have it)
+            if (!loadedConfig.thumbnailMode) {
+                loadedConfig.thumbnailMode = 'speed'
+            }
+
+            clientConfig = loadedConfig
+            saveClientConfig()
         } else {
             clientConfig = { ...defaultConfig }
             saveClientConfig()

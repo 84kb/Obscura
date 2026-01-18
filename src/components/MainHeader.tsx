@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { FilterOptions, ViewSettings, Tag, TagFolder, MediaFile, Genre, ItemInfoType } from '../types'
+import { FilterOptions, ViewSettings, Tag, TagFolder, MediaFile, Folder, ItemInfoType, ElectronAPI } from '../types'
 import { TagFilterDropdown } from './TagFilterDropdown'
 import { FolderFilterDropdown } from './FolderFilterDropdown'
 import { RatingFilterDropdown } from './RatingFilterDropdown'
@@ -7,6 +7,7 @@ import { TypeFilterDropdown } from './TypeFilterDropdown'
 import { ArtistFilterDropdown } from './ArtistFilterDropdown'
 import { DurationFilterDropdown } from './DurationFilterDropdown'
 import { DateFilterDropdown } from './DateFilterDropdown'
+import { ConfirmModal } from './ConfirmModal'
 import './MainHeader.css'
 
 interface MainHeaderProps {
@@ -22,7 +23,9 @@ interface MainHeaderProps {
     allMediaFiles: MediaFile[]
     viewSettings: ViewSettings
     onViewSettingsChange: (settings: ViewSettings) => void
-    genres: Genre[]
+    folders: Folder[]
+    onRefreshLibrary: () => void
+    onReload: () => void
 }
 
 export function MainHeader({
@@ -38,7 +41,9 @@ export function MainHeader({
     allMediaFiles,
     viewSettings,
     onViewSettingsChange,
-    genres
+    folders,
+    onRefreshLibrary,
+    onReload
 }: MainHeaderProps) {
     const [isFilterBarOpen, setIsFilterBarOpen] = useState(false)
     const [isTagFilterOpen, setIsTagFilterOpen] = useState(false)
@@ -57,6 +62,13 @@ export function MainHeader({
     const durationFilterBtnRef = useRef<HTMLDivElement>(null)
     const [isDateFilterOpen, setIsDateFilterOpen] = useState(false)
     const dateFilterBtnRef = useRef<HTMLDivElement>(null)
+
+    const [isRefreshModalOpen, setIsRefreshModalOpen] = useState(false)
+
+    const handleConfirmRefresh = () => {
+        setIsRefreshModalOpen(false)
+        onRefreshLibrary()
+    }
 
     // 外部クリックで閉じる
     useEffect(() => {
@@ -105,41 +117,46 @@ export function MainHeader({
 
     const updateViewSetting = <K extends keyof ViewSettings>(key: K, value: ViewSettings[K]) => {
         onViewSettingsChange({ ...viewSettings, [key]: value })
+
+        // サムネイルモード変更時はバックエンドの設定も更新する
+        if (key === 'thumbnailMode') {
+            (window.electronAPI as unknown as ElectronAPI).updateClientConfig({ thumbnailMode: value as 'speed' | 'quality' })
+        }
     }
 
-    // メディアファイルからフォルダー(ジャンル)一覧とカウントを生成
-    const folders = useMemo(() => {
-        // ジャンルごとのカウントを計算
-        const genreCounts = new Map<number, number>()
+    // メディアファイルからフォルダー一覧とカウントを生成
+    const foldersWithCounts = useMemo(() => {
+        // フォルダーごとのカウントを計算
+        const folderCounts = new Map<number, number>()
         allMediaFiles.forEach(file => {
             if (file.is_deleted) return
-            file.genres?.forEach(genre => {
-                genreCounts.set(genre.id, (genreCounts.get(genre.id) || 0) + 1)
+            file.folders?.forEach(folder => {
+                folderCounts.set(folder.id, (folderCounts.get(folder.id) || 0) + 1)
             })
         })
 
         // カウント情報を付与してソート
-        return genres.map(g => ({
-            id: g.id,
-            name: g.name,
-            count: genreCounts.get(g.id) || 0,
-            parentId: g.parentId
+        return folders.map(f => ({
+            id: f.id,
+            name: f.name,
+            count: folderCounts.get(f.id) || 0,
+            parentId: f.parentId
         })).sort((a, b) => b.count - a.count)
-    }, [allMediaFiles, genres])
+    }, [allMediaFiles, folders])
 
-    // 選択されたフォルダー名(ジャンル名)を取得
+    // 選択されたフォルダー名を取得
     const getSelectedFolderNames = () => {
-        if (filterOptions.selectedGenres.length === 0) return null
-        const selectedGenreNames = filterOptions.selectedGenres
+        if (filterOptions.selectedFolders.length === 0) return null
+        const selectedFolderNames = filterOptions.selectedFolders
             .map(id => {
-                const genre = genres.find(g => g.id === id)
-                return genre?.name
+                const folder = folders.find(f => f.id === id)
+                return folder?.name
             })
             .filter(Boolean)
 
-        if (selectedGenreNames.length === 1) return selectedGenreNames[0]
-        if (selectedGenreNames.length <= 2) return selectedGenreNames.join(', ')
-        return `${selectedGenreNames.slice(0, 1).join(', ')}...(${selectedGenreNames.length})`
+        if (selectedFolderNames.length === 1) return selectedFolderNames[0]
+        if (selectedFolderNames.length <= 2) return selectedFolderNames.join(', ')
+        return `${selectedFolderNames.slice(0, 1).join(', ')}...(${selectedFolderNames.length})`
     }
 
     const folderLabel = getSelectedFolderNames()
@@ -265,6 +282,19 @@ export function MainHeader({
 
                 <div className="header-right">
 
+                    {/* リロードボタン */}
+                    <button
+                        className="icon-btn"
+                        title="再読み込み"
+                        onClick={onReload}
+                    >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M23 4v6h-6"></path>
+                            <path d="M1 20v-6h6"></path>
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                        </svg>
+                    </button>
+
                     {/* 表示オプションドロップダウン */}
                     <div className="view-menu-container" ref={viewMenuRef}>
                         <button
@@ -347,8 +377,6 @@ export function MainHeader({
                                         </button>
                                     </div>
                                 </div>
-
-                                <div className="dropdown-divider"></div>
 
                                 <div className="dropdown-row toggle-row">
                                     <span className="dropdown-label">名前を表示</span>
@@ -450,6 +478,19 @@ export function MainHeader({
                                     </label>
                                 </div>
 
+                                <div className="dropdown-divider"></div>
+
+                                <div className="dropdown-row">
+                                    <button
+                                        className="btn btn-full btn-outline-danger"
+                                        onClick={() => {
+                                            setIsViewMenuOpen(false)
+                                            setIsRefreshModalOpen(true)
+                                        }}
+                                    >
+                                        ライブラリを更新
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>
@@ -482,7 +523,7 @@ export function MainHeader({
                     {/* フォルダーフィルター */}
                     <div className="filter-bar-item" ref={folderFilterBtnRef}>
                         <button
-                            className={`filter-bar-btn ${filterOptions.selectedGenres.length > 0 ? 'active' : ''}`}
+                            className={`filter-bar-btn ${filterOptions.selectedFolders.length > 0 ? 'active' : ''}`}
                             onClick={() => setIsFolderFilterOpen(!isFolderFilterOpen)}
                         >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -492,7 +533,7 @@ export function MainHeader({
                         </button>
                         {isFolderFilterOpen && (
                             <FolderFilterDropdown
-                                folders={folders}
+                                folders={foldersWithCounts}
                                 filterOptions={filterOptions}
                                 onFilterChange={onFilterChange}
                                 onClose={() => setIsFolderFilterOpen(false)}
@@ -632,6 +673,17 @@ export function MainHeader({
                         )}
                     </div>
                 </div>
+            )}
+
+            {isRefreshModalOpen && (
+                <ConfirmModal
+                    title="ライブラリの更新"
+                    message="すべてのライブラリファイルのサムネイルとメタデータを再取得します。ファイル数によっては時間がかかる可能性がありますが、実行しますか？"
+                    confirmLabel="更新を開始"
+                    isDestructive={true}
+                    onConfirm={handleConfirmRefresh}
+                    onCancel={() => setIsRefreshModalOpen(false)}
+                />
             )}
         </div>
     )

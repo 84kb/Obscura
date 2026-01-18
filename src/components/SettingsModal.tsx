@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { AppSettings, Library } from '../types'
+import { AppSettings, Library, ClientConfig, AutoImportPath } from '../types'
 import './SettingsModal.css'
 
 interface SettingsModalProps {
@@ -32,7 +32,7 @@ const API_ENDPOINTS: ApiEndpoint[] = [
             { name: 'limit', type: 'number', desc: '1ページあたりのアイテム数 (デフォルト: 50)', required: false },
             { name: 'search', type: 'string', desc: 'キーワード検索', required: false },
             { name: 'tags', type: 'string[]', desc: 'タグIDの配列 (例: tags=1,2,3)', required: false },
-            { name: 'genres', type: 'string[]', desc: 'ジャンルIDの配列 (例: genres=a,b,c)', required: false },
+            { name: 'folders', type: 'string[]', desc: 'フォルダーIDの配列 (例: folders=a,b,c)', required: false },
         ]
     },
     {
@@ -119,10 +119,10 @@ const API_ENDPOINTS: ApiEndpoint[] = [
     },
     {
         method: 'GET',
-        path: '/api/genres',
-        label: 'ジャンル一覧',
-        description: '登録されているすべてのジャンルのリストを取得します。',
-        permission: 'read:genres',
+        path: '/api/folders',
+        label: 'フォルダー一覧',
+        description: '登録されているすべてのフォルダーのリストを取得します。',
+        permission: 'read:folders',
         params: []
     },
 ]
@@ -140,7 +140,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     const [appVersion, setAppVersion] = useState<string>('Unknown')
 
     useEffect(() => {
-        if (window.electronAPI) {
+        if (window.electronAPI && (window.electronAPI as any).getAppVersion) {
             (window.electronAPI as any).getAppVersion().then((v: string) => setAppVersion(v))
         }
     }, [])
@@ -1220,6 +1220,33 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
                     <div className="settings-row">
                         <div className="settings-info">
+                            <span className="settings-label">PiP 操作モード</span>
+                            <span className="settings-desc">ピクチャーインピクチャー画面のボタン配置</span>
+                        </div>
+                        <div className="radio-group" style={{ display: 'flex', gap: '16px' }}>
+                            <label className="radio-item">
+                                <input
+                                    type="radio"
+                                    checked={settings.pipControlMode === 'navigation' || !settings.pipControlMode}
+                                    onChange={() => onUpdateSettings({ ...settings, pipControlMode: 'navigation' })}
+                                />
+                                <span className="radio-dot"></span>
+                                <span className="radio-label">前/次の動画</span>
+                            </label>
+                            <label className="radio-item">
+                                <input
+                                    type="radio"
+                                    checked={settings.pipControlMode === 'skip'}
+                                    onChange={() => onUpdateSettings({ ...settings, pipControlMode: 'skip' })}
+                                />
+                                <span className="radio-dot"></span>
+                                <span className="radio-label">10秒スキップ</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div className="settings-row">
+                        <div className="settings-info">
                             <span className="settings-label">既定の画像サイズ</span>
                         </div>
                         <div className="radio-group">
@@ -1279,6 +1306,23 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                             <input type="checkbox" />
                             <span className="checkbox-box"></span>
                             <span className="checkbox-label">前回の再生位置を記憶する</span>
+                        </label>
+                    </div>
+                </div>
+            </section>
+
+            <section className="settings-section">
+                <h4 className="section-title">インスペクター</h4>
+                <div className="settings-card">
+                    <div className="settings-row-checkbox">
+                        <label className="checkbox-item">
+                            <input
+                                type="checkbox"
+                                checked={settings.enableRichText}
+                                onChange={() => handleToggle('enableRichText')}
+                            />
+                            <span className="checkbox-box"></span>
+                            <span className="checkbox-label">説明欄のリッチテキスト (HTML) 有効化</span>
                         </label>
                     </div>
                 </div>
@@ -1453,6 +1497,76 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
         )
     }
 
+    const [availableLibraries, setAvailableLibraries] = useState<{ name: string; path: string }[]>([])
+
+    useEffect(() => {
+        if (activeCategory === 'import' && window.electronAPI) {
+            (window.electronAPI as any).getLibraries()
+                .then((libs: any[]) => setAvailableLibraries(libs))
+                .catch((e: any) => console.error('Failed to get libraries:', e))
+        }
+    }, [activeCategory])
+
+    const handleAddWatchPath = async () => {
+        if (!window.electronAPI) return
+        const path = await (window.electronAPI as any).selectFolder()
+        if (path) {
+            // Check dupes
+            if (clientConfig?.autoImport.watchPaths.some((p: AutoImportPath) => p.path === path)) {
+                alert('このフォルダは既に登録されています')
+                return
+            }
+
+            // Default to first library if available
+            const defaultLibId = availableLibraries.length > 0 ? availableLibraries[0].path : ''
+
+            const newPath = {
+                id: crypto.randomUUID(), // Or generate simple ID
+                path,
+                targetLibraryId: defaultLibId,
+                enabled: true
+            }
+
+            const newConfig = {
+                ...clientConfig!,
+                autoImport: {
+                    ...clientConfig!.autoImport,
+                    watchPaths: [...(clientConfig!.autoImport.watchPaths || []), newPath]
+                }
+            }
+            setClientConfig(newConfig);
+            (window.electronAPI as any).updateClientConfig(newConfig)
+        }
+    }
+
+    const handleRemoveWatchPath = (id: string) => {
+        if (!clientConfig) return
+        const newConfig: ClientConfig = {
+            ...clientConfig,
+            autoImport: {
+                ...clientConfig.autoImport,
+                watchPaths: clientConfig.autoImport.watchPaths.filter((p: AutoImportPath) => p.id !== id)
+            }
+        }
+        setClientConfig(newConfig);
+        (window.electronAPI as any).updateClientConfig(newConfig)
+    }
+
+    const handleUpdateWatchPath = (id: string, updates: Partial<AutoImportPath>) => {
+        if (!clientConfig) return
+        const newConfig: ClientConfig = {
+            ...clientConfig,
+            autoImport: {
+                ...clientConfig.autoImport,
+                watchPaths: clientConfig.autoImport.watchPaths.map((p: AutoImportPath) =>
+                    p.id === id ? { ...p, ...updates } : p
+                )
+            }
+        }
+        setClientConfig(newConfig);
+        (window.electronAPI as any).updateClientConfig(newConfig)
+    }
+
     const renderImportSettings = () => {
         if (!clientConfig) return <div className="loading">読み込み中...</div>
 
@@ -1466,8 +1580,6 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                 <span className="settings-label">自動インポートを有効にする</span>
                                 <span className="settings-description">
                                     指定したフォルダを監視し、新しいファイルを自動的にインポートします。
-                                    <br />
-                                    <span style={{ color: '#ef4444', fontSize: '11px' }}>注意: インポート完了後、元のファイルは完全に削除されます。</span>
                                 </span>
                             </div>
                             <label className="toggle-switch">
@@ -1478,7 +1590,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                         const newConfig = {
                                             ...clientConfig,
                                             autoImport: {
-                                                ...(clientConfig.autoImport || { watchPath: '' }),
+                                                ...(clientConfig.autoImport || { watchPaths: [] }),
                                                 enabled: e.target.checked
                                             }
                                         }
@@ -1490,31 +1602,78 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                             </label>
                         </div>
 
-                        <div className="settings-row">
-                            <div className="settings-info">
-                                <span className="settings-label">監視フォルダ</span>
-                                <span className="settings-description">
-                                    {clientConfig?.autoImport?.watchPath || '未設定'}
-                                </span>
-                            </div>
-                            <button className="btn btn-secondary btn-sm" onClick={async () => {
-                                if (window.electronAPI) {
-                                    const path = await (window.electronAPI as any).selectFolder()
-                                    if (path) {
-                                        const newConfig = {
-                                            ...clientConfig,
-                                            autoImport: {
-                                                ...(clientConfig.autoImport || { enabled: false }),
-                                                watchPath: path
-                                            }
-                                        }
-                                        setClientConfig(newConfig);
-                                        (window.electronAPI as any).updateClientConfig(newConfig)
-                                    }
-                                }
-                            }}>
-                                フォルダを選択
+                        <div className="settings-divider" style={{ margin: '16px 0', borderBottom: '1px solid #3a3a3c' }}></div>
+
+                        <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span className="settings-label" style={{ fontSize: '13px' }}>監視フォルダ設定</span>
+                            <button className="btn btn-secondary btn-sm" onClick={handleAddWatchPath}>
+                                + フォルダを追加
                             </button>
+                        </div>
+
+                        {(!clientConfig.autoImport.watchPaths || clientConfig.autoImport.watchPaths.length === 0) ? (
+                            <div style={{ padding: '20px', textAlign: 'center', color: '#888', background: '#252528', borderRadius: '8px', fontSize: '13px' }}>
+                                監視フォルダが設定されていません
+                            </div>
+                        ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                {clientConfig.autoImport.watchPaths.map((p: AutoImportPath) => (
+                                    <div key={p.id} style={{
+                                        background: '#252528',
+                                        padding: '12px',
+                                        borderRadius: '8px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '12px',
+                                        border: '1px solid #3a3a3c'
+                                    }}>
+                                        <div style={{ width: '32px', display: 'flex', justifyContent: 'center' }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={p.enabled}
+                                                onChange={(e) => handleUpdateWatchPath(p.id, { enabled: e.target.checked })}
+                                                style={{ width: '16px', height: '16px' }}
+                                            />
+                                        </div>
+
+                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                            <div style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                <span>インポート先: </span>
+                                                <select
+                                                    value={p.targetLibraryId}
+                                                    onChange={(e) => handleUpdateWatchPath(p.id, { targetLibraryId: e.target.value })}
+                                                    className="settings-input"
+                                                    style={{ padding: '2px 8px', fontSize: '12px', width: 'auto', minWidth: '150px' }}
+                                                >
+                                                    {availableLibraries.map(lib => (
+                                                        <option key={lib.path} value={lib.path}>{lib.name}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div style={{ fontSize: '11px', color: '#aaa', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.path}>
+                                                {p.path}
+                                            </div>
+                                        </div>
+
+                                        <button
+                                            onClick={() => handleRemoveWatchPath(p.id)}
+                                            style={{
+                                                background: 'transparent',
+                                                border: 'none',
+                                                color: '#ef4444',
+                                                cursor: 'pointer',
+                                                padding: '4px'
+                                            }}
+                                            title="削除"
+                                        >
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="6"></line></svg>
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        <div style={{ marginTop: '16px', fontSize: '11px', color: '#eab308' }}>
+                            ※ インポート完了後、元のファイルは完全に削除されます。
                         </div>
                     </div>
                 </section>

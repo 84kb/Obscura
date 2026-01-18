@@ -1,76 +1,94 @@
 import chokidar from 'chokidar'
 import fs from 'fs-extra'
-// import path from 'path' 
-import { mediaDB } from './database'
+import { libraryRegistry } from './database'
 import { ClientConfig } from './settings'
 
 interface WatcherState {
-    watcher: chokidar.FSWatcher | null
-    currentPath: string
+    // Map<watchPath, WatcherInstance>
+    watchers: Map<string, chokidar.FSWatcher>
 }
 
 const state: WatcherState = {
-    watcher: null,
-    currentPath: ''
+    watchers: new Map()
 }
 
-
 export function updateWatcher(config: ClientConfig, onImport?: (files: string[]) => void) {
-    const { enabled, watchPath } = config.autoImport
+    const { enabled, watchPaths } = config.autoImport
 
-    // 無効化されているか、パスが変わった場合は既存の監視を停止
-    if (!enabled || watchPath !== state.currentPath) {
-        if (state.watcher) {
-            state.watcher.close().then(() => console.log('Watcher closed'))
-            state.watcher = null
-            state.currentPath = ''
+    // Master switch: if disabled, close all
+    if (!enabled) {
+        state.watchers.forEach(w => w.close())
+        state.watchers.clear()
+        console.log('[Watcher] Master switch disabled. All watchers closed.')
+        return
+    }
+
+    // 1. Identify active configs
+    const activeConfigs = (watchPaths || []).filter(p => p.enabled && p.path && p.targetLibraryId)
+    const activePaths = new Set(activeConfigs.map(p => p.path))
+
+    // 2. Remove watchers for paths that are no longer active
+    for (const [path, watcher] of state.watchers.entries()) {
+        if (!activePaths.has(path)) {
+            watcher.close().catch(e => console.error(`Failed to close watcher for ${path}:`, e))
+            state.watchers.delete(path)
+            console.log(`[Watcher] Stopped watching: ${path}`)
         }
     }
 
-    // 有効かつパスが設定されていて、まだ監視していない場合に開始
-    if (enabled && watchPath && !state.watcher) {
-        if (!fs.existsSync(watchPath)) {
-            console.warn(`Watch path does not exist: ${watchPath}`)
-            return
-        }
-
-        console.log(`Starting watcher on: ${watchPath}`)
-        state.currentPath = watchPath
-        state.watcher = chokidar.watch(watchPath, {
-            ignored: /(^|[\/\\])\../, // ドットファイルは無視
-            persistent: true,
-            ignoreInitial: false, // 起動時に既存ファイルもインポートする場合はfalse。今回は動作を見て決めるが、通常は既存も取り込むべき。
-            awaitWriteFinish: {
-                stabilityThreshold: 2000,
-                pollInterval: 100
+    // 3. Add new watchers
+    activeConfigs.forEach(cfg => {
+        if (!state.watchers.has(cfg.path)) {
+            if (!fs.existsSync(cfg.path)) {
+                console.warn(`[Watcher] Path not found, skipping: ${cfg.path}`)
+                return
             }
-        })
 
-        state.watcher.on('add', async (filePath: string) => {
-            console.log(`File detected: ${filePath}`)
-            try {
-                // インポート実行
-                const imported = await mediaDB.importMediaFiles([filePath])
+            console.log(`[Watcher] Starting watch on: ${cfg.path} -> Library: ${cfg.targetLibraryId}`)
 
-                if (imported && imported.length > 0) {
-                    console.log(`Successfully imported: ${filePath}`)
-                    // 元ファイルを削除
-                    await fs.remove(filePath)
-                    console.log(`Removed source file: ${filePath}`)
-
-                    // コールバック呼び出し
-                    if (onImport) {
-                        onImport(imported.map(m => m.file_path))
-                    }
-                } else {
-                    console.warn(`Skipped or failed import (no media imported): ${filePath}`)
+            const watcher = chokidar.watch(cfg.path, {
+                ignored: /(^|[\/\\])\../,
+                persistent: true,
+                ignoreInitial: false,
+                awaitWriteFinish: {
+                    stabilityThreshold: 2000,
+                    pollInterval: 100
                 }
-            } catch (error: any) {
-                console.error(`Error processing file ${filePath}:`, error)
-            }
-        })
+            })
 
-        state.watcher.on('error', (error: any) => console.error(`Watcher error: ${error}`))
-    }
+            watcher.on('add', async (filePath: string) => {
+                console.log(`[Watcher] File detected in ${cfg.path}: ${filePath}`)
+                try {
+                    // Get specific library instance (even if closed/background)
+                    // targetLibraryId is treated as library PATH
+                    const lib = libraryRegistry.getLibrary(cfg.targetLibraryId)
+
+                    // Import
+                    const imported = await lib.importMediaFiles([filePath])
+
+                    if (imported && imported.length > 0) {
+                        console.log(`[Watcher] Imported to ${lib.path}: ${filePath}`)
+
+                        // Remove source file
+                        await fs.remove(filePath)
+                        console.log(`[Watcher] Source removed: ${filePath}`)
+
+                        // Notification (Global)
+                        if (onImport) {
+                            onImport(imported.map(m => m.file_path))
+                        }
+                    } else {
+                        console.warn(`[Watcher] Skipped/Failed import: ${filePath}`)
+                    }
+                } catch (error: any) {
+                    console.error(`[Watcher] Error processing ${filePath}:`, error)
+                }
+            })
+
+            watcher.on('error', (err) => console.error(`[Watcher] Error on ${cfg.path}:`, err))
+
+            state.watchers.set(cfg.path, watcher)
+        }
+    })
 }
 

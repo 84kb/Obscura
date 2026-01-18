@@ -39,6 +39,7 @@ try {
         createTag: (name) => ipcRenderer.invoke('create-tag', name),
         deleteTag: (id) => ipcRenderer.invoke('delete-tag', id),
         addTagToMedia: (mediaId, tagId) => ipcRenderer.invoke('add-tag-to-media', mediaId, tagId),
+        addTagsToMedia: (mediaIds, tagIds) => ipcRenderer.invoke('add-tags-to-media', mediaIds, tagIds),
         removeTagFromMedia: (mediaId, tagId) => ipcRenderer.invoke('remove-tag-from-media', mediaId, tagId),
         updateTagFolder: (tagId, folderId) => ipcRenderer.invoke('update-tag-folder', tagId, folderId),
 
@@ -46,16 +47,25 @@ try {
         getTagFolders: () => ipcRenderer.invoke('get-tag-folders'),
         createTagFolder: (name) => ipcRenderer.invoke('create-tag-folder', name),
         deleteTagFolder: (id) => ipcRenderer.invoke('delete-tag-folder', id),
-        renameTagFolder: (id, newName) => ipcRenderer.invoke('rename-tag-folder', id, newName),
+        renameTagFolder: (id, name) => ipcRenderer.invoke('rename-tag-folder', id, name),
 
+        // ライブラリ管理
+        refreshLibrary: () => ipcRenderer.invoke('refresh-library'),
+        onRefreshProgress: (callback) => {
+            const handler = (_event, current, total) => callback(current, total)
+            ipcRenderer.on('refresh-progress', handler)
+            return () => ipcRenderer.removeListener('refresh-progress', handler) // クリーンアップ関数を返す
+        },
+
+        // リモート接続
         // ジャンル操作
-        getGenres: () => ipcRenderer.invoke('get-genres'),
-        createGenre: (name, parentId) => ipcRenderer.invoke('create-genre', name, parentId),
-        deleteGenre: (id) => ipcRenderer.invoke('delete-genre', id),
-        renameGenre: (id, newName) => ipcRenderer.invoke('rename-genre', id, newName),
-        addGenreToMedia: (mediaId, genreId) => ipcRenderer.invoke('add-genre-to-media', mediaId, genreId),
-        removeGenreFromMedia: (mediaId, genreId) => ipcRenderer.invoke('remove-genre-from-media', mediaId, genreId),
-        updateGenreStructure: (updates) => ipcRenderer.invoke('update-genre-structure', updates),
+        getFolders: () => ipcRenderer.invoke('get-folders'),
+        createFolder: (name, parentId) => ipcRenderer.invoke('create-folder', name, parentId),
+        deleteFolder: (id) => ipcRenderer.invoke('delete-folder', id),
+        renameFolder: (id, newName) => ipcRenderer.invoke('rename-folder', id, newName),
+        addFolderToMedia: (mediaId, folderId) => ipcRenderer.invoke('add-folder-to-media', mediaId, folderId),
+        removeFolderFromMedia: (mediaId, folderId) => ipcRenderer.invoke('remove-folder-from-media', mediaId, folderId),
+        updateFolderStructure: (updates) => ipcRenderer.invoke('update-folder-structure', updates),
 
         // サムネイル生成
         generateThumbnail: (mediaId, filePath) => ipcRenderer.invoke('generate-thumbnail', mediaId, filePath),
@@ -78,6 +88,7 @@ try {
 
         // ファイル操作
         openPath: (filePath) => ipcRenderer.invoke('open-path', filePath),
+        openExternal: (url) => ipcRenderer.invoke('open-external', url),
         showItemInFolder: (filePath) => ipcRenderer.invoke('show-item-in-folder', filePath),
         openWith: (filePath) => ipcRenderer.invoke('open-with', filePath),
         copyFile: (filePath) => ipcRenderer.invoke('copy-file', filePath),
@@ -135,7 +146,7 @@ try {
         downloadRemoteMedia: (url, filename, options) => ipcRenderer.invoke('download-remote-media', url, filename, options),
         uploadRemoteMedia: (url, token, filePaths, options) => ipcRenderer.invoke('upload-remote-media', { url, token, filePaths, options }),
         renameRemoteMedia: (url, token, id, newName) => ipcRenderer.invoke('rename-remote-media', { url, token, id, newName }),
-        deleteRemoteMedia: (url, token, id) => ipcRenderer.invoke('delete-remote-media', { url, token, id }),
+        deleteRemoteMedia: (url, token, id, options) => ipcRenderer.invoke('delete-remote-media', { url, token, id, options }),
         updateRemoteMedia: (url, token, id, updates) => ipcRenderer.invoke('update-remote-media', { url, token, id, updates }),
 
         // === 自動アップデート ===
@@ -163,6 +174,7 @@ try {
         minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
         maximizeWindow: () => ipcRenderer.invoke('window-maximize'),
         closeWindow: () => ipcRenderer.invoke('window-close'),
+        focusWindow: () => ipcRenderer.invoke('focus-window'),
 
         // 汎用イベントリスナー (ホワイトリスト形式)
         on: (channel, callback) => {

@@ -120,7 +120,10 @@ export function requirePermission(...requiredPermissions: Permission[]) {
             if (!req.user) return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: '認証が必要です' } })
             if (req.user.permissions.includes('FULL')) return next()
             const hasPermission = requiredPermissions.some(perm => req.user!.permissions.includes(perm))
-            if (!hasPermission) return res.status(403).json({ error: { code: 'INSUFFICIENT_PERMISSION', message: '権限が不足しています' } })
+            if (!hasPermission) {
+                console.warn(`[Permission Denied] User: ${req.user!.nickname} (${req.user!.permissions.join(',')}), Required: ${requiredPermissions.join(',')}`)
+                return res.status(403).json({ error: { code: 'INSUFFICIENT_PERMISSION', message: '権限が不足しています' } })
+            }
             next()
         } catch (error) {
             logError('auth', 'Permission check error', error)
@@ -332,10 +335,22 @@ export function startServer(port: number): Promise<void> {
                 } catch (e) { res.status(500).send() }
             })
 
-            expressApp.delete('/api/media/:id', authMiddleware, requirePermission('FULL'), (req, res) => {
+            expressApp.delete('/api/media/:id', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res) => {
                 const id = req.params.id ? parseInt(String(req.params.id)) : NaN
                 if (isNaN(id)) return res.status(400).send()
-                library.moveToTrash(id)
+
+                const permanent = req.query.permanent === 'true'
+
+                if (permanent) {
+                    // 完全削除にはFULL権限が必要
+                    if (!req.user || !req.user.permissions.includes('FULL')) {
+                        return res.status(403).json({ error: { code: 'INSUFFICIENT_PERMISSION', message: '完全削除にはFULL権限が必要です' } })
+                    }
+                    library.deleteMediaFilesPermanently([id])
+                } else {
+                    // ゴミ箱移動はEDIT権限でOK (requirePermissionでチェック済み)
+                    library.moveToTrash(id)
+                }
                 res.json({ success: true })
             })
 

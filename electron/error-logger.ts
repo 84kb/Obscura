@@ -4,7 +4,8 @@ import crypto from 'crypto'
 const fs = require('fs-extra')
 
 // エラーログのパス
-const errorLogPath = path.join(app.getPath('userData'), 'error-log.json')
+const userDataPath = app ? app.getPath('userData') : '.'
+const errorLogPath = path.join(userDataPath, 'error-log.json')
 
 // エラーレベル
 export type ErrorLevel = 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL'

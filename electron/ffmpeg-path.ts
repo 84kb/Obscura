@@ -2,7 +2,7 @@ import { app } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs-extra'
 
-const isDev = !app.isPackaged
+const isDev = app ? !app.isPackaged : true
 const platform = process.platform
 
 const getExecutableName = (name: string) => {
@@ -12,7 +12,7 @@ const getExecutableName = (name: string) => {
 export function getFFmpegPath(): string {
     // 1. ユーザーデータフォルダ (自動アップデートで配置される場所)
     try {
-        const userDataPath = app.getPath('userData')
+        const userDataPath = app ? app.getPath('userData') : '.'
         const customPath = path.join(userDataPath, 'bin', getExecutableName('ffmpeg'))
         if (fs.existsSync(customPath)) {
             console.log(`[FFmpeg] Using custom path: ${customPath}`)
@@ -50,7 +50,7 @@ export function getFFmpegPath(): string {
 export function getFFprobePath(): string {
     // 1. ユーザーデータフォルダ
     try {
-        const userDataPath = app.getPath('userData')
+        const userDataPath = app ? app.getPath('userData') : '.'
         const customPath = path.join(userDataPath, 'bin', getExecutableName('ffprobe'))
         if (fs.existsSync(customPath)) {
             console.log(`[FFprobe] Using custom path: ${customPath}`)

@@ -1,25 +1,26 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { MediaFile, Tag, TagFolder, Genre, FilterOptions, Library, RemoteLibrary } from '../types'
+import { MediaFile, Tag, TagFolder, Folder, FilterOptions, Library, RemoteLibrary, ElectronAPI } from '../types'
 import { useNotification } from '../contexts/NotificationContext'
 
 export function useLibrary() {
     const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([])
     const [tags, setTags] = useState<Tag[]>([])
     const [tagFolders, setTagFolders] = useState<TagFolder[]>([])
-    const [genres, setGenres] = useState<Genre[]>([])
+    const [folders, setFolders] = useState<Folder[]>([]) // Renamed from genres
     const [libraries, setLibraries] = useState<Library[]>([])
     const [loading, setLoading] = useState(false)
     const [activeLibrary, setActiveLibrary] = useState<Library | null>(null)
     const [activeRemoteLibrary, setActiveRemoteLibrary] = useState<RemoteLibrary | null>(null)
+    const [myUserToken, setMyUserToken] = useState<string>('')
     const [randomSeed, setRandomSeed] = useState<number>(Date.now())
     const [filterOptions, setFilterOptions] = useState<FilterOptions>({
         searchQuery: '',
         selectedTags: [],
         excludedTags: [],
-        selectedGenres: [],
+        selectedFolders: [], // Renamed from selectedGenres
         tagFilterMode: 'or',
-        selectedFolders: [],
-        excludedFolders: [],
+        selectedSysDirs: [], // Renamed from selectedFolders
+        excludedSysDirs: [], // Renamed from excludedFolders
         folderFilterMode: 'or',
         filterType: 'all',
         fileType: 'all',
@@ -32,7 +33,83 @@ export function useLibrary() {
         excludedArtists: []
     })
 
-    const [myUserToken, setMyUserToken] = useState<string>('')
+    // ... (intermediate lines skipped)
+
+    // フォルダー (ex-Genre) 読み込み
+    const loadFolders = useCallback(async () => {
+        if (activeRemoteLibrary) {
+            try {
+                let userToken = myUserToken
+                let accessToken = activeRemoteLibrary.token
+
+                if (activeRemoteLibrary.token.includes(':')) {
+                    const parts = activeRemoteLibrary.token.split(':')
+                    userToken = parts[0]
+                    accessToken = parts[1]
+                }
+                const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
+
+                const response = await fetch(`${baseUrl}/api/folders`, { // Api endpoint also renamed? Yes usually.
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'X-User-Token': userToken
+                    }
+                })
+                if (response.ok) {
+                    const data = await response.json()
+                    setFolders(data)
+                }
+            } catch (e) {
+                console.error('Failed to load remote folders', e)
+            }
+        } else {
+            try {
+                const loadedFolders = await window.electronAPI.getFolders()
+                setFolders(loadedFolders as Folder[])
+            } catch (error) {
+                console.error('Failed to load folders:', error)
+            }
+        }
+    }, [activeRemoteLibrary, myUserToken])
+
+
+    // ... 
+
+    // フォルダー (ex-Genre) 作成
+    const createFolder = useCallback(async (name: string, parentId?: number | null) => {
+        if (!activeLibrary && !activeRemoteLibrary) return null
+        try {
+            const newFolder = await window.electronAPI.createFolder(name, parentId)
+            await loadFolders()
+            return newFolder
+        } catch (error) {
+            console.error('Failed to create folder:', error)
+            return null
+        }
+    }, [loadFolders, activeLibrary, activeRemoteLibrary])
+
+    // フォルダー削除
+    const deleteFolder = useCallback(async (id: number) => {
+        try {
+            await window.electronAPI.deleteFolder(id)
+            await loadFolders()
+        } catch (error) {
+            console.error('Failed to delete folder:', error)
+        }
+    }, [loadFolders, activeLibrary, activeRemoteLibrary])
+
+    // フォルダー名変更
+    const renameFolder = useCallback(async (id: number, newName: string) => {
+        try {
+            await window.electronAPI.renameFolder(id, newName)
+            await loadFolders()
+        } catch (error) {
+            console.error('Failed to rename folder:', error)
+        }
+    }, [loadFolders, activeLibrary, activeRemoteLibrary])
+
+
+
     const { addNotification, removeNotification, updateProgress } = useNotification()
 
     // アップロード進捗リスナー
@@ -192,43 +269,6 @@ export function useLibrary() {
         }
     }, [activeRemoteLibrary])
 
-    // ジャンル読み込み
-    const loadGenres = useCallback(async () => {
-        if (activeRemoteLibrary) {
-            try {
-                let userToken = myUserToken
-                let accessToken = activeRemoteLibrary.token
-
-                if (activeRemoteLibrary.token.includes(':')) {
-                    const parts = activeRemoteLibrary.token.split(':')
-                    userToken = parts[0]
-                    accessToken = parts[1]
-                }
-                const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
-
-                const response = await fetch(`${baseUrl}/api/genres`, {
-                    headers: {
-                        'Authorization': `Bearer ${accessToken}`,
-                        'X-User-Token': userToken
-                    }
-                })
-                if (response.ok) {
-                    const data = await response.json()
-                    setGenres(data)
-                }
-            } catch (e) {
-                console.error('Failed to load remote genres', e)
-            }
-        } else {
-            try {
-                const loadedGenres = await window.electronAPI.getGenres()
-                setGenres(loadedGenres as Genre[])
-            } catch (error) {
-                console.error('Failed to load genres:', error)
-            }
-        }
-    }, [activeRemoteLibrary, myUserToken])
-
 
     // フォルダー選択とスキャン
     const selectAndScanFolder = useCallback(async () => {
@@ -269,38 +309,7 @@ export function useLibrary() {
         }
     }, [loadTags, activeLibrary, activeRemoteLibrary])
 
-    // ジャンル作成
-    const createGenre = useCallback(async (name: string, parentId?: number | null) => {
-        if (!activeLibrary && !activeRemoteLibrary) return null
-        try {
-            const newGenre = await window.electronAPI.createGenre(name, parentId)
-            await loadGenres()
-            return newGenre
-        } catch (error) {
-            console.error('Failed to create genre:', error)
-            return null
-        }
-    }, [loadGenres, activeLibrary, activeRemoteLibrary])
 
-    // ジャンル削除
-    const deleteGenre = useCallback(async (id: number) => {
-        try {
-            await window.electronAPI.deleteGenre(id)
-            await loadGenres()
-        } catch (error) {
-            console.error('Failed to delete genre:', error)
-        }
-    }, [loadGenres, activeLibrary, activeRemoteLibrary])
-
-    // ジャンル名変更
-    const renameGenre = useCallback(async (id: number, newName: string) => {
-        try {
-            await window.electronAPI.renameGenre(id, newName)
-            await loadGenres()
-        } catch (error) {
-            console.error('Failed to rename genre:', error)
-        }
-    }, [loadGenres, activeLibrary, activeRemoteLibrary])
 
     // メディアにタグ追加
     const addTagToMedia = useCallback(async (mediaId: number, tagId: number) => {
@@ -322,23 +331,44 @@ export function useLibrary() {
         }
     }, [loadMediaFiles])
 
-    // メディアにジャンル追加
-    const addGenreToMedia = useCallback(async (mediaId: number, genreId: number) => {
+    // メディアにタグ一括追加
+    const addTagsToMedia = useCallback(async (mediaIds: number[], tagIds: number[]) => {
         try {
-            await window.electronAPI.addGenreToMedia(mediaId, genreId)
+            if (activeRemoteLibrary) {
+                // リモートの場合は個別に呼ぶか、新しいAPIが必要（今回はローカル優先で実装し、リモートは未対応かループで対応）
+                // 暫定的にループで対応
+                for (const mId of mediaIds) {
+                    for (const tId of tagIds) {
+                        await (window.electronAPI as any).addRemoteTagToMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, mId, tId)
+                    }
+                }
+                await loadMediaFiles()
+                return
+            }
+            await window.electronAPI.addTagsToMedia(mediaIds, tagIds)
             await loadMediaFiles()
         } catch (error) {
-            console.error('Failed to add genre to media:', error)
+            console.error('Failed to add tags to media:', error)
+        }
+    }, [loadMediaFiles, activeRemoteLibrary])
+
+    // メディアにフォルダー追加
+    const addFolderToMedia = useCallback(async (mediaId: number, folderId: number) => {
+        try {
+            await window.electronAPI.addFolderToMedia(mediaId, folderId)
+            await loadMediaFiles()
+        } catch (error) {
+            console.error('Failed to add folder to media:', error)
         }
     }, [loadMediaFiles])
 
-    // メディアからジャンル削除
-    const removeGenreFromMedia = useCallback(async (mediaId: number, genreId: number) => {
+    // メディアからフォルダー削除
+    const removeFolderFromMedia = useCallback(async (mediaId: number, folderId: number) => {
         try {
-            await window.electronAPI.removeGenreFromMedia(mediaId, genreId)
+            await window.electronAPI.removeFolderFromMedia(mediaId, folderId)
             await loadMediaFiles()
         } catch (error) {
-            console.error('Failed to remove genre from media:', error)
+            console.error('Failed to remove folder from media:', error)
         }
     }, [loadMediaFiles])
 
@@ -545,7 +575,7 @@ export function useLibrary() {
         // セクションフィルター
         switch (filterOptions.filterType) {
             case 'uncategorized':
-                result = result.filter(m => !m.genres || m.genres.length === 0)
+                result = result.filter(m => !m.folders || m.folders.length === 0)
                 break
             case 'untagged':
                 result = result.filter(m => !m.tags || m.tags.length === 0)
@@ -574,19 +604,19 @@ export function useLibrary() {
             result = result.filter(m => m.file_name.toLowerCase().includes(query))
         }
 
-        // ジャンルフィルター (Sidebarのジャンル選択 & FolderFilterDropdown)
-        if (filterOptions.selectedGenres.length > 0) {
+        // フォルダーフィルター (Sidebarのジャンル選択 & FolderFilterDropdown)
+        if (filterOptions.selectedFolders.length > 0) {
             if (filterOptions.folderFilterMode === 'and') {
-                // AND: すべてのジャンルを含む
+                // AND: すべてのフォルダーを含む
                 result = result.filter(m =>
-                    filterOptions.selectedGenres.every(genreId =>
-                        m.genres?.some(g => g.id === genreId)
+                    filterOptions.selectedFolders.every(folderId =>
+                        m.folders?.some(g => g.id === folderId)
                     )
                 )
             } else {
-                // OR: いずれかのジャンルを含む
+                // OR: いずれかのフォルダーを含む
                 result = result.filter(m =>
-                    m.genres?.some(g => filterOptions.selectedGenres.includes(g.id))
+                    m.folders?.some(g => filterOptions.selectedFolders.includes(g.id))
                 )
             }
         }
@@ -780,6 +810,30 @@ export function useLibrary() {
         }
     }, [activeLibrary, activeRemoteLibrary])
 
+    // ライブラリの再読み込み (ソフトリロード + 再ランダム化 + メタデータ更新)
+    const reloadLibrary = useCallback(async () => {
+        // ランダムモードならシードを更新
+        if (filterOptions.filterType === 'random') {
+            setRandomSeed(Date.now())
+        }
+
+        // リモートでない場合はローカルライブラリのハードリフレッシュを実行
+        if (!activeRemoteLibrary) {
+            try {
+                await (window.electronAPI as unknown as ElectronAPI).refreshLibrary()
+            } catch (e) {
+                console.error('Failed to refresh library:', e)
+            }
+        }
+
+        // データの再取得
+        await Promise.all([
+            loadMediaFiles(),
+            loadTags(),
+            loadFolders()
+        ])
+    }, [filterOptions.filterType, loadMediaFiles, loadTags, loadFolders, activeRemoteLibrary])
+
     // ライブラリ統計
     const libraryStats = useMemo(() => {
         const totalCount = mediaFiles.length
@@ -826,7 +880,7 @@ export function useLibrary() {
         localStorage.setItem('activeRemoteLibrary', JSON.stringify(lib)) // 状態を保存
         setMediaFiles([])
         setTags([])
-        setGenres([])
+        setFolders([])
     }, [activeRemoteLibrary, activeLibrary])
 
     // ローカルライブラリへの切り替え
@@ -853,11 +907,11 @@ export function useLibrary() {
             await loadLibraries()
             await loadMediaFiles()
             await loadTags()
-            await loadGenres()
+            await loadFolders()
         } catch (error) {
             console.error('Failed to create library:', error)
         }
-    }, [loadLibraries, loadMediaFiles, loadTags, loadGenres])
+    }, [loadLibraries, loadMediaFiles, loadTags, loadFolders])
 
     // 既存のライブラリを開く
     const openLibrary = useCallback(async () => {
@@ -870,14 +924,14 @@ export function useLibrary() {
                 await loadLibraries()
                 await loadMediaFiles()
                 await loadTags()
-                await loadGenres()
+                await loadFolders()
                 return library
             }
         } catch (error) {
             console.error('Failed to open library:', error)
         }
         return null
-    }, [loadLibraries, loadMediaFiles, loadTags, loadGenres])
+    }, [loadLibraries, loadMediaFiles, loadTags, loadFolders])
 
     // 初期読み込み (ライブラリ自体のロード)
     useEffect(() => {
@@ -890,8 +944,8 @@ export function useLibrary() {
         loadMediaFiles()
         loadTags()
         loadTagFolders()
-        loadGenres()
-    }, [loadMediaFiles, loadTags, loadTagFolders, loadGenres])
+        loadFolders()
+    }, [loadMediaFiles, loadTags, loadTagFolders, loadFolders])
 
     // 全データの一括更新
     const refreshAll = useCallback(async () => {
@@ -901,21 +955,21 @@ export function useLibrary() {
                 loadMediaFiles(),
                 loadTags(),
                 loadTagFolders(),
-                loadGenres()
+                loadFolders()
             ])
         } catch (e) {
             console.error('Failed to refresh library:', e)
         } finally {
             setLoading(false)
         }
-    }, [loadMediaFiles, loadTags, loadTagFolders, loadGenres])
+    }, [loadMediaFiles, loadTags, loadTagFolders, loadFolders])
 
     return useMemo(() => ({
         mediaFiles: filteredMediaFiles,
         allMediaFiles: mediaFiles,
         tags,
         tagFolders,
-        genres,
+        folders,
         libraries,
         loading,
         activeLibrary,
@@ -927,12 +981,12 @@ export function useLibrary() {
         selectAndScanFolder,
         createTag,
         deleteTag,
-        createGenre,
-        deleteGenre,
+        createFolder,
+        deleteFolder,
         addTagToMedia,
         removeTagFromMedia,
-        addGenreToMedia,
-        removeGenreFromMedia,
+        addFolderToMedia,
+        removeFolderFromMedia,
         moveToTrash,
         restoreFromTrash,
         deletePermanently,
@@ -946,23 +1000,25 @@ export function useLibrary() {
         updateArtist,
         libraryStats,
         refreshLibrary: refreshAll,
-        loadGenres,
-        renameGenre,
+        reloadLibrary,
+        loadFolders,
+        renameFolder,
         activeRemoteLibrary,
         switchToRemoteLibrary,
         switchToLocalLibrary,
         openLibrary,
         myUserToken,
         updateDescription,
-        setMediaFiles
+        setMediaFiles,
+        addTagsToMedia
     }), [
-        filteredMediaFiles, mediaFiles, tags, tagFolders, genres, libraries, loading, activeLibrary,
+        filteredMediaFiles, mediaFiles, tags, tagFolders, folders, libraries, loading, activeLibrary,
         filterOptions, setFilterOptions, createLibrary, switchLibrary, selectAndScanFolder,
-        createTag, deleteTag, createGenre, deleteGenre, addTagToMedia, removeTagFromMedia,
-        addGenreToMedia, removeGenreFromMedia, moveToTrash, restoreFromTrash, deletePermanently,
+        createTag, deleteTag, createFolder, deleteFolder, addTagToMedia, removeTagFromMedia,
+        addTagsToMedia, addFolderToMedia, removeFolderFromMedia, moveToTrash, restoreFromTrash, deletePermanently,
         moveFilesToTrash, restoreFilesFromTrash, deleteFilesPermanently,
         updateLastPlayed, importMedia, updateRating, renameMedia, updateArtist, libraryStats,
-        loadMediaFiles, loadGenres, renameGenre, activeRemoteLibrary, switchToRemoteLibrary,
+        loadMediaFiles, loadFolders, renameFolder, activeRemoteLibrary, switchToRemoteLibrary,
         switchToLocalLibrary, openLibrary, myUserToken, updateDescription
     ])
 }

@@ -1,6 +1,15 @@
 import { useState, useRef, useEffect } from 'react'
+import { MediaFile } from '../types'
+import { toMediaUrl } from '../utils/fileUrl'
 
-export function usePlayer() {
+interface UsePlayerProps {
+    media?: MediaFile
+    onNext?: () => void
+    onPrev?: () => void
+    pipControlMode?: 'navigation' | 'skip'
+}
+
+export function usePlayer({ media, onNext, onPrev, pipControlMode = 'navigation' }: UsePlayerProps = {}) {
     const [isPlaying, setIsPlaying] = useState(false)
     const [currentTime, setCurrentTime] = useState(0)
     const [duration, setDuration] = useState(0)
@@ -290,6 +299,131 @@ export function usePlayer() {
         }
     }, [videoRef.current, audioRef.current, isLooping]) // メディア要素が切り替わった時に再実行
 
+    // PiP (Picture-in-Picture)
+    const [isPiP, setIsPiP] = useState(false)
+
+    const togglePiP = async () => {
+        const media = videoRef.current
+        if (!media) return
+
+        try {
+            if (document.pictureInPictureElement) {
+                await document.exitPictureInPicture()
+            } else if (media.requestPictureInPicture) {
+                if (media.readyState < 1) {
+                    console.log('Waiting for metadata before PiP...')
+                    return
+                }
+                await media.requestPictureInPicture()
+            }
+        } catch (err) {
+            console.error('Failed to toggle PiP:', err)
+        }
+    }
+
+    // PiPイベントリスナー
+    useEffect(() => {
+        const media = videoRef.current
+        if (!media) return
+
+        const handleEnterPiP = () => setIsPiP(true)
+        const handleLeavePiP = () => {
+            setIsPiP(false)
+            // PiP終了時にウィンドウへフォーカス＆最前面化
+            // 型定義の反映ラグ回避のため any キャスト
+            const api = window.electronAPI as any
+            if (api && api.focusWindow) {
+                api.focusWindow().catch((err: any) => console.error('Failed to focus window:', err))
+            }
+        }
+
+        media.addEventListener('enterpictureinpicture', handleEnterPiP)
+        media.addEventListener('leavepictureinpicture', handleLeavePiP)
+
+        return () => {
+            media.removeEventListener('enterpictureinpicture', handleEnterPiP)
+            media.removeEventListener('leavepictureinpicture', handleLeavePiP)
+        }
+    }, [videoRef.current])
+
+    // Media Session API Integration
+    useEffect(() => {
+        const mediaElement = videoRef.current || audioRef.current
+        if (!media || !navigator.mediaSession || !mediaElement) return
+
+        const hasNext = !!onNext
+        const hasPrev = !!onPrev
+
+        // Update Metadata
+        const artworks = []
+        if (media.thumbnail_path) {
+            // ローカルパスをブラウザが扱えるURLに変換
+            // window.electronAPIが存在する場合のみ有効（レンダラープロセス）
+            const artUrl = window.electronAPI ? toMediaUrl(media.thumbnail_path) : media.thumbnail_path
+            artworks.push({ src: artUrl, sizes: '512x512', type: 'image/jpeg' })
+        }
+
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: media.file_name,
+            artist: (media.artists || [media.artist]).filter(Boolean).join(', ') || 'Unknown Artist',
+            artwork: artworks
+        })
+
+        // Action Handlers
+        const handlePlayPause = () => togglePlay()
+        const handleSeekBackward = () => rewind()
+        const handleSeekForward = () => forward()
+
+        const handlePrevAction = () => {
+            if (hasPrev && onPrev) onPrev()
+        }
+        const handleNextAction = () => {
+            if (hasNext && onNext) onNext()
+        }
+
+        const handleSeekTo = (details: MediaSessionActionDetails) => {
+            if (details.seekTime !== undefined) {
+                seek(details.seekTime)
+            }
+        }
+
+        try {
+            // Reset all handlers first
+            navigator.mediaSession.setActionHandler('play', handlePlayPause)
+            navigator.mediaSession.setActionHandler('pause', handlePlayPause)
+            navigator.mediaSession.setActionHandler('seekto', handleSeekTo)
+
+            navigator.mediaSession.setActionHandler('seekbackward', null)
+            navigator.mediaSession.setActionHandler('seekforward', null)
+            navigator.mediaSession.setActionHandler('previoustrack', null)
+            navigator.mediaSession.setActionHandler('nexttrack', null)
+
+            // Determine controls based on availability (Skip mode removed)
+            if (onPrev) {
+                navigator.mediaSession.setActionHandler('previoustrack', handlePrevAction)
+            }
+            if (onNext) {
+                navigator.mediaSession.setActionHandler('nexttrack', handleNextAction)
+            }
+
+        } catch (e) {
+            console.error('[usePlayer] Failed to set media session handlers:', e)
+        }
+
+        // Cleanup
+        return () => {
+            if (navigator.mediaSession) {
+                navigator.mediaSession.setActionHandler('play', null)
+                navigator.mediaSession.setActionHandler('pause', null)
+                navigator.mediaSession.setActionHandler('seekbackward', null)
+                navigator.mediaSession.setActionHandler('seekforward', null)
+                navigator.mediaSession.setActionHandler('previoustrack', null)
+                navigator.mediaSession.setActionHandler('nexttrack', null)
+                navigator.mediaSession.setActionHandler('seekto', null)
+            }
+        }
+    }, [media, onNext, onPrev, pipControlMode, videoRef.current, audioRef.current])
+
     return {
         containerRef,
         videoRef,
@@ -301,6 +435,7 @@ export function usePlayer() {
         isMuted,
         playbackRate,
         isLooping,
+        isPiP,
         togglePlay,
         seek,
         forward,
@@ -310,5 +445,6 @@ export function usePlayer() {
         changePlaybackRate,
         toggleLoop,
         toggleFullscreen,
+        togglePiP,
     }
 }

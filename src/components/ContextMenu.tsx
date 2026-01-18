@@ -1,17 +1,17 @@
 import { useEffect, useRef } from 'react'
-import { MediaFile, Genre } from '../types'
+import { MediaFile, Folder } from '../types'
 import './ContextMenu.css'
 
 interface ContextMenuProps {
     x: number
     y: number
     media: MediaFile
-    genres: Genre[]
+    folders: Folder[]
     onClose: () => void
     onOpenDefault: () => void
     onOpenWith: () => void
     onShowInExplorer: () => void
-    onAddToGenre: (genreId: number) => void
+    onAddToFolder: (folderId: number) => void
     onRename: () => void
     onCopy: () => void
     onCopyPath: () => void
@@ -24,12 +24,12 @@ export function ContextMenu({
     x,
     y,
     media,
-    genres,
+    folders,
     onClose,
     onOpenDefault,
     onOpenWith,
     onShowInExplorer,
-    onAddToGenre,
+    onAddToFolder,
     onRename,
     onCopy,
     onCopyPath,
@@ -84,8 +84,8 @@ export function ContextMenu({
         }
     }, [x, y])
 
-    // ジャンルに追加済みかどうか
-    const mediaGenreIds = media.genres?.map(g => g.id) || []
+    // フォルダーに追加済みかどうか
+    const mediaFolderIds = media.folders?.map(f => f.id) || []
 
     return (
         <div
@@ -119,7 +119,7 @@ export function ContextMenu({
 
             <div className="context-menu-separator" />
 
-            {/* ジャンルに追加サブメニュー */}
+            {/* フォルダーに追加サブメニュー */}
             <div className="context-menu-item has-submenu">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
@@ -129,23 +129,23 @@ export function ContextMenu({
                     <polyline points="9 18 15 12 9 6" />
                 </svg>
                 <div className="context-submenu">
-                    {genres.length === 0 ? (
+                    {folders.length === 0 ? (
                         <div className="context-menu-item disabled">
                             <span>フォルダがありません</span>
                         </div>
                     ) : (
-                        genres.map(genre => (
+                        folders.map(folder => (
                             <div
-                                key={genre.id}
-                                className={`context-menu-item ${mediaGenreIds.includes(genre.id) ? 'checked' : ''}`}
-                                onClick={() => onAddToGenre(genre.id)}
+                                key={folder.id}
+                                className={`context-menu-item ${mediaFolderIds.includes(folder.id) ? 'checked' : ''}`}
+                                onClick={() => onAddToFolder(folder.id)}
                             >
-                                {mediaGenreIds.includes(genre.id) && (
+                                {mediaFolderIds.includes(folder.id) && (
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                         <polyline points="20 6 9 17 4 12" />
                                     </svg>
                                 )}
-                                <span>{genre.name}</span>
+                                <span>{folder.name}</span>
                             </div>
                         ))
                     )}

@@ -581,3 +581,50 @@
         transform: scale(1) translateY(0);
     }
 }
+/* Picture-in-Picture Mode */
+.player-container.pip-mode .player-header-bar {
+    display: none;
+}
+
+.player-container.pip-mode .player-controls-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.9), transparent);
+    padding-bottom: 8px;
+    height: auto;
+    min-height: 60px;
+    align-items: flex-end;
+}
+
+.player-container.pip-mode .volume-control-group,
+.player-container.pip-mode .control-btn[title='ピクチャーインピクチャー'],
+.player-container.pip-mode .controls-right .control-btn:last-child {
+    display: none;
+}
+
+.player-container.pip-mode .control-btn {
+    width: 32px;
+    height: 32px;
+}
+
+.player-container.pip-mode .player-seek-container {
+    margin: 0 8px;
+    height: 32px;
+}
+
+.player-container.pip-mode .player-content {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+}
+
+.player-container.pip-mode .player-video {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: contain;
+}
+

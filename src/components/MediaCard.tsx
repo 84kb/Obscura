@@ -187,6 +187,15 @@ export function MediaCard({
         onInternalDragEnd?.()
     }
 
+    // 画像読み込み完了状態
+    const [isLoaded, setIsLoaded] = useState(false)
+
+    useEffect(() => {
+        // メディアが変わったらリセット
+        setIsLoaded(false)
+        setThumbnailUrl(getInitialThumbnailUrl())
+    }, [media.id, media.file_path, media.thumbnail_path, thumbnailMode])
+
     return (
         <div
             className={`media-card ${isSelected ? 'selected' : ''}`}
@@ -198,7 +207,13 @@ export function MediaCard({
             onDragEnd={handleDragEnd}
             {...props}
         >
-            <div className="media-card-thumbnail">
+            <div
+                className="media-card-thumbnail"
+                style={{
+                    backgroundColor: media.dominant_color || '#2a2a2a',
+                    transition: 'background-color 0.3s ease'
+                }}
+            >
                 {/* ファイルタイプバッジ（左上） - showExtensionLabelで制御 */}
                 {showExtensionLabel && (
                     <div className="media-card-badge">
@@ -212,9 +227,14 @@ export function MediaCard({
                         alt={media.file_name}
                         loading="lazy"
                         decoding="async"
+                        onLoad={() => setIsLoaded(true)}
+                        style={{
+                            opacity: isLoaded ? 1 : 0,
+                            transition: 'opacity 0.3s ease'
+                        }}
                     />
                 ) : (
-                    <div className="media-card-placeholder">
+                    <div className="media-card-placeholder" style={{ opacity: 1 }}>
                         {getIcon()}
                     </div>
                 )}

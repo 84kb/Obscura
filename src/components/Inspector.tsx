@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { MediaFile, Tag, Genre, MediaComment } from '../types'
+import { MediaFile, Tag, Folder, MediaComment } from '../types'
 import './Inspector.css'
 import { toMediaUrl } from '../utils/fileUrl'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core'
@@ -11,14 +11,15 @@ interface InspectorProps {
     media: MediaFile[]
     playingMedia?: MediaFile | null
     allTags: Tag[]
-    allGenres: Genre[]
+    allFolders: Folder[]
     onAddTag: (mediaId: number, tagId: number) => void
     onRemoveTag: (mediaId: number, tagId: number) => void
     onCreateTag?: (name: string) => Promise<Tag | null>
-    onAddGenre: (mediaId: number, genreId: number) => void
-    onRemoveGenre: (mediaId: number, genreId: number) => void
-    onCreateGenre?: (name: string) => Promise<Genre | null>
+    onAddFolder: (mediaId: number, folderId: number) => void
+    onRemoveFolder: (mediaId: number, folderId: number) => void
+    onCreateFolder?: (name: string) => Promise<Folder | null>
     onPlay: (media: MediaFile) => void
+    onAddTags?: (mediaIds: number[], tagIds: number[]) => void
     onMoveToTrash: (id: number) => void
     onMoveFilesToTrash: (ids: number[]) => void
     onRestore: (id: number) => void
@@ -33,20 +34,22 @@ interface InspectorProps {
     onUpdateUrl?: (id: number, url: string | null) => void
     totalStats: { totalCount: number; totalSize: number }
     currentContextMedia?: MediaFile[]
+    enableRichText?: boolean
 }
 
 export function Inspector({
     media,
     playingMedia,
     allTags,
-    allGenres,
+    allFolders,
     onAddTag,
     onRemoveTag,
     onCreateTag,
-    onAddGenre,
-    onRemoveGenre,
-    onCreateGenre,
+    onAddFolder,
+    onRemoveFolder,
+    onCreateFolder,
     onPlay,
+    onAddTags,
 
 
     onRestore,
@@ -60,16 +63,17 @@ export function Inspector({
     onUpdateDescription,
     onUpdateUrl,
     totalStats,
-    currentContextMedia
+    currentContextMedia,
+    enableRichText
 }: InspectorProps) {
     // ユーザー要望により基本すべて展開状態に変更されていたが、DnD導入でセクション個別管理へ移行
     const [comments, setComments] = useState<MediaComment[]>([])
 
     // タグ・ジャンル追加用のモーダル状態
     const [showTagInput, setShowTagInput] = useState(false)
-    const [showGenreInput, setShowGenreInput] = useState(false)
+    const [showFolderInput, setShowFolderInput] = useState(false)
     const [tagInput, setTagInput] = useState('')
-    const [genreInput, setGenreInput] = useState('')
+    const [folderInput, setFolderInput] = useState('')
 
     // ファイル名編集用
     const [fileName, setFileName] = useState('')
@@ -87,11 +91,11 @@ export function Inspector({
 
     // ポップオーバー位置
     const [tagPickerPos, setTagPickerPos] = useState<{ top: number; right: number } | null>(null)
-    const [genrePickerPos, setGenrePickerPos] = useState<{ top: number; right: number } | null>(null)
+    const [folderPickerPos, setFolderPickerPos] = useState<{ top: number; right: number } | null>(null)
     const tagButtonRef = useRef<HTMLButtonElement>(null)
-    const genreButtonRef = useRef<HTMLButtonElement>(null)
+    const folderButtonRef = useRef<HTMLButtonElement>(null)
     const tagPickerRef = useRef<HTMLDivElement>(null)
-    const genrePickerRef = useRef<HTMLDivElement>(null)
+    const folderPickerRef = useRef<HTMLDivElement>(null)
 
     // テキストエリアの自動リサイズ用
     const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -151,10 +155,10 @@ export function Inspector({
         return acc.filter(t => (m.tags || []).some(mt => mt.id === t.id))
     }, null as Tag[] | null) || []
 
-    const commonGenres = media.length === 0 ? [] : media.reduce((acc, m) => {
-        if (acc === null) return m.genres || []
-        return acc.filter(g => (m.genres || []).some(mg => mg.id === g.id))
-    }, null as Genre[] | null) || []
+    const commonFolders = media.length === 0 ? [] : media.reduce((acc, m) => {
+        if (acc === null) return m.folders || []
+        return acc.filter(f => (m.folders || []).some(mf => mf.id === f.id))
+    }, null as Folder[] | null) || []
 
     // コメントの定期フェッチ (複数選択時は非表示か、最初のアイテムのみにするが、基本は単一時のみ)
     useEffect(() => {
@@ -178,15 +182,15 @@ export function Inspector({
                     setShowTagInput(false)
                     setTagInput('')
                 }
-                if (showGenreInput) {
-                    setShowGenreInput(false)
-                    setGenreInput('')
+                if (showFolderInput) {
+                    setShowFolderInput(false)
+                    setFolderInput('')
                 }
             }
         }
         document.addEventListener('keydown', handleKeyDown)
         return () => document.removeEventListener('keydown', handleKeyDown)
-    }, [showTagInput, showGenreInput])
+    }, [showTagInput, showFolderInput])
 
     // 外側クリックでピッカーを閉じる
     useEffect(() => {
@@ -199,21 +203,21 @@ export function Inspector({
                 setTagInput('')
             }
             // フォルダーピッカーが開いている時
-            if (showGenreInput && genrePickerRef.current && !genrePickerRef.current.contains(target) &&
-                genreButtonRef.current && !genreButtonRef.current.contains(target)) {
-                setShowGenreInput(false)
-                setGenreInput('')
+            if (showFolderInput && folderPickerRef.current && !folderPickerRef.current.contains(target) &&
+                folderButtonRef.current && !folderButtonRef.current.contains(target)) {
+                setShowFolderInput(false)
+                setFolderInput('')
             }
         }
         // Use click instead of mousedown to allow item clicks to process first
         document.addEventListener('click', handleClickOutside)
         return () => document.removeEventListener('click', handleClickOutside)
-    }, [showTagInput, showGenreInput])
+    }, [showTagInput, showFolderInput])
 
     // ボタンクリック時にポップオーバー位置を計算
     const handleTagButtonClick = () => {
         // フォルダーピッカーが開いていたら閉じる（排他）
-        if (showGenreInput) setShowGenreInput(false)
+        if (showFolderInput) setShowFolderInput(false)
 
         if (!showTagInput && tagButtonRef.current) {
             const rect = tagButtonRef.current.getBoundingClientRect()
@@ -222,15 +226,15 @@ export function Inspector({
         setShowTagInput(!showTagInput)
     }
 
-    const handleGenreButtonClick = () => {
+    const handleFolderButtonClick = () => {
         // タグピッカーが開いていたら閉じる（排他）
         if (showTagInput) setShowTagInput(false)
 
-        if (!showGenreInput && genreButtonRef.current) {
-            const rect = genreButtonRef.current.getBoundingClientRect()
-            setGenrePickerPos({ top: rect.top, right: window.innerWidth - rect.left + 8 })
+        if (!showFolderInput && folderButtonRef.current) {
+            const rect = folderButtonRef.current.getBoundingClientRect()
+            setFolderPickerPos({ top: rect.top, right: window.innerWidth - rect.left + 8 })
         }
-        setShowGenreInput(!showGenreInput)
+        setShowFolderInput(!showFolderInput)
     }
 
     const formatDate = (dateString: string) => {
@@ -258,43 +262,70 @@ export function Inspector({
         return `${mins}:${secs.toString().padStart(2, '0')}`
     }
 
-    const handleCreateTag = async () => {
-        if (tagInput.trim() && media.length > 0) {
-            const trimmedInput = tagInput.trim()
-            const existingTag = allTags.find(t => t.name.toLowerCase() === trimmedInput.toLowerCase())
+    const createOrAddTags = async (inputStr: string) => {
+        if (!inputStr.trim() || media.length === 0) return
+
+        // カンマ、改行、全角カンマ、スペースなどで分割
+        const inputs = inputStr.split(/[,，\n]/).map(s => s.trim()).filter(s => s.length > 0)
+
+        // 重複除去
+        const uniqueInputs = Array.from(new Set(inputs))
+
+        const mediaIds = media.map(m => m.id)
+        const tagIdsToAdd: number[] = []
+
+        for (const input of uniqueInputs) {
+            // [A,B] のような形式は A,B という1つのタグとして扱うのではなく、すでに分割済みと仮定
+            // ただし、ユーザー要望で [AB] -> ABタグ作成 とあるので、角括弧を取り除く処理を入れる
+            const cleanedInput = input.replace(/^\[|\]$/g, '')
+            if (!cleanedInput) continue
+
+            const existingTag = allTags.find(t => t.name.toLowerCase() === cleanedInput.toLowerCase())
 
             if (existingTag) {
-                media.forEach(m => {
-                    const isAdded = m.tags?.some(mt => mt.id === existingTag.id)
-                    if (!isAdded) onAddTag(m.id, existingTag.id)
-                })
+                tagIdsToAdd.push(existingTag.id)
             } else if (onCreateTag) {
-                const newTag = await onCreateTag(trimmedInput)
+                const newTag = await onCreateTag(cleanedInput)
                 if (newTag) {
-                    media.forEach(m => onAddTag(m.id, newTag.id))
+                    tagIdsToAdd.push(newTag.id)
                 }
             }
-            setTagInput('')
         }
+
+        if (tagIdsToAdd.length > 0) {
+            if (onAddTags) {
+                onAddTags(mediaIds, tagIdsToAdd)
+            } else {
+                // Fallback: loop individually if batch prop not provided
+                media.forEach(m => {
+                    tagIdsToAdd.forEach(tagId => onAddTag(m.id, tagId))
+                })
+            }
+        }
+        setTagInput('')
     }
 
-    const handleCreateGenre = async () => {
-        if (genreInput.trim() && media.length > 0) {
-            const trimmedInput = genreInput.trim()
-            const existingGenre = allGenres.find(g => g.name.toLowerCase() === trimmedInput.toLowerCase())
+    const handleCreateTag = () => {
+        createOrAddTags(tagInput)
+    }
 
-            if (existingGenre) {
+    const handleCreateFolder = async () => {
+        if (folderInput.trim() && media.length > 0) {
+            const trimmedInput = folderInput.trim()
+            const existingFolder = allFolders.find(f => f.name.toLowerCase() === trimmedInput.toLowerCase())
+
+            if (existingFolder) {
                 media.forEach(m => {
-                    const isAdded = m.genres?.some(mg => mg.id === existingGenre.id)
-                    if (!isAdded) onAddGenre(m.id, existingGenre.id)
+                    const isAdded = m.folders?.some(mf => mf.id === existingFolder.id)
+                    if (!isAdded) onAddFolder(m.id, existingFolder.id)
                 })
-            } else if (onCreateGenre) {
-                const newGenre = await onCreateGenre(trimmedInput)
-                if (newGenre) {
-                    media.forEach(m => onAddGenre(m.id, newGenre.id))
+            } else if (onCreateFolder) {
+                const newFolder = await onCreateFolder(trimmedInput)
+                if (newFolder) {
+                    media.forEach(m => onAddFolder(m.id, newFolder.id))
                 }
             }
-            setGenreInput('')
+            setFolderInput('')
         }
     }
 
@@ -302,13 +333,22 @@ export function Inspector({
         if (e.key === 'Enter') {
             e.preventDefault()
             handleCreateTag()
+        } else if (e.key === ',') {
+            e.preventDefault()
+            handleCreateTag()
         }
     }
 
-    const handleGenreInputKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const handleTagInputPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+        e.preventDefault()
+        const pastedText = e.clipboardData.getData('text')
+        createOrAddTags(pastedText)
+    }
+
+    const handleFolderInputKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter') {
             e.preventDefault()
-            handleCreateGenre()
+            handleCreateFolder()
         }
     }
 
@@ -345,12 +385,17 @@ export function Inspector({
     }
 
     // --- DnD & Layout State ---
-    const initialOrder = ['artist', 'description', 'url', 'tags', 'genres', 'info', 'comments', 'playlist']
+    const initialOrder = ['artist', 'description', 'url', 'tags', 'folders', 'info', 'comments', 'playlist']
     const [sectionOrder, setSectionOrder] = useState<string[]>(() => {
         try {
             const saved = localStorage.getItem('inspector_layout_order_v2')
             if (saved) {
-                const parsed = JSON.parse(saved) as string[]
+                let parsed = JSON.parse(saved) as string[]
+                // Migration: genres -> folders
+                if (parsed.includes('genres') && !parsed.includes('folders')) {
+                    parsed = parsed.map(p => p === 'genres' ? 'folders' : p)
+                }
+
                 const missing = initialOrder.filter(item => !parsed.includes(item))
                 if (missing.length > 0) {
                     return [...parsed, ...missing]
@@ -580,7 +625,7 @@ export function Inspector({
                                             </div>
                                         </InspectorSection>
                                     )
-                                case 'genres':
+                                case 'folders':
                                     return (
                                         <InspectorSection
                                             key={sectionId}
@@ -590,13 +635,13 @@ export function Inspector({
                                             onToggle={() => toggleSection(sectionId)}
                                         >
                                             <div className="tags-container">
-                                                {commonGenres.map(genre => (
-                                                    <div key={genre.id} className="detail-genre">
-                                                        <span>{genre.name}</span>
-                                                        <button onClick={() => media.forEach(m => onRemoveGenre(m.id, genre.id))}>×</button>
+                                                {commonFolders.map(folder => (
+                                                    <div key={folder.id} className="detail-genre">
+                                                        <span>{folder.name}</span>
+                                                        <button onClick={() => media.forEach(m => onRemoveFolder(m.id, folder.id))}>×</button>
                                                     </div>
                                                 ))}
-                                                <button ref={genreButtonRef} className="add-tag-chip" onClick={handleGenreButtonClick}>
+                                                <button ref={folderButtonRef} className="add-tag-chip" onClick={handleFolderButtonClick}>
                                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                                 </button>
                                             </div>
@@ -636,48 +681,97 @@ export function Inspector({
                                             onToggle={() => toggleSection(sectionId)}
                                         >
 
-                                            <textarea
-                                                key={media.length === 1 ? media[0].id : 'multi'}
-                                                className={`artist-input ${isDescriptionExpanded ? 'expanded' : ''}`}
-                                                placeholder="説明を入力..."
-                                                rows={3}
-                                                style={{
-                                                    resize: 'none',
-                                                    minHeight: '60px',
-                                                    fontFamily: 'inherit',
-                                                    lineHeight: '1.5',
-                                                    width: '100%',
-                                                    boxSizing: 'border-box',
-                                                    height: isDescriptionExpanded ? 'auto' : undefined,
-                                                    overflow: isDescriptionExpanded ? 'hidden' : 'auto'
-                                                }}
-                                                value={media.length === 1 ? (media[0].description || '') : ''}
-                                                onClick={() => {
-                                                    if (!isDescriptionExpanded) {
-                                                        setIsDescriptionExpanded(true)
-                                                        // 次のレンダリング後に高さを調整するためにsetTimeoutを使用
-                                                        setTimeout(() => {
-                                                            const el = document.activeElement as HTMLTextAreaElement
-                                                            if (el && el.tagName === 'TEXTAREA') {
-                                                                el.style.height = 'auto'
-                                                                el.style.height = el.scrollHeight + 'px'
+                                            {enableRichText && !isDescriptionExpanded ? (
+                                                <div
+                                                    className="description-preview-html artist-input"
+                                                    style={{
+                                                        minHeight: '60px',
+                                                        lineHeight: '1.5',
+                                                        width: '100%',
+                                                        padding: '8px',
+                                                        cursor: 'text',
+                                                        overflowY: 'auto',
+                                                        maxHeight: '200px',
+                                                        whiteSpace: 'pre-wrap',
+                                                        wordBreak: 'break-all'
+                                                    }}
+                                                    dangerouslySetInnerHTML={{ __html: media.length === 1 ? (media[0].description || '<span style="color:var(--text-muted)">説明を入力...</span>') : '' }}
+                                                    onClick={(e) => {
+                                                        const target = e.target as HTMLElement
+                                                        if (target.tagName === 'A') {
+                                                            e.preventDefault()
+                                                            e.stopPropagation()
+                                                            const href = (target as HTMLAnchorElement).href
+                                                            if (href) {
+                                                                window.electronAPI.openExternal(href)
                                                             }
-                                                        }, 0)
-                                                    }
-                                                }}
-                                                onChange={(e) => {
-                                                    const val = e.target.value
-                                                    if (media.length === 1 && onUpdateDescription) {
-                                                        onUpdateDescription(media[0].id, val)
-                                                    }
-                                                    // 高さ自動調整 (展開時のみ)
-                                                    if (isDescriptionExpanded) {
-                                                        e.target.style.height = 'auto'
-                                                        e.target.style.height = e.target.scrollHeight + 'px'
-                                                    }
-                                                }}
-                                                disabled={media.length !== 1}
-                                            />
+                                                            return
+                                                        }
+
+                                                        if (media.length === 1) {
+                                                            setIsDescriptionExpanded(true)
+                                                            // フォーカスを移すための遅延
+                                                            setTimeout(() => {
+                                                                const el = document.querySelector('.inspector-content .artist-input.expanded') as HTMLTextAreaElement
+                                                                if (el) {
+                                                                    el.focus()
+                                                                    el.style.height = 'auto'
+                                                                    el.style.height = el.scrollHeight + 'px'
+                                                                }
+                                                            }, 0)
+                                                        }
+                                                    }}
+                                                />
+                                            ) : (
+                                                <textarea
+                                                    key={media.length === 1 ? media[0].id : 'multi'}
+                                                    className={`artist-input ${isDescriptionExpanded ? 'expanded' : ''}`}
+                                                    placeholder="説明を入力..."
+                                                    rows={3}
+                                                    autoFocus={isDescriptionExpanded && enableRichText}
+                                                    style={{
+                                                        resize: 'none',
+                                                        minHeight: '60px',
+                                                        fontFamily: 'inherit',
+                                                        lineHeight: '1.5',
+                                                        width: '100%',
+                                                        boxSizing: 'border-box',
+                                                        height: isDescriptionExpanded ? 'auto' : undefined,
+                                                        overflow: isDescriptionExpanded ? 'hidden' : 'auto'
+                                                    }}
+                                                    value={media.length === 1 ? (media[0].description || '') : ''}
+                                                    onClick={() => {
+                                                        if (!isDescriptionExpanded) {
+                                                            setIsDescriptionExpanded(true)
+                                                            // 次のレンダリング後に高さを調整するためにsetTimeoutを使用
+                                                            setTimeout(() => {
+                                                                const el = document.activeElement as HTMLTextAreaElement
+                                                                if (el && el.tagName === 'TEXTAREA') {
+                                                                    el.style.height = 'auto'
+                                                                    el.style.height = el.scrollHeight + 'px'
+                                                                }
+                                                            }, 0)
+                                                        }
+                                                    }}
+                                                    onBlur={() => {
+                                                        if (enableRichText) {
+                                                            setIsDescriptionExpanded(false)
+                                                        }
+                                                    }}
+                                                    onChange={(e) => {
+                                                        const val = e.target.value
+                                                        if (media.length === 1 && onUpdateDescription) {
+                                                            onUpdateDescription(media[0].id, val)
+                                                        }
+                                                        // 高さ自動調整 (展開時のみ)
+                                                        if (isDescriptionExpanded) {
+                                                            e.target.style.height = 'auto'
+                                                            e.target.style.height = e.target.scrollHeight + 'px'
+                                                        }
+                                                    }}
+                                                    disabled={media.length !== 1}
+                                                />
+                                            )}
                                         </InspectorSection>
                                     )
                                 case 'url':
@@ -814,6 +908,7 @@ export function Inspector({
                                     value={tagInput}
                                     onChange={(e) => setTagInput(e.target.value)}
                                     onKeyDown={handleTagInputKeyDown}
+                                    onPaste={handleTagInputPaste}
                                     className="picker-popover-search"
                                     autoFocus
                                 />
@@ -872,39 +967,38 @@ export function Inspector({
                 }
 
                 {
-                    showGenreInput && genrePickerPos && createPortal(
-                        // ... existing genre picker code ...
+                    showFolderInput && folderPickerPos && createPortal(
                         <div
-                            ref={genrePickerRef}
+                            ref={folderPickerRef}
                             className="picker-popover-fixed"
-                            style={{ top: genrePickerPos.top, right: genrePickerPos.right }}
+                            style={{ top: folderPickerPos.top, right: folderPickerPos.right }}
                         >
                             <div className="picker-popover-header">
                                 <input
                                     type="text"
                                     placeholder="フォルダーを検索..."
-                                    value={genreInput}
-                                    onChange={(e) => setGenreInput(e.target.value)}
-                                    onKeyDown={handleGenreInputKeyDown}
+                                    value={folderInput}
+                                    onChange={(e) => setFolderInput(e.target.value)}
+                                    onKeyDown={handleFolderInputKeyDown}
                                     className="picker-popover-search"
                                     autoFocus
                                 />
                             </div>
                             <div className="picker-popover-list">
-                                {allGenres.filter(g => g.name.toLowerCase().includes(genreInput.toLowerCase())).map(genre => {
-                                    const isAdded = commonGenres.some(cg => cg.id === genre.id)
-                                    const isPartial = !isAdded && media.some(m => m.genres?.some(mg => mg.id === genre.id))
+                                {allFolders.filter(f => f.name.toLowerCase().includes(folderInput.toLowerCase())).map(folder => {
+                                    const isAdded = commonFolders.some(cf => cf.id === folder.id)
+                                    const isPartial = !isAdded && media.some(m => m.folders?.some(mf => mf.id === folder.id))
 
                                     return (
                                         <div
-                                            key={genre.id}
+                                            key={folder.id}
                                             className={`picker-popover-item ${isAdded ? 'added' : ''} ${isPartial ? 'partial' : ''}`}
                                             onClick={(e) => {
                                                 e.stopPropagation()
                                                 if (isAdded) {
-                                                    media.forEach(m => onRemoveGenre(m.id, genre.id))
+                                                    media.forEach(m => onRemoveFolder(m.id, folder.id))
                                                 } else {
-                                                    media.forEach(m => onAddGenre(m.id, genre.id))
+                                                    media.forEach(m => onAddFolder(m.id, folder.id))
                                                 }
                                             }}
                                         >
@@ -918,23 +1012,23 @@ export function Inspector({
                                                     <div className="partial-mark"></div>
                                                 )}
                                             </span>
-                                            <span>{genre.name}</span>
+                                            <span>{folder.name}</span>
                                         </div>
                                     )
                                 })}
-                                {genreInput.trim() && !allGenres.some(g => g.name.toLowerCase() === genreInput.trim().toLowerCase()) && (
-                                    <button className="picker-popover-create-btn" onClick={handleCreateGenre}>
+                                {folderInput.trim() && !allFolders.some(f => f.name.toLowerCase() === folderInput.trim().toLowerCase()) && (
+                                    <button className="picker-popover-create-btn" onClick={handleCreateFolder}>
                                         <span className="create-plus">+</span>
                                         <span className="create-label">作成</span>
-                                        <span className="create-name">"{genreInput.trim()}"</span>
+                                        <span className="create-name">"{folderInput.trim()}"</span>
                                     </button>
                                 )}
-                                {genreInput.trim() === '' && allGenres.length === 0 && (
+                                {folderInput.trim() === '' && allFolders.length === 0 && (
                                     <div className="picker-popover-empty">フォルダーがありません</div>
                                 )}
                             </div>
                             <div className="picker-popover-footer">
-                                <button className="picker-close-btn" onClick={() => { setShowGenreInput(false); setGenreInput(''); }}>
+                                <button className="picker-close-btn" onClick={() => { setShowFolderInput(false); setFolderInput(''); }}>
                                     閉じる ESC
                                 </button>
                             </div>

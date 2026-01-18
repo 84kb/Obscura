@@ -15,12 +15,13 @@ export interface MediaFile {
     created_date?: string
     modified_date?: string
     tags?: Tag[]
-    genres?: Genre[]
+    folders?: Folder[] // Renamed from genres
     comments?: MediaComment[]
     artist?: string | null
     artists?: string[]
     description?: string | null
     url?: string | null
+    dominant_color?: string | null
 }
 
 export interface MediaComment {
@@ -38,7 +39,7 @@ export interface Tag {
     folderId?: number | null
 }
 
-export interface Genre {
+export interface Folder { // Renamed from Genre
     id: number
     name: string
     parentId?: number | null
@@ -60,10 +61,10 @@ export interface FilterOptions {
     searchQuery: string
     selectedTags: number[]
     excludedTags: number[]
-    selectedGenres: number[]
+    selectedFolders: number[] // Renamed from selectedGenres (for Virtual Folders)
     tagFilterMode: 'and' | 'or'
-    selectedFolders: string[]
-    excludedFolders: string[]
+    selectedSysDirs: string[] // Renamed from selectedFolders (for File System Dirs)
+    excludedSysDirs: string[] // Renamed from excludedFolders
     folderFilterMode: 'and' | 'or'
     filterType: 'all' | 'uncategorized' | 'untagged' | 'recent' | 'random' | 'trash' | 'tag_manager'
     fileType: 'all' | 'video' | 'audio' // 内部フィルタリング用として残す
@@ -130,15 +131,16 @@ export interface ElectronAPI {
     createTag: (name: string) => Promise<Tag>
     deleteTag: (id: number) => Promise<void>
     addTagToMedia: (mediaId: number, tagId: number) => Promise<void>
+    addTagsToMedia: (mediaIds: number[], tagIds: number[]) => Promise<void>
     removeTagFromMedia: (mediaId: number, tagId: number) => Promise<void>
 
-    getGenres: () => Promise<Genre[]>
-    createGenre: (name: string, parentId?: number | null) => Promise<Genre>
-    deleteGenre: (id: number) => Promise<void>
-    renameGenre: (id: number, newName: string) => Promise<void>
-    addGenreToMedia: (mediaId: number, genreId: number) => Promise<void>
-    removeGenreFromMedia: (mediaId: number, genreId: number) => Promise<void>
-    updateGenreStructure: (updates: { id: number; parentId: number | null; orderIndex: number }[]) => Promise<void>
+    getFolders: () => Promise<Folder[]> // Renamed from getGenres
+    createFolder: (name: string, parentId?: number | null) => Promise<Folder>
+    deleteFolder: (id: number) => Promise<void>
+    renameFolder: (id: number, newName: string) => Promise<void>
+    addFolderToMedia: (mediaId: number, folderId: number) => Promise<void>
+    removeFolderFromMedia: (mediaId: number, folderId: number) => Promise<void>
+    updateFolderStructure: (updates: { id: number; parentId: number | null; orderIndex: number }[]) => Promise<void>
 
     generateThumbnail: (mediaId: number, filePath: string) => Promise<string | null>
 
@@ -165,6 +167,7 @@ export interface ElectronAPI {
 
     // ファイル操作
     openPath: (filePath: string) => Promise<void>
+    openExternal: (url: string) => Promise<void>
     showItemInFolder: (filePath: string) => Promise<void>
     openWith: (filePath: string) => Promise<void>
     copyFile: (filePath: string) => Promise<void>
@@ -182,6 +185,9 @@ export interface ElectronAPI {
     createTagFolder: (name: string) => Promise<TagFolder>
     deleteTagFolder: (id: number) => Promise<void>
     renameTagFolder: (id: number, newName: string) => Promise<void>
+    // ライブラリ管理
+    refreshLibrary: () => Promise<boolean>
+    onRefreshProgress: (callback: (current: number, total: number) => void) => void
     updateTagFolder: (tagId: number, folderId: number | null) => Promise<void>
 
     // ネイティブファイルドラッグ（同期的）
@@ -217,7 +223,7 @@ export interface ElectronAPI {
     downloadRemoteMedia: (url: string, filename: string, options?: { notificationId?: string }) => Promise<{ success: boolean; path?: string; message?: string }>
     uploadRemoteMedia: (url: string, token: string, filePaths: string[], options?: { notificationId?: string }) => Promise<{ success: boolean; results?: any[]; message?: string }>
     renameRemoteMedia: (url: string, token: string, id: number, newName: string) => Promise<any>
-    deleteRemoteMedia: (url: string, token: string, id: number) => Promise<any>
+    deleteRemoteMedia: (url: string, token: string, id: number, options?: { permanent?: boolean }) => Promise<any>
     updateRemoteMedia: (url: string, token: string, id: number, updates: any) => Promise<any>
 
     // === 自動アップデート ===
@@ -241,6 +247,9 @@ export interface ElectronAPI {
     checkFFmpegUpdate: () => Promise<{ available: boolean; version?: string; url?: string }>
     updateFFmpeg: (url: string) => Promise<boolean>
     onFFmpegUpdateProgress: (callback: (progress: number) => void) => () => void
+
+    // その他
+    focusWindow: () => Promise<void>
 }
 
 export interface RemoteLibrary {
@@ -252,9 +261,18 @@ export interface RemoteLibrary {
 }
 
 
+export interface AutoImportPath {
+    id: string
+    path: string
+    targetLibraryId: string
+    enabled: boolean
+}
+
 export interface AutoImportConfig {
     enabled: boolean
-    watchPath: string
+    watchPaths: AutoImportPath[]
+    // Deprecated legacy fields (optional for migration)
+    watchPath?: string
     targetLibraryId?: string
 }
 
@@ -265,6 +283,7 @@ export interface ClientConfig {
     remoteLibraries: RemoteLibrary[]
     myUserToken?: string
     autoImport: AutoImportConfig
+    thumbnailMode: 'speed' | 'quality'
 }
 
 export interface AppSettings {
@@ -272,6 +291,8 @@ export interface AppSettings {
     allowUpscale: boolean
     gridSize: number
     viewMode: 'grid' | 'list'
+    enableRichText: boolean
+    pipControlMode: 'navigation' | 'skip'
 }
 
 export type ItemInfoType = 'duration' | 'size' | 'tags' | 'rating' | 'modified' | 'created'

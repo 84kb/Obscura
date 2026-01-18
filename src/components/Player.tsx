@@ -5,7 +5,7 @@ import './Player.css'
 import { toMediaUrl } from '../utils/fileUrl'
 
 interface PlayerProps {
-    media: MediaFile | null
+    media: MediaFile
     onBack: () => void
     onNext?: () => void
     onPrev?: () => void
@@ -16,6 +16,7 @@ interface PlayerProps {
     onPlayFirst?: () => void
     activeRemoteLibrary?: RemoteLibrary | null
     myUserToken?: string
+    pipControlMode?: 'navigation' | 'skip'
 }
 
 export const Player: React.FC<PlayerProps> = ({
@@ -29,7 +30,8 @@ export const Player: React.FC<PlayerProps> = ({
     onToggleAutoPlay,
     onPlayFirst,
     activeRemoteLibrary,
-    myUserToken
+    myUserToken,
+    pipControlMode = 'navigation'
 }) => {
     const {
         containerRef,
@@ -51,7 +53,18 @@ export const Player: React.FC<PlayerProps> = ({
         changePlaybackRate,
         toggleLoop,
         toggleFullscreen,
-    } = usePlayer()
+        isPiP,
+        togglePiP,
+    } = usePlayer({
+        media,
+        onNext,
+        onPrev,
+        pipControlMode,
+        // @ts-ignore - 他のプロップスは無視される
+        onPlayFirst,
+        activeRemoteLibrary,
+        myUserToken
+    })
 
     const [commentText, setCommentText] = useState('')
     const [showCommentInput, setShowCommentInput] = useState(false)
@@ -278,9 +291,8 @@ export const Player: React.FC<PlayerProps> = ({
         })
 
         return cleanup
+        return cleanup
     }, [media])
-
-    if (!media) return null
 
     const formatTime = (seconds: number) => {
         if (!isFinite(seconds)) return '0:00'
@@ -291,9 +303,10 @@ export const Player: React.FC<PlayerProps> = ({
 
     const progress = duration > 0 ? (currentTime / duration) * 100 : 0
 
-    const isVideo = media.file_type === 'video'
     // media:// プロトコルを使用 (httpの場合はそのまま)
     const fileUrl = window.electronAPI ? toMediaUrl(media.file_path) : media.file_path
+
+    const isVideo = media.file_type === 'video'
 
     return (
         <div
@@ -335,7 +348,7 @@ export const Player: React.FC<PlayerProps> = ({
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
                             </svg>
-                        </button>
+                        </button >
                         <button
                             className={`nav-btn ${resizeMode === 'scale-down' ? 'active' : ''}`}
                             onClick={() => setResizeMode('scale-down')}
@@ -347,7 +360,7 @@ export const Player: React.FC<PlayerProps> = ({
                                 <path d="M4 4h16v16H4z" strokeOpacity="0.3" />
                             </svg>
                         </button>
-                    </div>
+                    </div >
 
                     <div className="nav-buttons">
                         <button
@@ -371,8 +384,8 @@ export const Player: React.FC<PlayerProps> = ({
                             </svg>
                         </button>
                     </div>
-                </div>
-            </div>
+                </div >
+            </div >
 
             <div className="player-content">
                 {isVideo ? (
@@ -561,6 +574,16 @@ export const Player: React.FC<PlayerProps> = ({
                         </svg>
                     </button>
 
+                    {/* PiP */}
+                    {isVideo && (
+                        <button className={`control-btn ${isPiP ? 'active' : ''}`} onClick={togglePiP} title="ピクチャーインピクチャー">
+                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <rect x="2" y="6" width="20" height="14" rx="2" ry="2" />
+                                <rect x="13" y="11" width="8" height="5" rx="1" ry="1" fill="currentColor" />
+                            </svg>
+                        </button>
+                    )}
+
                     {/* コメント */}
                     <div className="comment-control-group">
                         <button className={`control-btn ${showCommentInput ? 'active' : ''}`} onClick={() => setShowCommentInput(!showCommentInput)}>
@@ -593,6 +616,6 @@ export const Player: React.FC<PlayerProps> = ({
             </div>
 
             {/* 以前のback-button-overlayは削除済み */}
-        </div>
+        </div >
     )
 }

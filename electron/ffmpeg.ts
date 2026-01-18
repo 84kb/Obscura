@@ -73,11 +73,11 @@ export async function generatePreviewImages(videoPath: string, outputDir: string
 /**
  * メディアファイルからメタデータを取得する（動画・音声対応）
  */
-export async function getMediaMetadata(filePath: string): Promise<{ width?: number; height?: number; duration?: number; artist?: string; description?: string; comment?: string }> {
+export async function getMediaMetadata(filePath: string): Promise<{ width?: number; height?: number; duration?: number; artist?: string; description?: string; comment?: string; url?: string }> {
     return new Promise((resolve) => {
         const args = [
             '-v', 'error',
-            '-show_entries', 'stream=width,height,duration:format=duration:format_tags=artist,uploader,performer,comment,description,DESCRIPTION',
+            '-show_entries', 'stream=width,height,duration,tags:format=duration:format_tags',
             '-of', 'json',
             filePath
         ]
@@ -99,6 +99,7 @@ export async function getMediaMetadata(filePath: string): Promise<{ width?: numb
                     let duration: number | undefined
                     let artist: string | undefined
                     let description: string | undefined
+                    let url: string | undefined
 
                     // ストリーム情報から解像度とデュレーションを取得
                     if (json.streams && json.streams.length > 0) {
@@ -117,29 +118,103 @@ export async function getMediaMetadata(filePath: string): Promise<{ width?: numb
                         duration = parseFloat(json.format.duration)
                     }
 
-                    // フォーマットタグからアーティスト/投稿者を取得
+                    // タグ情報の収集 (formatとstreamの両方をチェック)
+                    let combinedTags: any = {}
                     if (json.format && json.format.tags) {
-                        const tags = json.format.tags
-                        artist = tags.artist || tags.ARTIST || tags.Artist ||
-                            tags.uploader || tags.UPLOADER || tags.Uploader ||
-                            tags.performer || tags.PERFORMER || tags.Performer ||
-                            undefined
+                        combinedTags = { ...combinedTags, ...json.format.tags }
+                    }
+                    if (json.streams) {
+                        json.streams.forEach((s: any) => {
+                            if (s.tags) {
+                                combinedTags = { ...combinedTags, ...s.tags }
+                            }
+                        })
+                    }
 
-                        description = tags.description || tags.DESCRIPTION || tags.Description || undefined
+                    // フォーマットタグからアーティスト/投稿者を取得
+                    artist = combinedTags.artist || combinedTags.ARTIST || combinedTags.Artist ||
+                        combinedTags.uploader || combinedTags.UPLOADER || combinedTags.Uploader ||
+                        combinedTags.performer || combinedTags.PERFORMER || combinedTags.Performer ||
+                        undefined
 
-                        // User Request: Comment field is used for URL
-                        // If description is empty, check if comment looks like a URL? No, request says "comment field is automatically entered" into URL field.
-                        // Assuming comment tag holds the URL.
-                        const comment = tags.comment || tags.COMMENT || tags.Comment
-                        if (comment) {
-                            // Simple heuristic: if it starts with http, treat as URL. 
-                            // Or just always assign to url field as per request "comment field automatic input".
-                            // Let's pass it as a separate field.
-                            // However, getMediaMetadata return type needs update.
+                    description = combinedTags.description || combinedTags.DESCRIPTION || combinedTags.Description || undefined
+
+                    // URL取得ロジック (User Request: Smart Niconico URL)
+                    const comment = combinedTags.comment || combinedTags.COMMENT || combinedTags.Comment
+                    let partId = combinedTags.Part_ID || combinedTags.part_id ||
+                        combinedTags.episode_id || combinedTags.EPISODE_ID
+
+                    // 1. Direct Part_ID check (already done above)
+
+                    // 2. Scan ALL tags for Part_ID if not found
+                    if (!partId) {
+                        for (const key of Object.keys(combinedTags)) {
+                            const val = combinedTags[key]
+                            if (typeof val === 'string') {
+                                // Try parsing as JSON first
+                                try {
+                                    // Only try if it looks like JSON
+                                    if (val.trim().startsWith('{')) {
+                                        const parsed = JSON.parse(val)
+                                        if (parsed && (parsed.Part_ID || parsed.part_id)) {
+                                            partId = parsed.Part_ID || parsed.part_id
+                                            break
+                                        }
+                                    }
+                                } catch (e) { }
+
+                                // Regex fallback
+                                // Look for "Part_ID":"sm12345" or similar
+                                const match = val.match(/["']?Part_ID["']?\s*[:=]\s*["']?([a-zA-Z0-9]+)["']?/i)
+                                if (match && match[1]) {
+                                    partId = match[1]
+                                    break
+                                }
+                            }
                         }
                     }
 
-                    resolve({ width, height, duration, artist, description, comment: (json.format && json.format.tags) ? (json.format.tags.comment || json.format.tags.COMMENT || json.format.tags.Comment) : undefined })
+                    // 3. Nuclear option: Global Regex on raw output data
+                    if (!partId) {
+                        try {
+                            const match = outputData.match(/["']?Part_ID["']?\s*[:=]\s*["']?([a-zA-Z0-9]+)["']?/i)
+                            if (match && match[1]) {
+                                partId = match[1]
+                            }
+                        } catch (e) { }
+                    }
+
+                    // 4. Filename Fallback (LAST RESORT)
+                    // ファイル名に "sm123456" などが含まれている場合
+                    if (!partId) {
+                        // filePathからファイル名を取得
+                        const fileName = path.basename(filePath)
+                        const match = fileName.match(/(sm|nm|so)\d+/i)
+                        if (match && match[0]) {
+                            partId = match[0]
+                        }
+                    }
+
+                    if (comment && comment.trim().startsWith('https://')) {
+                        // "https:// " で始まる場合はCommentをそのままURLとして使用
+                        url = comment
+                    } else if (partId) {
+                        // それ以外の場合でPart_IDがあるならニコニコ動画のURLを生成
+                        url = `https://www.nicovideo.jp/watch/${partId}`
+                    } else if (comment && (comment.startsWith('http://') || comment.startsWith('www.'))) {
+                        // その他のURLらしきもの
+                        url = comment
+                    }
+
+                    resolve({
+                        width,
+                        height,
+                        duration,
+                        artist,
+                        description,
+                        comment: (json.format && json.format.tags) ? (json.format.tags.comment || json.format.tags.COMMENT || json.format.tags.Comment) : undefined,
+                        url
+                    })
                     return
                 } catch (e) {
                     console.error('Failed to parse ffprobe output', e)
@@ -159,9 +234,57 @@ export async function getMediaMetadata(filePath: string): Promise<{ width?: numb
  * サムネイルを生成する（埋め込み画像抽出 -> フレームキャプチャの順で試行）
  * @param sourcePath 元動画/音声ファイルのパス
  * @param destPath 出力先パス
+ * @param mode 生成モード ('speed' | 'quality')
  * @returns 成功した場合はtrue
  */
-export async function createThumbnail(sourcePath: string, destPath: string): Promise<boolean> {
+/**
+ * 画像ファイルから主要色（ドミナントカラー）を抽出する
+ * @param imagePath 画像ファイルのパス
+ * @returns HEXカラーコード（例: #RRGGBB）または null
+ */
+export async function extractDominantColor(imagePath: string): Promise<string | null> {
+    return new Promise((resolve) => {
+        // 画像を1x1ピクセルにリサイズしてRGB値を出力
+        const args = [
+            '-i', imagePath,
+            '-vf', 'scale=1:1',
+            '-vframes', '1',
+            '-f', 'rawvideo',
+            '-pix_fmt', 'rgb24',
+            '-' // 標準出力へ
+        ]
+
+        const ffmpegPath = getFFmpegPath()
+        const ffmpeg = spawn(ffmpegPath, args)
+
+        let buffer: Buffer = Buffer.alloc(0)
+
+        ffmpeg.stdout.on('data', (data) => {
+            buffer = Buffer.concat([buffer, data])
+        })
+
+        ffmpeg.on('close', (code) => {
+            if (code === 0 && buffer.length >= 3) {
+                const r = buffer[0]
+                const g = buffer[1]
+                const b = buffer[2]
+                // HEX変換
+                const hex = `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`
+                // console.log(`[ffmpeg] Extracted color for ${imagePath}: ${hex}`)
+                resolve(hex)
+            } else {
+                resolve(null)
+            }
+        })
+
+        ffmpeg.on('error', (err) => {
+            console.error('[ffmpeg] Failed to extract color:', err)
+            resolve(null)
+        })
+    })
+}
+
+export async function createThumbnail(sourcePath: string, destPath: string, mode: 'speed' | 'quality' = 'speed'): Promise<boolean> {
     // 埋め込みサムネイル(カバーアート)の抽出を試みる
     const extractEmbedded = (): Promise<boolean> => {
         return new Promise((resolve) => {
@@ -204,16 +327,48 @@ export async function createThumbnail(sourcePath: string, destPath: string): Pro
     // フレームからサムネイルを生成
     const generateFromFrame = (): Promise<boolean> => {
         return new Promise((resolve) => {
-            const args = [
-                '-ss', '3',           // 3秒目から
-                '-i', sourcePath,
-                '-vframes', '1',
-                '-q:v', '3',
-                '-vf', 'scale=320:-1',
-                '-vcodec', 'png',
-                '-y',
-                destPath
-            ]
+            const isSpeed = mode === 'speed'
+
+            // Speed Mode: Seek to 1s, faster seeking (-ss before -i), no high quality flags if possible
+            // Quality Mode: Seek to 3s, higher quality scale/q factors
+
+            const args = []
+
+            if (isSpeed) {
+                // Fast seek (input seeking)
+                args.push('-ss', '1')
+            } else {
+                // Accurate seek (output seeking for accuracy, or just slightly later timestamp)
+                args.push('-ss', '3')
+            }
+
+            args.push('-i', sourcePath)
+            args.push('-vframes', '1')
+
+            if (isSpeed) {
+                // Speed options
+                // -f mjpeg is faster to write if we weren't enforcing PNG, but we want PNG for consistency perhaps?
+                // actually the function uses .png extension usually?
+                // Let's stick to PNG or JPG. The previous code enforced png usage via -vcodec png logic implicitly or explicitly.
+                // Previous code: '-vcodec', 'png'
+
+                // For speed, let's try to not be too heavy on quality
+                // Width 320 is fine.
+                args.push('-vf', 'scale=320:-1')
+                args.push('-vcodec', 'png')
+                // Skip -q:v for PNG usually (it's compression level). 
+                // But let's keep it simple.
+            } else {
+                // Quality options
+                args.push('-q:v', '3') // Higher quality
+                args.push('-vf', 'scale=480:-1') // Slightly larger maybe? Or kep 320 but better algo?
+                args.push('-vcodec', 'png')
+            }
+
+            args.push('-y')
+            args.push(destPath)
+
+            console.log(`[ffmpeg] Generating thumbnail (${mode}): ${args.join(' ')}`)
 
             const ffmpegPath = getFFmpegPath()
             const ffmpeg = spawn(ffmpegPath, args)
@@ -236,7 +391,9 @@ export async function createThumbnail(sourcePath: string, destPath: string): Pro
     }
 
     try {
-        // 埋め込み抽出
+        // 埋め込み抽出 (Qualityモード、またはSpeedモードでも埋め込みがあればそれが最速なので試す)
+        // ただしSpeedモードで埋め込み抽出が遅い(巨大ファイル全体スキャンになる)場合はスキップすべきだが、
+        // -map 0:v -vframes 1 は通常先頭だけ読むので速いはず。
         if (await extractEmbedded()) {
             return true
         }
