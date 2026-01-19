@@ -1610,16 +1610,18 @@ ipcMain.handle('add-remote-tag-to-media', async (_event, { url, token, mediaId, 
 })
 
 ipcMain.handle('remove-remote-tag-from-media', async (_event, { url, token, mediaId, tagId }: { url: string; token: string; mediaId: number; tagId: number }) => {
-    return callRemoteApi(url, token, `/api/tags/media`, 'DELETE', { mediaId, tagId })
+    return callRemoteApi(url, token, `/api/tags/media?mediaId=${mediaId}&tagId=${tagId}`, 'DELETE')
 })
 
 // ヘルパー関数
 async function callRemoteApi(baseUrl: string, token: string, path: string, method: string, body?: any) {
     try {
-        const userToken = getClientConfig().myUserToken || ''
+        let userToken = getClientConfig().myUserToken || ''
         let accessToken = token
         if (token.includes(':')) {
-            accessToken = token.split(':')[1]
+            const parts = token.split(':')
+            userToken = parts[0]
+            accessToken = parts[1]
         }
 
         const headers: any = {

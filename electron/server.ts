@@ -413,7 +413,8 @@ export function startServer(port: number): Promise<void> {
 
             expressApp.delete('/api/tags/media', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res: Response) => {
                 try {
-                    const { mediaId, tagId } = req.body
+                    const mediaId = req.body.mediaId ?? req.query.mediaId
+                    const tagId = req.body.tagId ?? req.query.tagId
                     if (mediaId === undefined || tagId === undefined) return res.status(400).json({ error: { code: 'INVALID_INPUT' } })
 
                     library.removeTagFromMedia(mediaId, tagId)
