@@ -8,7 +8,7 @@ import { createServer } from 'http'
 import { libraryRegistry, libraryDB } from './database'
 import { sharedUserDB, auditLogDB, Permission, serverConfigDB } from './shared-library'
 import { validateUserToken, validateAccessToken } from './crypto-utils'
-import { logError } from './error-logger'
+import { logError, logWarning, logInfo } from './error-logger'
 import fs from 'fs'
 import path from 'path'
 import multer from 'multer'
@@ -54,7 +54,7 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
 
         if (config.allowedIPs && config.allowedIPs.length > 0) {
             if (!config.allowedIPs.includes(normalizedIP)) {
-                console.warn(`[Security] Blocked connection from ${normalizedIP} (Not in allowed IPs)`)
+                logWarning('auth', `[Security] Blocked connection from ${normalizedIP} (Not in allowed IPs)`)
                 auditLogDB.addLog({
                     userId: 'unknown',
                     nickname: 'unknown',
@@ -100,8 +100,8 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
             id: user.id,
             nickname: user.nickname,
             iconUrl: user.iconUrl,
-            permissions: user.permissions,
-            ipAddress: req.ip || 'unknown',
+            permissions: user.permissions || [],
+            ipAddress: normalizedIP,
         }
 
         next()
@@ -121,7 +121,7 @@ export function requirePermission(...requiredPermissions: Permission[]) {
             if (req.user.permissions.includes('FULL')) return next()
             const hasPermission = requiredPermissions.some(perm => req.user!.permissions.includes(perm))
             if (!hasPermission) {
-                console.warn(`[Permission Denied] User: ${req.user!.nickname} (${req.user!.permissions.join(',')}), Required: ${requiredPermissions.join(',')}`)
+                logWarning('auth', `[Permission Denied] User: ${req.user!.nickname} (${req.user!.permissions.join(',')}), Required: ${requiredPermissions.join(',')}`)
                 return res.status(403).json({ error: { code: 'INSUFFICIENT_PERMISSION', message: '権限が不足しています' } })
             }
             next()
@@ -129,6 +129,23 @@ export function requirePermission(...requiredPermissions: Permission[]) {
             logError('auth', 'Permission check error', error)
             return res.status(500).json({ error: { code: 'SERVER_ERROR', message: 'サーバーエラー' } })
         }
+    }
+}
+
+/**
+ * リクエストからIDパラメータを安全に取得するヘルパー
+ */
+function getSafeParams(req: Request) {
+    const body = req.body || {}
+    const query = req.query || {}
+    const params = req.params || {}
+
+    return {
+        mediaId: body.mediaId ?? query.mediaId ?? (params.id ? parseInt(String(params.id)) : undefined),
+        tagId: body.tagId ?? query.tagId ?? undefined,
+        folderId: body.folderId ?? query.folderId ?? undefined,
+        mediaIds: body.mediaIds ?? query.mediaIds ?? undefined,
+        tagIds: body.tagIds ?? query.tagIds ?? undefined,
     }
 }
 
@@ -199,30 +216,44 @@ export function startServer(port: number): Promise<void> {
 
             expressApp.get('/api/media/:id', authMiddleware, requirePermission('READ_ONLY'), (req: AuthenticatedRequest, res: Response) => {
                 try {
-                    const media = library.getMediaFileWithDetails(parseInt(String(req.params.id)))
+                    const { mediaId: id } = getSafeParams(req)
+                    if (id === undefined || isNaN(Number(id))) return res.status(400).json({ error: { code: 'INVALID_INPUT', message: '有効なIDが必要です' } })
+
+                    const media = library.getMediaFileWithDetails(Number(id))
                     if (!media) return res.status(404).json({ error: { code: 'RESOURCE_NOT_FOUND', message: '見つかりません' } })
                     res.json(media)
-                } catch (e) { res.status(500).json({ error: { code: 'SERVER_ERROR' } }) }
+                } catch (e) {
+                    logError('api', `GET /api/media/${req.params.id} error`, e)
+                    res.status(500).json({ error: { code: 'SERVER_ERROR' } })
+                }
             })
 
             expressApp.get('/api/media/:id/duplicates', authMiddleware, requirePermission('READ_ONLY'), (req: AuthenticatedRequest, res: Response) => {
                 try {
-                    const id = parseInt(String(req.params.id))
-                    if (isNaN(id)) return res.status(400).json({ error: { code: 'INVALID_INPUT' } })
+                    const { mediaId: id } = getSafeParams(req)
+                    if (id === undefined || isNaN(Number(id))) return res.status(400).json({ error: { code: 'INVALID_INPUT', message: '有効なIDが必要です' } })
 
-                    const duplicates = library.getDuplicatesForMedia(id)
+                    const duplicates = library.getDuplicatesForMedia(Number(id))
                     res.json(duplicates)
-                } catch (e) { res.status(500).json({ error: { code: 'SERVER_ERROR' } }) }
+                } catch (e) {
+                    logError('api', `GET /api/media/${req.params.id}/duplicates error`, e)
+                    res.status(500).json({ error: { code: 'SERVER_ERROR' } })
+                }
             })
 
             expressApp.post('/api/media/:id/comments', authMiddleware, requirePermission('READ_ONLY'), (req: AuthenticatedRequest, res: Response) => {
                 try {
-                    const { text, time } = req.body
-                    if (!text) return res.status(400).json({ error: { code: 'INVALID_INPUT' } })
-                    const comment = library.addComment(parseInt(String(req.params.id)), text, time, req.user?.nickname)
+                    const { mediaId: id } = getSafeParams(req)
+                    const { text, time } = req.body || {}
+                    if (id === undefined || isNaN(Number(id)) || !text) return res.status(400).json({ error: { code: 'INVALID_INPUT', message: 'IDとテキストが必要です' } })
+
+                    const comment = library.addComment(Number(id), text, time, req.user?.nickname)
                     res.status(201).json(comment)
-                    if (io) io.emit(`media:comment:${String(req.params.id)}`, comment)
-                } catch (e) { res.status(500).json({ error: { code: 'SERVER_ERROR' } }) }
+                    if (io) io.emit(`media:comment:${String(id)}`, comment)
+                } catch (e) {
+                    logError('api', `POST /api/media/${req.params.id}/comments error`, e)
+                    res.status(500).json({ error: { code: 'SERVER_ERROR' } })
+                }
             })
 
             expressApp.get('/api/tags', authMiddleware, requirePermission('READ_ONLY'), (_req, res) => {
@@ -369,59 +400,80 @@ export function startServer(port: number): Promise<void> {
             })
 
 
-            // タグ操作API (関係)
+            // --- タグ操作API (関係) ---
+            // ※パラメータ衝突を防ぐため、具体的なパス (/api/tags/media) を変数パス (/api/tags/:id) より前に配置
             expressApp.post('/api/tags/media', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res: Response) => {
                 try {
-                    const { mediaId, tagId, mediaIds, tagIds } = req.body
+                    const { mediaId, tagId, mediaIds, tagIds } = getSafeParams(req)
 
                     // 単体追加
                     if (mediaId !== undefined && tagId !== undefined) {
-                        library.addTagToMedia(mediaId, tagId)
+                        library.addTagToMedia(Number(mediaId), Number(tagId))
                     }
                     // 一括追加
                     else if (mediaIds && tagIds && Array.isArray(mediaIds) && Array.isArray(tagIds)) {
-                        library.addTagsToMedia(mediaIds, tagIds)
+                        library.addTagsToMedia(mediaIds.map(Number), tagIds.map(Number))
                     }
                     else {
-                        return res.status(400).json({ error: { code: 'INVALID_INPUT' } })
+                        return res.status(400).json({ error: { code: 'INVALID_INPUT', message: 'mediaId, tagId または mediaIds, tagIds が必要です' } })
                     }
 
                     res.json({ success: true })
                     if (io) io.emit('library-updated')
-                } catch (e) { res.status(500).send() }
+                } catch (e: any) {
+                    logError('api', 'POST /api/tags/media error', e)
+                    res.status(500).json({ error: { code: 'SERVER_ERROR', message: e.message } })
+                }
             })
 
             expressApp.delete('/api/tags/media', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res: Response) => {
                 try {
-                    const mediaId = req.body.mediaId ?? req.query.mediaId
-                    const tagId = req.body.tagId ?? req.query.tagId
-                    if (mediaId === undefined || tagId === undefined) return res.status(400).json({ error: { code: 'INVALID_INPUT' } })
+                    const { mediaId, tagId } = getSafeParams(req)
+                    if (mediaId === undefined || tagId === undefined) {
+                        return res.status(400).json({ error: { code: 'INVALID_INPUT', message: 'mediaId と tagId が必要です' } })
+                    }
 
-                    library.removeTagFromMedia(mediaId, tagId)
+                    library.removeTagFromMedia(Number(mediaId), Number(tagId))
                     res.json({ success: true })
                     if (io) io.emit('library-updated')
-                } catch (e) { res.status(500).send() }
+                } catch (e: any) {
+                    logError('api', 'DELETE /api/tags/media error', e)
+                    res.status(500).json({ error: { code: 'SERVER_ERROR', message: e.message } })
+                }
             })
 
-            // タグ基本API
+            // --- タグ基本API ---
             expressApp.post('/api/tags', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res: Response) => {
                 try {
-                    const { name } = req.body
-                    if (!name) return res.status(400).json({ error: { code: 'INVALID_INPUT' } })
+                    const { name } = req.body || {}
+                    if (!name) return res.status(400).json({ error: { code: 'INVALID_INPUT', message: '名前が必要です' } })
                     const tag = library.createTag(name)
                     res.status(201).json(tag)
                     if (io) io.emit('library-updated')
-                } catch (e) { res.status(500).send() }
+                } catch (e: any) {
+                    logError('api', 'POST /api/tags error', e)
+                    res.status(500).json({ error: { code: 'SERVER_ERROR', message: e.message } })
+                }
             })
 
             expressApp.delete('/api/tags/:id', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res: Response) => {
                 try {
-                    const id = parseInt(String(req.params.id))
-                    if (isNaN(id)) return res.status(400).send()
-                    library.deleteTag(id)
+                    const { mediaId: id } = getSafeParams(req)
+                    if (id === undefined || isNaN(Number(id))) return res.status(400).json({ error: { code: 'INVALID_INPUT', message: '有効なIDが必要です' } })
+                    library.deleteTag(Number(id))
                     res.json({ success: true })
                     if (io) io.emit('library-updated')
-                } catch (e) { res.status(500).send() }
+                } catch (e: any) {
+                    logError('api', `DELETE /api/tags/${req.params.id} error`, e)
+                    res.status(500).json({ error: { code: 'SERVER_ERROR', message: e.message } })
+                }
+            })
+
+            // グローバルエラーハンドラー (最後の砦)
+            expressApp.use((err: any, req: Request, res: Response, next: NextFunction) => {
+                logError('server', `Unhandled error at ${req.method} ${req.url}`, err)
+                if (res.headersSent) return next(err)
+                res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: '予期せぬエラーが発生しました' } })
             })
 
             if (config.requireHttps && config.sslCertPath && config.sslKeyPath) {

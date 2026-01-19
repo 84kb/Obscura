@@ -924,11 +924,13 @@ export class MediaLibrary {
     this.db.mediaTags = this.db.mediaTags.filter((mt) => !(mt.mediaId === mId && mt.tagId === tId))
 
     const media = this.db.mediaFiles.find(m => m.id === mId)
-    if (media && media.tags) {
-      media.tags = media.tags.filter((t: any) => {
-        const id = typeof t === 'object' ? t.id : t
-        return id !== tId
-      })
+    if (media) {
+      if (media.tags) {
+        media.tags = media.tags.filter((t: any) => {
+          const id = typeof t === 'object' ? t.id : t
+          return id !== tId
+        })
+      }
       this.saveMediaMetadata(media)
     }
   }
