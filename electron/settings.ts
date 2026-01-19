@@ -34,6 +34,8 @@ export interface ClientConfig {
     language: 'ja' | 'en'
     remoteLibraries: RemoteLibrary[]
     myUserToken?: string
+    nickname?: string
+    iconUrl?: string
     autoImport: AutoImportConfig
     thumbnailMode: 'speed' | 'quality'
     discordRichPresenceEnabled: boolean
@@ -46,6 +48,8 @@ const defaultConfig: ClientConfig = {
     language: 'ja',
     remoteLibraries: [],
     myUserToken: undefined,
+    nickname: undefined,
+    iconUrl: undefined,
     autoImport: {
         enabled: false,
         watchPaths: []

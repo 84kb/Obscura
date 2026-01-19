@@ -226,7 +226,19 @@ export function MainHeader({
         const counts: Map<string, number> = new Map()
         allMediaFiles.forEach(media => {
             if (media.is_deleted) return
-            const artists = (media.artists && media.artists.length > 0) ? media.artists : [media.artist || '未設定']
+
+            // artists配列を使うか、artistをカンマで分割して配列にする
+            let artists: string[] = []
+            if (media.artists && media.artists.length > 0) {
+                artists = media.artists
+            } else if (media.artist) {
+                // カンマ区切りの場合は分割
+                artists = media.artist.split(',').map(a => a.trim()).filter(a => a)
+            }
+
+            if (artists.length === 0) {
+                artists = ['未設定']
+            }
 
             artists.forEach(artist => {
                 const name = artist || '未設定'

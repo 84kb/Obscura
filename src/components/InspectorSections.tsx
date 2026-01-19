@@ -171,7 +171,10 @@ export const CommentSectionContent = ({
             ) : (
                 comments.map(c => (
                     <div key={c.id} className="comment-item">
-                        <div className="comment-time">{formatTime(c.time)}</div>
+                        <div className="comment-meta">
+                            <span className="comment-time">{formatTime(c.time)}</span>
+                            {c.nickname && <span className="comment-nickname">{c.nickname}</span>}
+                        </div>
                         <div className="comment-text">{c.text}</div>
                     </div>
                 ))

@@ -5,7 +5,7 @@ import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
 import { Server as SocketIOServer } from 'socket.io'
 import { createServer } from 'http'
-import { libraryRegistry, libraryDB, tagDB } from './database'
+import { libraryRegistry, libraryDB } from './database'
 import { sharedUserDB, auditLogDB, Permission, serverConfigDB } from './shared-library'
 import { validateUserToken, validateAccessToken } from './crypto-utils'
 import { logError } from './error-logger'
@@ -229,6 +229,10 @@ export function startServer(port: number): Promise<void> {
                 res.json(library.getAllTags())
             })
 
+            expressApp.get('/api/tag-groups', authMiddleware, requirePermission('READ_ONLY'), (_req, res) => {
+                res.json(library.getAllTagGroups())
+            })
+
             expressApp.get('/api/folders', authMiddleware, requirePermission('READ_ONLY'), (_req, res) => {
                 res.json(library.getAllFolders())
             })
@@ -370,7 +374,7 @@ export function startServer(port: number): Promise<void> {
                 try {
                     const { name } = req.body
                     if (!name) return res.status(400).json({ error: { code: 'INVALID_INPUT' } })
-                    const tag = tagDB.createTag(name)
+                    const tag = library.createTag(name)
                     res.status(201).json(tag)
                     if (io) io.emit('library-updated')
                 } catch (e) { res.status(500).send() }
@@ -380,7 +384,7 @@ export function startServer(port: number): Promise<void> {
                 try {
                     const id = parseInt(String(req.params.id))
                     if (isNaN(id)) return res.status(400).send()
-                    tagDB.deleteTag(id)
+                    library.deleteTag(id)
                     res.json({ success: true })
                     if (io) io.emit('library-updated')
                 } catch (e) { res.status(500).send() }
@@ -392,11 +396,11 @@ export function startServer(port: number): Promise<void> {
 
                     // 単体追加
                     if (mediaId !== undefined && tagId !== undefined) {
-                        tagDB.addTagToMedia(mediaId, tagId)
+                        library.addTagToMedia(mediaId, tagId)
                     }
                     // 一括追加
                     else if (mediaIds && tagIds && Array.isArray(mediaIds) && Array.isArray(tagIds)) {
-                        tagDB.addTagsToMedia(mediaIds, tagIds)
+                        library.addTagsToMedia(mediaIds, tagIds)
                     }
                     else {
                         return res.status(400).json({ error: { code: 'INVALID_INPUT' } })
@@ -412,7 +416,7 @@ export function startServer(port: number): Promise<void> {
                     const { mediaId, tagId } = req.body
                     if (mediaId === undefined || tagId === undefined) return res.status(400).json({ error: { code: 'INVALID_INPUT' } })
 
-                    tagDB.removeTagFromMedia(mediaId, tagId)
+                    library.removeTagFromMedia(mediaId, tagId)
                     res.json({ success: true })
                     if (io) io.emit('library-updated')
                 } catch (e) { res.status(500).send() }

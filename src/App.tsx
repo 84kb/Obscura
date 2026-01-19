@@ -925,6 +925,10 @@ export default function App() {
                     }}
                     activeRemoteLibrary={activeRemoteLibrary}
                     myUserToken={myUserToken}
+                    onCommentAdded={() => {
+                        // コメント追加後、メディアデータを再取得してInspectorを更新
+                        reloadLibrary()
+                    }}
                 />
             </div>
         ) : null

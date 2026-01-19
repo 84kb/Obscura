@@ -845,7 +845,11 @@ ipcMain.handle('focus-window', () => {
 ipcMain.handle('get-app-version', () => app.getVersion())
 
 // コメント
-ipcMain.handle('add-comment', (_, mediaId, text, time) => commentDB.addComment(mediaId, text, time))
+ipcMain.handle('add-comment', (_, mediaId, text, time, nickname?: string) => {
+    // ニックネームが未指定の場合、クライアント設定からプロファイル名を取得
+    const actualNickname = nickname || getClientConfig().nickname || undefined
+    return commentDB.addComment(mediaId, text, time, actualNickname)
+})
 ipcMain.handle('get-comments', (_event, mediaId) => {
     return commentDB.getComments(mediaId)
 })

@@ -282,11 +282,23 @@
     font-size: 13px;
 }
 
+.comment-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
 .comment-time {
     color: var(--primary);
     font-weight: 600;
-    font-size: 11px;
-    margin-bottom: 2px;
+    font-size: 10px;
+}
+
+.comment-nickname {
+    color: white;
+    font-weight: 500;
+    font-size: 12px;
 }
 
 .comment-text {

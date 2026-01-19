@@ -1243,6 +1243,6 @@ export const folderDB = {
 }
 
 export const commentDB = {
-  addComment: (mediaId: number, text: string, time: number) => getActiveMediaLibrary()?.addComment(mediaId, text, time),
+  addComment: (mediaId: number, text: string, time: number, nickname?: string) => getActiveMediaLibrary()?.addComment(mediaId, text, time, nickname),
   getComments: (mediaId: number) => getActiveMediaLibrary()?.getComments(mediaId) || [],
 }

@@ -387,7 +387,30 @@ export function useLibrary() {
     // タググループ読み込み (現在リモートAPI未実装のためスキップまたは実装が必要。一旦スキップ)
     const loadTagGroups = useCallback(async () => {
         if (activeRemoteLibrary) {
-            setTagGroups([]) // リモートは未対応とする
+            try {
+                let userToken = myUserToken
+                let accessToken = activeRemoteLibrary.token
+
+                if (activeRemoteLibrary.token.includes(':')) {
+                    const parts = activeRemoteLibrary.token.split(':')
+                    userToken = parts[0]
+                    accessToken = parts[1]
+                }
+                const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
+
+                const response = await fetch(`${baseUrl}/api/tag-groups`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'X-User-Token': userToken
+                    }
+                })
+                if (response.ok) {
+                    const data = await response.json()
+                    setTagGroups(data)
+                }
+            } catch (e) {
+                console.error('Failed to load remote tag groups', e)
+            }
             return
         }
         try {
@@ -396,7 +419,7 @@ export function useLibrary() {
         } catch (error) {
             console.error('Failed to load tag groups:', error)
         }
-    }, [activeRemoteLibrary])
+    }, [activeRemoteLibrary, myUserToken])
 
 
     // フォルダー選択とスキャン
@@ -1060,7 +1083,17 @@ export function useLibrary() {
         if ((filterOptions.selectedArtists && filterOptions.selectedArtists.length > 0) ||
             (filterOptions.excludedArtists && filterOptions.excludedArtists.length > 0)) {
             result = result.filter(m => {
-                const artists = (m.artists && m.artists.length > 0) ? m.artists : [m.artist || '未設定']
+                // artists配列を使うか、artistをカンマで分割して配列にする
+                let artists: string[] = []
+                if (m.artists && m.artists.length > 0) {
+                    artists = m.artists
+                } else if (m.artist) {
+                    // カンマ区切りの場合は分割
+                    artists = m.artist.split(',').map(a => a.trim()).filter(a => a)
+                }
+                if (artists.length === 0) {
+                    artists = ['未設定']
+                }
 
                 // 除外チェック
                 if (filterOptions.excludedArtists.length > 0) {

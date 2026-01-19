@@ -17,6 +17,7 @@ interface PlayerProps {
     activeRemoteLibrary?: RemoteLibrary | null
     myUserToken?: string
     pipControlMode?: 'navigation' | 'skip'
+    onCommentAdded?: () => void
 }
 
 export const Player: React.FC<PlayerProps> = ({
@@ -31,7 +32,8 @@ export const Player: React.FC<PlayerProps> = ({
     onPlayFirst,
     activeRemoteLibrary,
     myUserToken,
-    pipControlMode = 'navigation'
+    pipControlMode = 'navigation',
+    onCommentAdded
 }) => {
     const {
         containerRef,
@@ -106,32 +108,19 @@ export const Player: React.FC<PlayerProps> = ({
 
     // 動画読み込み後に自動再生を開始（mediaが変更された時のみ）
     useEffect(() => {
-        console.log('[Player] Auto-play useEffect triggered, media:', media?.id)
         const mediaElement = videoRef.current || audioRef.current
-        if (!mediaElement) {
-            console.log('[Player] No media element found')
-            return
-        }
-
-        const handleLoadedMetadata = () => {
-            console.log('[Player] Metadata loaded, starting auto-play')
-            mediaElement.play().catch(err => console.error('Auto-play failed:', err))
-        }
+        if (!mediaElement) return
 
         // 既にメタデータがロードされている場合は即座に再生
         if (mediaElement.readyState >= 1) {
-            console.log('[Player] Metadata already loaded, starting auto-play immediately')
-            mediaElement.play().catch(err => console.error('Auto-play failed:', err))
+            mediaElement.play().catch(() => { })
         } else {
-            console.log('[Player] Waiting for metadata to load')
-            mediaElement.addEventListener('loadedmetadata', handleLoadedMetadata)
+            // メタデータロード後に再生（onceで自動的にリスナー解除）
+            mediaElement.addEventListener('loadedmetadata', () => {
+                mediaElement.play().catch(() => { })
+            }, { once: true })
         }
-
-        return () => {
-            console.log('[Player] Cleaning up auto-play useEffect')
-            mediaElement.removeEventListener('loadedmetadata', handleLoadedMetadata)
-        }
-    }, [media]) // mediaが変更された時のみ実行
+    }, [media?.id]) // media.idのみに依存（オブジェクト参照変更による再トリガーを防止）
 
     // Buffered Time State
     const [bufferedTime, setBufferedTime] = useState(0)
@@ -164,7 +153,7 @@ export const Player: React.FC<PlayerProps> = ({
             mediaElement.removeEventListener('progress', handleProgress)
             mediaElement.removeEventListener('timeupdate', handleProgress)
         }
-    }, [media])
+    }, [media?.id])
 
     // ループと自動再生の連携
     useEffect(() => {
@@ -176,7 +165,7 @@ export const Player: React.FC<PlayerProps> = ({
         } else {
             mediaElement.loop = isLooping
         }
-    }, [autoPlayEnabled, isLooping, media])
+    }, [autoPlayEnabled, isLooping, media?.id])
 
 
     // Discord RPC Integration
@@ -300,6 +289,10 @@ export const Player: React.FC<PlayerProps> = ({
             setCommentText('')
             setShowCommentInput(false)
             console.log('Comment added')
+            // コメント追加後に通知（Inspector更新用）
+            if (onCommentAdded) {
+                onCommentAdded()
+            }
         } catch (error) {
             console.error('Failed to add comment:', error)
         }
