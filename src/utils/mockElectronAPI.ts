@@ -3,7 +3,7 @@
  * Electron環境外でUIを検証するためのモック実装
  */
 
-import { MediaFile, Tag, TagFolder, Folder, Library, MediaComment, ClientConfig, ServerConfig, SharedUser } from '../types'
+import { MediaFile, Tag, TagGroup, Folder, Library, MediaComment, ClientConfig, ServerConfig, SharedUser } from '../types'
 
 // localStorageのキー
 const STORAGE_KEYS = {
@@ -12,7 +12,7 @@ const STORAGE_KEYS = {
     FOLDERS: 'mock_folders',
     LIBRARIES: 'mock_libraries',
     ACTIVE_LIBRARY: 'mock_active_library',
-    TAG_FOLDERS: 'mock_tag_folders',
+    TAG_GROUPS: 'mock_tag_groups',
     COMMENTS: 'mock_comments',
 }
 
@@ -195,12 +195,12 @@ export const mockElectronAPI = {
     updateUrl: async (_mediaId: number, _url: string | null) => { },
     exportMedia: async (_mediaId: number, _options?: { notificationId?: string }) => ({ success: true }),
 
-    // Tag Folders
-    getTagFolders: async (): Promise<TagFolder[]> => [],
-    createTagFolder: async (_name: string): Promise<TagFolder> => ({ id: 0, name: '' }),
-    deleteTagFolder: async (_id: number) => { },
-    renameTagFolder: async (_id: number, _newName: string) => { },
-    updateTagFolder: async (_tagId: number, _folderId: number | null) => { },
+    // Tag Groups
+    getTagGroups: async (): Promise<TagGroup[]> => [],
+    createTagGroup: async (_name: string): Promise<TagGroup> => ({ id: 0, name: '' }),
+    deleteTagGroup: async (_id: number) => { },
+    renameTagGroup: async (_id: number, _newName: string) => { },
+    updateTagGroup: async (_tagId: number, _groupId: number | null) => { },
 
     startDrag: (_filePaths: string[]) => { },
 
@@ -242,7 +242,8 @@ export const mockElectronAPI = {
         myUserToken: undefined,
         autoImport: { enabled: false, watchPaths: [] },
         thumbnailMode: 'speed' as const,
-        discordRichPresenceEnabled: false
+        discordRichPresenceEnabled: false,
+        libraryViewSettings: {}
     }),
     updateClientConfig: async (_updates: Partial<ClientConfig>): Promise<ClientConfig> => ({
         downloadPath: '',
@@ -252,7 +253,8 @@ export const mockElectronAPI = {
         myUserToken: undefined,
         autoImport: { enabled: false, watchPaths: [] },
         thumbnailMode: 'speed' as const,
-        discordRichPresenceEnabled: false
+        discordRichPresenceEnabled: false,
+        libraryViewSettings: {}
     }),
     selectDownloadDirectory: async () => null,
     testConnection: async (_url: string, _token: string) => ({ success: true }),

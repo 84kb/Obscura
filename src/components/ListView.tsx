@@ -73,9 +73,11 @@ const HeaderContextMenu: React.FC<{
 // 一覧表示用のサムネイルコンポーネント (高速スクロール対策)
 const ListThumbnail: React.FC<{ media: MediaFile, thumbnailMode: 'speed' | 'quality' }> = ({ media, thumbnailMode }) => {
     const [src, setSrc] = React.useState<string | null>(null);
+    const [isLoaded, setIsLoaded] = React.useState(false);
 
     React.useEffect(() => {
         setSrc(null);
+        setIsLoaded(false);
         if (!media.thumbnail_path) return;
 
         let timeoutId: NodeJS.Timeout | null = null;
@@ -96,14 +98,37 @@ const ListThumbnail: React.FC<{ media: MediaFile, thumbnailMode: 'speed' | 'qual
     }, [media.id, media.thumbnail_path, thumbnailMode]);
 
     if (!media.thumbnail_path) return null;
-    if (!src) return (
-        <div
-            className="list-view-thumbnail placeholder"
-            style={{ backgroundColor: media.dominant_color || 'var(--bg-card)' }}
-        />
-    );
 
-    return <img src={src} alt="" className="list-view-thumbnail" loading="lazy" />;
+    return (
+        <div
+            className="list-view-thumbnail"
+            style={{
+                backgroundColor: media.dominant_color || 'var(--bg-card)',
+                position: 'relative',
+                overflow: 'hidden'
+            }}
+        >
+            {src && (
+                <img
+                    src={src}
+                    alt=""
+                    className="list-view-thumbnail"
+                    loading="lazy"
+                    style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        opacity: isLoaded ? 1 : 0,
+                        transition: 'opacity 0.2s ease',
+                        objectFit: 'cover'
+                    }}
+                    onLoad={() => setIsLoaded(true)}
+                />
+            )}
+        </div>
+    );
 };
 
 export const ListView: React.FC<ListViewProps> = ({

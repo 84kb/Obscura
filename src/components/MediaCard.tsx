@@ -246,11 +246,13 @@ export function MediaCard({
                             <textarea
                                 defaultValue={(() => {
                                     // 拡張子を除いた名前を表示
-                                    const lastDotIndex = media.file_name.lastIndexOf('.')
+                                    // 拡張子を除いた名前を表示
+                                    const displayValue = media.title || media.file_name
+                                    const lastDotIndex = displayValue.lastIndexOf('.')
                                     if (lastDotIndex > 0) {
-                                        return media.file_name.substring(0, lastDotIndex)
+                                        return displayValue.substring(0, lastDotIndex)
                                     }
-                                    return media.file_name
+                                    return displayValue
                                 })()}
                                 autoFocus
                                 className="preview-filename-input"
@@ -291,10 +293,11 @@ export function MediaCard({
                                     }
 
                                     // 拡張子を復元して保存
-                                    const lastDotIndex = media.file_name.lastIndexOf('.')
+                                    const displayValue = media.title || media.file_name
+                                    const lastDotIndex = displayValue.lastIndexOf('.')
                                     let newName = baseName
                                     if (lastDotIndex > 0) {
-                                        const ext = media.file_name.substring(lastDotIndex)
+                                        const ext = displayValue.substring(lastDotIndex)
                                         newName = baseName + ext
                                     }
 
@@ -315,7 +318,12 @@ export function MediaCard({
                             />
                         ) : (
                             <>
-                                {showExtension ? media.file_name : media.file_name.replace(/\.[^/.]+$/, "")}
+                                <>
+                                    {(() => {
+                                        const displayValue = media.title || media.file_name
+                                        return showExtension ? displayValue : displayValue.replace(/\.[^/.]+$/, "")
+                                    })()}
+                                </>
                             </>
                         )}
                     </div>

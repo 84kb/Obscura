@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { FilterOptions, ViewSettings, Tag, TagFolder, MediaFile, Folder, ItemInfoType, ElectronAPI } from '../types'
+import { FilterOptions, ViewSettings, Tag, TagGroup, MediaFile, Folder, ItemInfoType, ElectronAPI } from '../types'
 import { TagFilterDropdown } from './TagFilterDropdown'
 import { FolderFilterDropdown } from './FolderFilterDropdown'
 import { RatingFilterDropdown } from './RatingFilterDropdown'
@@ -19,7 +19,7 @@ interface MainHeaderProps {
     viewMode: 'grid' | 'list'
     onViewModeChange: (mode: 'grid' | 'list') => void
     tags: Tag[]
-    tagFolders: TagFolder[]
+    tagGroups: TagGroup[]
     allMediaFiles: MediaFile[]
     viewSettings: ViewSettings
     onViewSettingsChange: (settings: ViewSettings) => void
@@ -39,7 +39,7 @@ export function MainHeader({
     viewMode,
     onViewModeChange,
     tags,
-    tagFolders,
+    tagGroups,
     allMediaFiles,
     viewSettings,
     onViewSettingsChange,
@@ -410,7 +410,7 @@ export function MainHeader({
                                         >
                                             <option value="duration">再生時間</option>
                                             <option value="size">サイズ</option>
-                                            <option value="tags">タグ</option>
+                                            <option value="tags">タググループ</option>
                                             <option value="rating">評価</option>
                                             <option value="modified">変更日</option>
                                             <option value="created">作成日</option>
@@ -662,7 +662,7 @@ export function MainHeader({
                         {isTagFilterOpen && (
                             <TagFilterDropdown
                                 tags={tags}
-                                tagFolders={tagFolders}
+                                tagGroups={tagGroups}
                                 filterOptions={filterOptions}
                                 onFilterChange={onFilterChange}
                                 onClose={() => setIsTagFilterOpen(false)}

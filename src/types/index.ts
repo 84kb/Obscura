@@ -22,6 +22,7 @@ export interface MediaFile {
     description?: string | null
     url?: string | null
     dominant_color?: string | null
+    title?: string | null
 }
 
 export interface MediaComment {
@@ -36,7 +37,7 @@ export interface MediaComment {
 export interface Tag {
     id: number
     name: string
-    folderId?: number | null
+    groupId?: number | null
 }
 
 export interface Folder { // Renamed from Genre
@@ -46,7 +47,7 @@ export interface Folder { // Renamed from Genre
     orderIndex?: number
 }
 
-export interface TagFolder {
+export interface TagGroup {
     id: number
     name: string
 }
@@ -194,15 +195,15 @@ export interface ElectronAPI {
     updateUrl: (mediaId: number, url: string | null) => Promise<void>
     exportMedia: (mediaId: number, options?: { notificationId?: string }) => Promise<{ success: boolean; message?: string }>
 
-    // タグフォルダー操作
-    getTagFolders: () => Promise<TagFolder[]>
-    createTagFolder: (name: string) => Promise<TagFolder>
-    deleteTagFolder: (id: number) => Promise<void>
-    renameTagFolder: (id: number, newName: string) => Promise<void>
+    // タググループ操作
+    getTagGroups: () => Promise<TagGroup[]>
+    createTagGroup: (name: string) => Promise<TagGroup>
+    deleteTagGroup: (id: number) => Promise<void>
+    renameTagGroup: (id: number, newName: string) => Promise<void>
     // ライブラリ管理
     refreshLibrary: () => Promise<boolean>
     onRefreshProgress: (callback: (current: number, total: number) => void) => void
-    updateTagFolder: (tagId: number, folderId: number | null) => Promise<void>
+    updateTagGroup: (tagId: number, groupId: number | null) => Promise<void>
 
     // ネイティブファイルドラッグ（同期的）
     startDrag: (filePaths: string[]) => void

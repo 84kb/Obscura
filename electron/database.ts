@@ -17,14 +17,14 @@ const librariesConfigPath = path.join(userDataPath, 'libraries.json')
 interface Database {
   mediaFiles: any[]
   tags: any[]
-  tagFolders: any[]
+  tagGroups: any[]
   folders: any[] // Renamed from genres
   mediaTags: { mediaId: number; tagId: number }[]
   mediaFolders: { mediaId: number; folderId: number }[] // Renamed from mediaGenres
   comments: any[]
   nextMediaId: number
   nextTagId: number
-  nextTagFolderId: number
+  nextTagGroupId: number
   nextFolderId: number // Renamed from nextGenreId
   nextCommentId: number
 }
@@ -73,7 +73,7 @@ export class MediaLibrary {
   private dbPath: string // Legacy support
   private tagsPath: string
   private foldersPath: string // Was genresPath (now storing Folders)
-  private tagFoldersPath: string // Was foldersPath (now storing TagFolders)
+  private tagGroupsPath: string // Was foldersPath (now storing TagGroups)
 
   private db: Database
   private importQueue: Promise<any> = Promise.resolve()
@@ -83,19 +83,19 @@ export class MediaLibrary {
     this.dbPath = path.join(libraryPath, 'database.json')
     this.tagsPath = path.join(libraryPath, 'tags.json')
     this.foldersPath = path.join(libraryPath, 'folders.json') // Stores "Folders" (ex-Genres)
-    this.tagFoldersPath = path.join(libraryPath, 'tag_folders.json') // Stores "TagFolders"
+    this.tagGroupsPath = path.join(libraryPath, 'tag_folders.json') // Stores "TagGroups"
 
     this.db = {
       mediaFiles: [],
       tags: [],
-      tagFolders: [],
+      tagGroups: [],
       folders: [],
       mediaTags: [],
       mediaFolders: [],
       comments: [],
       nextMediaId: 1,
       nextTagId: 1,
-      nextTagFolderId: 1,
+      nextTagGroupId: 1,
       nextFolderId: 1,
       nextCommentId: 1,
     }
@@ -105,7 +105,7 @@ export class MediaLibrary {
   private load() {
     try {
       // 0. File Migration (Renaming)
-      // Migrate old users who had 'folders.json' as TagFolders
+      // Migrate old users who had 'folders.json' as TagGroups
       const legacyTagFoldersPath = path.join(this.path, 'folders.json')
 
       // If we have 'folders.json' but NOT 'tag_folders.json', and we also have 'genres.json' (implying old structure),
@@ -114,12 +114,12 @@ export class MediaLibrary {
       // So checking if 'genres.json' exists is a good indicator we are in "Old Mode".
       const legacyGenresPath = path.join(this.path, 'genres.json')
 
-      if (fs.existsSync(legacyTagFoldersPath) && !fs.existsSync(this.tagFoldersPath)) {
-        // Check if this 'folders.json' is actually TagFolders. 
+      if (fs.existsSync(legacyTagFoldersPath) && !fs.existsSync(this.tagGroupsPath)) {
+        // Check if this 'folders.json' is actually TagGroups. 
         // In the previous version, folders.json WAS TagFolders.
         // We must move it to tag_folders.json before we potentially overwrite it with Genres.
         console.log('[MediaLibrary] Migrating folders.json (TagFolders) to tag_folders.json')
-        fs.renameSync(legacyTagFoldersPath, this.tagFoldersPath)
+        fs.renameSync(legacyTagFoldersPath, this.tagGroupsPath)
       }
 
       if (fs.existsSync(legacyGenresPath) && !fs.existsSync(this.foldersPath)) {
@@ -136,8 +136,21 @@ export class MediaLibrary {
 
       // 2. Load global metadata
       if (fs.existsSync(this.tagsPath)) this.db.tags = fs.readJsonSync(this.tagsPath)
-      if (fs.existsSync(this.tagFoldersPath)) this.db.tagFolders = fs.readJsonSync(this.tagFoldersPath)
+      if (fs.existsSync(this.tagGroupsPath)) this.db.tagGroups = fs.readJsonSync(this.tagGroupsPath)
       if (fs.existsSync(this.foldersPath)) this.db.folders = fs.readJsonSync(this.foldersPath)
+
+      // 2.5 Migration: Rename folderId to groupId in Tags
+      if (this.db.tags) {
+        let tagsChanged = false
+        this.db.tags.forEach((t: any) => {
+          if (t.folderId !== undefined && t.groupId === undefined) {
+            t.groupId = t.folderId
+            delete t.folderId
+            tagsChanged = true
+          }
+        })
+        if (tagsChanged) this.saveTags()
+      }
 
       // 3. Load media files metadata from dispersed files
       this.db.mediaFiles = []
@@ -155,6 +168,20 @@ export class MediaLibrary {
               const meta = fs.readJsonSync(metaPath)
               // Ensure required fields exist (migration logic for individual files)
               if (meta.id) {
+                // Migration for tags inside media
+                if (meta.tags) {
+                  let mediaTagsChanged = false
+                  meta.tags.forEach((t: any) => {
+                    if (t.folderId !== undefined && t.groupId === undefined) {
+                      t.groupId = t.folderId
+                      delete t.folderId
+                      mediaTagsChanged = true
+                    }
+                  })
+                  if (mediaTagsChanged) {
+                    fs.writeJsonSync(metaPath, meta, { spaces: 2 })
+                  }
+                }
                 this.db.mediaFiles.push(meta)
                 // Reconstruct IDs counters if needed (basic max logic)
                 this.db.nextMediaId = Math.max(this.db.nextMediaId, meta.id + 1)
@@ -230,7 +257,7 @@ export class MediaLibrary {
     if (this.db.mediaFiles.length > 0) {
       this.db.nextMediaId = Math.max(...this.db.mediaFiles.map(m => m.id)) + 1
     }
-    // Tag, Folder, TagFolder use random IDs now, so no need to init counters for them.
+    // Tag, Folder, TagGroup use random IDs now, so no need to init counters for them.
 
     if (this.db.comments.length > 0) {
       this.db.nextCommentId = Math.max(...this.db.comments.map(c => c.id)) + 1
@@ -244,11 +271,11 @@ export class MediaLibrary {
 
       // 1. Save globals
       this.db.tags = legacyData.tags || []
-      this.db.tagFolders = legacyData.tagFolders || []
+      this.db.tagGroups = legacyData.tagGroups || legacyData.tagFolders || []
       this.db.folders = legacyData.genres || [] // Migrate genres to folders
 
       this.saveTags()
-      this.saveTagFolders() // Was saveFolders() for tagFolders
+      this.saveTagGroups() // Was saveFolders() for tagGroups
       this.saveFolders()    // Was saveGenres() for Folders
       this.db.nextMediaId = legacyData.nextMediaId || 1
       this.db.nextTagId = legacyData.nextTagId || 1
@@ -307,8 +334,8 @@ export class MediaLibrary {
   private saveTags() {
     fs.writeJsonSync(this.tagsPath, this.db.tags, { spaces: 2 })
   }
-  private saveTagFolders() { // Renamed from saveFolders to avoid confusion
-    fs.writeJsonSync(this.tagFoldersPath, this.db.tagFolders, { spaces: 2 })
+  private saveTagGroups() { // Renamed from saveFolders to avoid confusion
+    fs.writeJsonSync(this.tagGroupsPath, this.db.tagGroups, { spaces: 2 })
   }
   private saveFolders() { // Renamed from saveGenres
     fs.writeJsonSync(this.foldersPath, this.db.folders, { spaces: 2 })
@@ -702,6 +729,17 @@ export class MediaLibrary {
   public updateFileName(id: number, newName: string) {
     const media = this.db.mediaFiles.find((m) => m.id === id)
     if (media) {
+      // Check for invalid filename characters (excluding extension if preserved by logic, but newName includes it)
+      // Invalid chars in Windows: < > : " / \ | ? *
+      const invalidChars = /[<>:"/\\|?*]/
+
+      if (invalidChars.test(newName)) {
+        console.log(`[MediaLibrary] Invalid characters detected in "${newName}". Updating title instead of renaming file.`)
+        media.title = newName // Set the virtual name
+        this.saveMediaMetadata(media)
+        return // Skip physical rename
+      }
+
       try {
         const oldPath = media.file_path
         const dir = path.dirname(oldPath)
@@ -710,8 +748,17 @@ export class MediaLibrary {
           fs.renameSync(oldPath, newPath)
           media.file_path = newPath
           media.file_name = newName
+          // If physically renamed successfully, we should probably clear the virtual title
+          // to ensure the file name and display name match,
+          // OR we assume that if the user provides a valid filename, they want that to be the name.
+          // Let's clear title if it was set, or set it to null to fall back to filename.
+          media.title = null
           this.saveMediaMetadata(media)
-        } else { media.file_name = newName; this.saveMediaMetadata(media) }
+        } else {
+          media.file_name = newName
+          media.title = null
+          this.saveMediaMetadata(media)
+        }
       } catch (error) { console.error('Failed to rename physical file:', error); throw error }
     }
   }
@@ -895,10 +942,10 @@ export class MediaLibrary {
       this.saveMediaMetadata(media)
     }
   }
-  public updateTagFolder(tagId: number, folderId: number | null) {
+  public updateTagGroup(tagId: number, groupId: number | null) {
     const tag = this.db.tags.find((t) => t.id === tagId)
     if (tag) {
-      tag.folderId = folderId;
+      tag.groupId = groupId;
       this.saveTags()
       // Need to update tags in mediaFiles?
       // Since we store COPY of tags in media.tags (full object), yes we do.
@@ -907,7 +954,7 @@ export class MediaLibrary {
         if (m.tags) {
           const t = m.tags.find((mt: any) => mt.id === tagId)
           if (t) {
-            t.folderId = folderId
+            t.groupId = groupId
             this.saveMediaMetadata(m)
           }
         }
@@ -915,23 +962,23 @@ export class MediaLibrary {
     }
   }
 
-  // タグフォルダ
-  public getAllTagFolders() { return this.db.tagFolders.sort((a: any, b: any) => a.name.localeCompare(b.name)) }
-  public createTagFolder(name: string) {
-    const existing = this.db.tagFolders.find((f: any) => f.name === name)
+  // タググループ
+  public getAllTagGroups() { return this.db.tagGroups.sort((a: any, b: any) => a.name.localeCompare(b.name)) }
+  public createTagGroup(name: string) {
+    const existing = this.db.tagGroups.find((f: any) => f.name === name)
     if (existing) return existing
 
     // ランダムID生成
-    const id = this.generateUniqueId(this.db.tagFolders)
-    const folder = { id, name }
-    this.db.tagFolders.push(folder)
-    this.saveFolders()
-    return folder
+    const id = this.generateUniqueId(this.db.tagGroups)
+    const group = { id, name }
+    this.db.tagGroups.push(group)
+    this.saveTagGroups() // Fixed: saveTagGroups
+    return group
   }
-  public deleteTagFolder(id: number) {
-    this.db.tagFolders = this.db.tagFolders.filter((f: any) => f.id !== id)
-    this.db.tags.forEach((t) => { if (t.folderId === id) t.folderId = null })
-    this.saveFolders()
+  public deleteTagGroup(id: number) {
+    this.db.tagGroups = this.db.tagGroups.filter((f: any) => f.id !== id)
+    this.db.tags.forEach((t) => { if (t.groupId === id) t.groupId = null })
+    this.saveTagGroups() // Fixed: saveTagGroups
     this.saveTags()
     // Need to update tags in mediaFiles?
     // Since we store COPY of tags in media.tags (full object), yes we do.
@@ -939,15 +986,15 @@ export class MediaLibrary {
       if (m.tags) {
         let changed = false
         m.tags.forEach((t: any) => {
-          if (t.folderId === id) { t.folderId = null; changed = true; }
+          if (t.groupId === id) { t.groupId = null; changed = true; }
         })
         if (changed) this.saveMediaMetadata(m)
       }
     })
   }
-  public renameTagFolder(id: number, newName: string) {
-    const folder = this.db.tagFolders.find((f: any) => f.id === id)
-    if (folder) { folder.name = newName; this.saveFolders() }
+  public renameTagGroup(id: number, newName: string) {
+    const group = this.db.tagGroups.find((f: any) => f.id === id)
+    if (group) { group.name = newName; this.saveTagGroups() } // Fixed: saveTagGroups
   }
 
   // フォルダー (ex-Genres)
@@ -1175,14 +1222,14 @@ export const tagDB = {
   addTagToMedia: (mId: number, tId: number) => getActiveMediaLibrary()?.addTagToMedia(mId, tId),
   addTagsToMedia: (mIds: number[], tIds: number[]) => getActiveMediaLibrary()?.addTagsToMedia(mIds, tIds),
   removeTagFromMedia: (mId: number, tId: number) => getActiveMediaLibrary()?.removeTagFromMedia(mId, tId),
-  updateTagFolder: (tId: number, fId: number | null) => getActiveMediaLibrary()?.updateTagFolder(tId, fId),
+  updateTagGroup: (tId: number, gId: number | null) => getActiveMediaLibrary()?.updateTagGroup(tId, gId),
 }
 
-export const tagFolderDB = {
-  getAllTagFolders: () => getActiveMediaLibrary()?.getAllTagFolders() || [],
-  createTagFolder: (name: string) => getActiveMediaLibrary()?.createTagFolder(name),
-  deleteTagFolder: (id: number) => getActiveMediaLibrary()?.deleteTagFolder(id),
-  renameTagFolder: (id: number, name: string) => getActiveMediaLibrary()?.renameTagFolder(id, name),
+export const tagGroupDB = {
+  getAllTagGroups: () => getActiveMediaLibrary()?.getAllTagGroups() || [],
+  createTagGroup: (name: string) => getActiveMediaLibrary()?.createTagGroup(name),
+  deleteTagGroup: (id: number) => getActiveMediaLibrary()?.deleteTagGroup(id),
+  renameTagGroup: (id: number, name: string) => getActiveMediaLibrary()?.renameTagGroup(id, name),
 }
 
 export const folderDB = {

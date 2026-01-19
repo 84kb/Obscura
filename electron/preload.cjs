@@ -41,13 +41,13 @@ try {
         addTagToMedia: (mediaId, tagId) => ipcRenderer.invoke('add-tag-to-media', mediaId, tagId),
         addTagsToMedia: (mediaIds, tagIds) => ipcRenderer.invoke('add-tags-to-media', mediaIds, tagIds),
         removeTagFromMedia: (mediaId, tagId) => ipcRenderer.invoke('remove-tag-from-media', mediaId, tagId),
-        updateTagFolder: (tagId, folderId) => ipcRenderer.invoke('update-tag-folder', tagId, folderId),
+        updateTagGroup: (tagId, groupId) => ipcRenderer.invoke('update-tag-group', tagId, groupId),
 
-        // タグフォルダ操作
-        getTagFolders: () => ipcRenderer.invoke('get-tag-folders'),
-        createTagFolder: (name) => ipcRenderer.invoke('create-tag-folder', name),
-        deleteTagFolder: (id) => ipcRenderer.invoke('delete-tag-folder', id),
-        renameTagFolder: (id, name) => ipcRenderer.invoke('rename-tag-folder', id, name),
+        // タググループ操作
+        getTagGroups: () => ipcRenderer.invoke('get-tag-groups'),
+        createTagGroup: (name) => ipcRenderer.invoke('create-tag-group', name),
+        deleteTagGroup: (id) => ipcRenderer.invoke('delete-tag-group', id),
+        renameTagGroup: (id, name) => ipcRenderer.invoke('rename-tag-group', id, name),
 
         // ライブラリ管理
         refreshLibrary: () => ipcRenderer.invoke('refresh-library'),

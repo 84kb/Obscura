@@ -5,7 +5,7 @@ import { fileURLToPath, URL } from 'node:url'
 import crypto from 'crypto'
 import http from 'node:http'
 import https from 'node:https'
-import { initDatabase, mediaDB, tagDB, tagFolderDB, folderDB, libraryDB, commentDB, getActiveMediaLibrary } from './database'
+import { initDatabase, mediaDB, tagDB, tagGroupDB, folderDB, libraryDB, commentDB, getActiveMediaLibrary } from './database'
 import { ServerConfig, RemoteLibrary } from '../src/types'
 import { getThumbnailPath } from './utils'
 import { generatePreviewImages, getMediaMetadata, createThumbnail, embedMetadata } from './ffmpeg'
@@ -712,25 +712,25 @@ ipcMain.handle('remove-tag-from-media', async (_, mediaId: number, tagId: number
     tagDB.removeTagFromMedia(mediaId, tagId)
 })
 
-ipcMain.handle('update-tag-folder', async (_, tagId: number, folderId: number | null) => {
-    tagDB.updateTagFolder(tagId, folderId)
+ipcMain.handle('update-tag-group', async (_, tagId: number, groupId: number | null) => {
+    tagDB.updateTagGroup(tagId, groupId)
 })
 
-// タグフォルダ操作
-ipcMain.handle('get-tag-folders', async () => {
-    return tagFolderDB.getAllTagFolders()
+// タググループ操作
+ipcMain.handle('get-tag-groups', async () => {
+    return tagGroupDB.getAllTagGroups()
 })
 
-ipcMain.handle('create-tag-folder', async (_, name: string) => {
-    return tagFolderDB.createTagFolder(name)
+ipcMain.handle('create-tag-group', async (_, name: string) => {
+    return tagGroupDB.createTagGroup(name)
 })
 
-ipcMain.handle('delete-tag-folder', async (_, id: number) => {
-    tagFolderDB.deleteTagFolder(id)
+ipcMain.handle('delete-tag-group', async (_, id: number) => {
+    tagGroupDB.deleteTagGroup(id)
 })
 
-ipcMain.handle('rename-tag-folder', async (_, id: number, newName: string) => {
-    tagFolderDB.renameTagFolder(id, newName)
+ipcMain.handle('rename-tag-group', async (_, id: number, newName: string) => {
+    tagGroupDB.renameTagGroup(id, newName)
 })
 
 // フォルダー操作
@@ -761,6 +761,8 @@ ipcMain.handle('remove-folder-from-media', (_event, mediaId: number, folderId: n
 ipcMain.handle('update-folder-structure', (_event, updates: { id: number; parentId: number | null; orderIndex: number }[]) => {
     folderDB.updateFolderStructure(updates)
 })
+
+
 
 // サムネイル生成(ffmpegを使用)
 // サムネイル生成(ffmpegを使用)

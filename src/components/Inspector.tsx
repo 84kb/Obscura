@@ -6,6 +6,7 @@ import { toMediaUrl } from '../utils/fileUrl'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { InspectorSection, InfoSectionContent, CommentSectionContent, PlaylistSectionContent } from './InspectorSections'
+import { useNotification } from '../contexts/NotificationContext'
 
 interface InspectorProps {
     media: MediaFile[]
@@ -66,6 +67,8 @@ export function Inspector({
     currentContextMedia,
     enableRichText
 }: InspectorProps) {
+    const { addNotification } = useNotification()
+
     // ユーザー要望により基本すべて展開状態に変更されていたが、DnD導入でセクション個別管理へ移行
     const [comments, setComments] = useState<MediaComment[]>([])
 
@@ -808,6 +811,12 @@ export function Inspector({
                                                     onClick={(e) => {
                                                         e.stopPropagation();
                                                         window.electronAPI.copyToClipboard(url)
+                                                        addNotification({
+                                                            type: 'success',
+                                                            title: 'コピーしました',
+                                                            message: 'URLをクリップボードにコピーしました',
+                                                            duration: 2000
+                                                        })
                                                     }}
                                                     title="URLをコピー"
                                                     disabled={!url}
@@ -819,7 +828,7 @@ export function Inspector({
                                                     className="url-action-btn"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        if (url) window.electronAPI.openWith(url)
+                                                        if (url) window.electronAPI.openExternal(url)
                                                     }}
                                                     title="ブラウザで開く"
                                                     disabled={!url}

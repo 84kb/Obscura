@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { MediaFile, Tag, TagFolder, Folder, FilterOptions, Library, RemoteLibrary } from '../types'
+import { MediaFile, Tag, TagGroup, Folder, FilterOptions, Library, RemoteLibrary } from '../types'
 import { useNotification } from '../contexts/NotificationContext'
 
 export function useLibrary() {
     const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([])
     const [tags, setTags] = useState<Tag[]>([])
-    const [tagFolders, setTagFolders] = useState<TagFolder[]>([])
+    const [tagGroups, setTagGroups] = useState<TagGroup[]>([])
     const [folders, setFolders] = useState<Folder[]>([]) // Renamed from genres
     const [libraries, setLibraries] = useState<Library[]>([])
     const [loading, setLoading] = useState(false)
@@ -384,17 +384,17 @@ export function useLibrary() {
         }
     }, [activeRemoteLibrary, myUserToken])
 
-    // タグフォルダー読み込み (現在リモートAPI未実装のためスキップまたは実装が必要。一旦スキップ)
-    const loadTagFolders = useCallback(async () => {
+    // タググループ読み込み (現在リモートAPI未実装のためスキップまたは実装が必要。一旦スキップ)
+    const loadTagGroups = useCallback(async () => {
         if (activeRemoteLibrary) {
-            setTagFolders([]) // リモートは未対応とする
+            setTagGroups([]) // リモートは未対応とする
             return
         }
         try {
-            const loadedFolders = await window.electronAPI.getTagFolders()
-            setTagFolders(loadedFolders as TagFolder[])
+            const loadedGroups = await window.electronAPI.getTagGroups()
+            setTagGroups(loadedGroups as TagGroup[])
         } catch (error) {
-            console.error('Failed to load tag folders:', error)
+            console.error('Failed to load tag groups:', error)
         }
     }, [activeRemoteLibrary])
 
@@ -466,99 +466,171 @@ export function useLibrary() {
 
     // メディアにタグ追加
     const addTagToMedia = useCallback(async (mediaId: number, tagId: number) => {
+        // Optimistic Update
+        const targetTag = tags.find(t => t.id === tagId)
+        if (!targetTag) return
+
+        setMediaFiles(prev => prev.map(m => {
+            if (m.id === mediaId) {
+                // 既に持っている場合はスキップ
+                if (m.tags?.some(t => t.id === tagId)) return m
+                return { ...m, tags: [...(m.tags || []), targetTag] }
+            }
+            return m
+        }))
+
         try {
             if (activeRemoteLibrary) {
                 try {
                     await (window.electronAPI as any).addRemoteTagToMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, mediaId, tagId)
-                    await loadMediaFiles()
                     return
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
                         addNotification({ type: 'error', title: '権限不足', message: 'タグ追加の権限がありません。' })
                     }
+                    // Revert or reload on error
+                    await loadMediaFiles()
                     throw e
                 }
             }
             await window.electronAPI.addTagToMedia(mediaId, tagId)
-            await loadMediaFiles()
         } catch (error) {
             console.error('Failed to add tag to media:', error)
+            // Error recovery
+            await loadMediaFiles()
         }
-    }, [loadMediaFiles, activeRemoteLibrary, addNotification])
+    }, [loadMediaFiles, activeRemoteLibrary, addNotification, tags])
 
     // メディアからタグ削除
     const removeTagFromMedia = useCallback(async (mediaId: number, tagId: number) => {
+        // Optimistic Update
+        setMediaFiles(prev => prev.map(m => {
+            if (m.id === mediaId) {
+                return { ...m, tags: (m.tags || []).filter(t => t.id !== tagId) }
+            }
+            return m
+        }))
+
         try {
             if (activeRemoteLibrary) {
                 try {
                     await (window.electronAPI as any).removeRemoteTagFromMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, mediaId, tagId)
-                    await loadMediaFiles()
                     return
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
                         addNotification({ type: 'error', title: '権限不足', message: 'タグ削除の権限がありません。' })
                     }
+                    await loadMediaFiles()
                     throw e
                 }
             }
             await window.electronAPI.removeTagFromMedia(mediaId, tagId)
-            await loadMediaFiles()
         } catch (error) {
             console.error('Failed to remove tag from media:', error)
+            await loadMediaFiles()
         }
     }, [loadMediaFiles, activeRemoteLibrary, addNotification])
 
     // メディアにタグ一括追加
     const addTagsToMedia = useCallback(async (mediaIds: number[], tagIds: number[]) => {
+        // Optimistic Update
+        const targetTags = tags.filter(t => tagIds.includes(t.id))
+
+        setMediaFiles(prev => prev.map(m => {
+            if (mediaIds.includes(m.id)) {
+                // 重複排除して追加
+                const existingIds = new Set(m.tags?.map(t => t.id) || [])
+                const newTags = targetTags.filter(t => !existingIds.has(t.id))
+                if (newTags.length === 0) return m
+                return { ...m, tags: [...(m.tags || []), ...newTags] }
+            }
+            return m
+        }))
+
         try {
             if (activeRemoteLibrary) {
                 try {
                     await (window.electronAPI as any).addRemoteTagsToMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, mediaIds, tagIds)
-                    await loadMediaFiles()
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
                         addNotification({ type: 'error', title: '権限不足', message: 'タグ一括追加の権限がありません。' })
                     }
+                    await loadMediaFiles()
                     throw e
                 }
                 return
             }
             await window.electronAPI.addTagsToMedia(mediaIds, tagIds)
-            await loadMediaFiles()
         } catch (error) {
             console.error('Failed to add tags to media:', error)
+            await loadMediaFiles()
         }
-    }, [loadMediaFiles, activeRemoteLibrary, addNotification])
+    }, [loadMediaFiles, activeRemoteLibrary, addNotification, tags])
 
     // メディアにフォルダー追加
     const addFolderToMedia = useCallback(async (mediaId: number, folderId: number) => {
+        // Optimistic Update
+        const targetFolder = folders.find(f => f.id === folderId)
+        if (!targetFolder) return
+
+        setMediaFiles(prev => prev.map(m => {
+            if (m.id === mediaId) {
+                // 既に持っている場合はスキップ
+                if (m.folders?.some(f => f.id === folderId)) return m
+                return { ...m, folders: [...(m.folders || []), targetFolder] }
+            }
+            return m
+        }))
+
         try {
             await window.electronAPI.addFolderToMedia(mediaId, folderId)
-            await loadMediaFiles()
         } catch (error) {
             console.error('Failed to add folder to media:', error)
+            await loadMediaFiles()
         }
-    }, [loadMediaFiles])
+    }, [loadMediaFiles, folders])
 
     // メディアからフォルダー削除
     const removeFolderFromMedia = useCallback(async (mediaId: number, folderId: number) => {
+        // Optimistic Update
+        setMediaFiles(prev => prev.map(m => {
+            if (m.id === mediaId) {
+                return { ...m, folders: (m.folders || []).filter(f => f.id !== folderId) }
+            }
+            return m
+        }))
+
         try {
             await window.electronAPI.removeFolderFromMedia(mediaId, folderId)
-            await loadMediaFiles()
         } catch (error) {
             console.error('Failed to remove folder from media:', error)
+            await loadMediaFiles()
         }
     }, [loadMediaFiles])
 
     // ゴミ箱操作
     const moveToTrash = useCallback(async (id: number) => {
+        // Optimistic Update: リストから除外（またはis_deletedフラグ更新）
+        setMediaFiles(prev => {
+            // Trash表示でなければ除外
+            if (filterOptions.filterType !== 'trash') {
+                return prev.filter(m => m.id !== id)
+            }
+            // Trash表示なら維持（実際はis_deletedが変わるので厳密にはリロードが安全だが、
+            // 「ゴミ箱へ」は一覧から消えるのが期待動作なのでfilterでOK）
+            return prev.filter(m => m.id !== id)
+        })
+
         try {
             await window.electronAPI.moveToTrash(id)
-            await loadMediaFiles()
+            // ゴミ箱操作等は整合性が重要なので、念のためバックグラウンドでリロードしても良いが、
+            // 操作感を優先してここではリロードしない。
+            // 必要なら別途ポーリングやイベントで同期。
         } catch (error) {
             console.error('Failed to move to trash:', error)
+            await loadMediaFiles()
         }
-    }, [loadMediaFiles])
+    }, [loadMediaFiles, filterOptions.filterType])
 
     // ソート設定保存
     useEffect(() => {
@@ -567,91 +639,114 @@ export function useLibrary() {
     }, [filterOptions.sortOrder, filterOptions.sortDirection])
 
     const restoreFromTrash = useCallback(async (id: number) => {
+        // Optimistic: Trash表示ならリストから消える
+        if (filterOptions.filterType === 'trash') {
+            setMediaFiles(prev => prev.filter(m => m.id !== id))
+        }
+
         try {
             await window.electronAPI.restoreFromTrash(id)
-            await loadMediaFiles()
+            // 通常リストに戻ったことを反映するにはリロードが必要だが、
+            // Trash画面での操作としては「消える」でOK。
+            // 完全に同期するにはリロード推奨だが、一旦このまま。
         } catch (error) {
             console.error('Failed to restore from trash:', error)
+            await loadMediaFiles()
         }
-    }, [loadMediaFiles])
+    }, [loadMediaFiles, filterOptions.filterType])
 
     const deletePermanently = useCallback(async (id: number) => {
+        // Optimistic
+        setMediaFiles(prev => prev.filter(m => m.id !== id))
+
         try {
             await window.electronAPI.deletePermanently(id)
-            await loadMediaFiles()
         } catch (error) {
             console.error('Failed to delete permanently:', error)
+            await loadMediaFiles()
         }
     }, [loadMediaFiles])
 
     const moveFilesToTrash = useCallback(async (ids: number[]) => {
+        // Optimistic
+        setMediaFiles(prev => prev.filter(m => !ids.includes(m.id)))
+
         try {
             for (const id of ids) {
                 await window.electronAPI.moveToTrash(id)
             }
-            await loadMediaFiles()
         } catch (error) {
             console.error('Failed to move files to trash:', error)
+            await loadMediaFiles()
         }
     }, [loadMediaFiles])
 
     const restoreFilesFromTrash = useCallback(async (ids: number[]) => {
+        // Optimistic
+        if (filterOptions.filterType === 'trash') {
+            setMediaFiles(prev => prev.filter(m => !ids.includes(m.id)))
+        }
+
         try {
             for (const id of ids) {
                 await window.electronAPI.restoreFromTrash(id)
             }
-            await loadMediaFiles()
         } catch (error) {
             console.error('Failed to restore files from trash:', error)
+            await loadMediaFiles()
         }
-    }, [loadMediaFiles])
+    }, [loadMediaFiles, filterOptions.filterType])
 
     const deleteFilesPermanently = useCallback(async (ids: number[]) => {
+        // Optimistic
+        setMediaFiles(prev => prev.filter(m => !ids.includes(m.id)))
+
         try {
             if (activeRemoteLibrary) {
                 try {
                     for (const id of ids) {
                         await (window.electronAPI as any).deleteRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id)
                     }
-                    await loadMediaFiles()
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
                         addNotification({ type: 'error', title: '権限不足', message: '削除権限がありません。' })
                     }
+                    await loadMediaFiles()
                     throw e
                 }
                 return
             }
 
-            // deletePermanently は単一IDを想定している可能性があるため、ループで処理するか、
-            // サーバー側で複数削除に対応する必要があるが、現状のpreloadに合わせてループさせる
             for (const id of ids) {
                 await window.electronAPI.deletePermanently(id)
             }
-            await loadMediaFiles()
         } catch (error) {
             console.error('Failed to delete files permanently:', error)
+            await loadMediaFiles()
         }
     }, [loadMediaFiles, activeRemoteLibrary])
 
     const updateDescription = useCallback(async (id: number, description: string | null) => {
+        // Optimistic
+        setMediaFiles(prev => prev.map(m => m.id === id ? { ...m, description } : m))
+
         try {
             if (activeRemoteLibrary) {
                 try {
                     await (window.electronAPI as any).updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { description })
-                    await loadMediaFiles()
                     return
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
                         addNotification({ type: 'error', title: '権限不足', message: '説明を更新する権限がありません。' })
                     }
+                    await loadMediaFiles()
                     throw e
                 }
             }
             await window.electronAPI.updateDescription(id, description)
-            await loadMediaFiles()
         } catch (error) {
             console.error('Failed to update description:', error)
+            await loadMediaFiles()
         }
     }, [loadMediaFiles, activeRemoteLibrary])
 
@@ -691,7 +786,7 @@ export function useLibrary() {
                 removeNotification(notificationId)
                 addNotification({ type: 'success', title: 'アップロード完了', message: `${filePaths.length}個のファイルを追加しました。` })
                 await loadMediaFiles()
-                return
+                return res.results || []
             }
 
             const importedFiles = await window.electronAPI.importMedia(filePaths)
@@ -711,68 +806,77 @@ export function useLibrary() {
 
     // レーティング更新
     const updateRating = useCallback(async (id: number, rating: number) => {
+        // Optimistic
+        setMediaFiles(prev => prev.map(m => m.id === id ? { ...m, rating } : m))
+
         try {
             if (activeRemoteLibrary) {
                 try {
                     await (window.electronAPI as any).updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { rating })
-                    await loadMediaFiles()
                     return
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
                         addNotification({ type: 'error', title: '権限不足', message: '評価を更新する権限がありません。' })
                     }
+                    await loadMediaFiles()
                     throw e
                 }
             }
             await window.electronAPI.updateRating(id, rating)
-            await loadMediaFiles()
         } catch (error) {
             console.error('Failed to update rating:', error)
+            await loadMediaFiles()
         }
     }, [loadMediaFiles, activeRemoteLibrary, addNotification])
 
     // メディア名変更
     const renameMedia = useCallback(async (id: number, newName: string) => {
+        // Optimistic
+        setMediaFiles(prev => prev.map(m => m.id === id ? { ...m, file_name: newName } : m))
+
         try {
             if (activeRemoteLibrary) {
                 try {
                     await (window.electronAPI as any).renameRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, newName)
-                    await loadMediaFiles()
                     return
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
                         addNotification({ type: 'error', title: '権限不足', message: 'ファイル名変更の権限がありません。' })
                     }
+                    await loadMediaFiles()
                     throw e
                 }
             }
             await window.electronAPI.renameMedia(id, newName)
-            await loadMediaFiles()
         } catch (error) {
             console.error('Failed to rename media:', error)
+            await loadMediaFiles()
         }
     }, [loadMediaFiles, activeRemoteLibrary, addNotification])
 
 
     // 投稿者更新
     const updateArtist = useCallback(async (id: number, artist: string | null) => {
+        // Optimistic
+        setMediaFiles(prev => prev.map(m => m.id === id ? { ...m, artist } : m))
+
         try {
             if (activeRemoteLibrary) {
                 try {
                     await (window.electronAPI as any).updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { artist })
-                    await loadMediaFiles()
                     return
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
                         addNotification({ type: 'error', title: '権限不足', message: '編集権限がありません。' })
                     }
+                    await loadMediaFiles()
                     throw e
                 }
             }
             await window.electronAPI.updateArtist(id, artist)
-            await loadMediaFiles()
         } catch (error) {
             console.error('Failed to update artist:', error)
+            await loadMediaFiles()
         }
     }, [loadMediaFiles, activeRemoteLibrary, addNotification])
 
@@ -1219,9 +1323,9 @@ export function useLibrary() {
     useEffect(() => {
         loadMediaFiles()
         loadTags()
-        loadTagFolders()
+        loadTagGroups()
         loadFolders()
-    }, [loadMediaFiles, loadTags, loadTagFolders, loadFolders])
+    }, [loadMediaFiles, loadTags, loadTagGroups, loadFolders])
 
     // 全データの一括更新
     const refreshAll = useCallback(async () => {
@@ -1230,7 +1334,7 @@ export function useLibrary() {
             await Promise.all([
                 loadMediaFiles(),
                 loadTags(),
-                loadTagFolders(),
+                loadTagGroups(),
                 loadFolders()
             ])
         } catch (e) {
@@ -1238,13 +1342,13 @@ export function useLibrary() {
         } finally {
             setLoading(false)
         }
-    }, [loadMediaFiles, loadTags, loadTagFolders, loadFolders])
+    }, [loadMediaFiles, loadTags, loadTagGroups, loadFolders])
 
     return useMemo(() => ({
         mediaFiles: filteredMediaFiles,
         allMediaFiles: mediaFiles,
         tags,
-        tagFolders,
+        tagGroups,
         folders,
         libraries,
         loading,
@@ -1288,9 +1392,37 @@ export function useLibrary() {
         setMediaFiles,
         addTagsToMedia,
         checkImportDuplicates: (filePaths: string[]) => window.electronAPI.checkImportDuplicates(filePaths),
-        checkEntryDuplicates: (mediaId: number) => window.electronAPI.checkEntryDuplicates(mediaId)
+        checkEntryDuplicates: async (mediaId: number) => {
+            if (activeRemoteLibrary) {
+                try {
+                    const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
+                    let accessToken = activeRemoteLibrary.token
+                    let userToken = myUserToken
+                    if (activeRemoteLibrary.token.includes(':')) {
+                        const parts = activeRemoteLibrary.token.split(':')
+                        userToken = parts[0]
+                        accessToken = parts[1]
+                    }
+
+                    const response = await fetch(`${baseUrl}/api/media/${mediaId}/duplicates`, {
+                        headers: {
+                            'Authorization': `Bearer ${accessToken}`,
+                            'X-User-Token': userToken || ''
+                        }
+                    })
+                    if (response.ok) {
+                        return await response.json()
+                    }
+                    return []
+                } catch (e) {
+                    console.error('Failed to check remote duplicates:', e)
+                    return []
+                }
+            }
+            return window.electronAPI.checkEntryDuplicates(mediaId)
+        }
     }), [
-        filteredMediaFiles, mediaFiles, tags, tagFolders, folders, libraries, loading, activeLibrary,
+        filteredMediaFiles, mediaFiles, tags, tagGroups, folders, libraries, loading, activeLibrary,
         filterOptions, setFilterOptions, createLibrary, switchLibrary, selectAndScanFolder,
         createTag, deleteTag, createFolder, deleteFolder, addTagToMedia, removeTagFromMedia,
         addTagsToMedia, addFolderToMedia, removeFolderFromMedia, moveToTrash, restoreFromTrash, deletePermanently,

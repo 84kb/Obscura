@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
-import { Tag, TagFolder, FilterOptions } from '../types'
+import { Tag, TagGroup, FilterOptions } from '../types'
 import './TagFilterDropdown.css'
 
 interface TagFilterDropdownProps {
     tags: Tag[]
-    tagFolders: TagFolder[]
+    tagGroups: TagGroup[]
     filterOptions: FilterOptions
     onFilterChange: (options: FilterOptions) => void
     onClose: () => void
@@ -12,13 +12,13 @@ interface TagFilterDropdownProps {
 
 export function TagFilterDropdown({
     tags,
-    tagFolders,
+    tagGroups,
     filterOptions,
     onFilterChange,
     onClose
 }: TagFilterDropdownProps) {
     const [searchQuery, setSearchQuery] = useState('')
-    const [selectedFolderId, setSelectedFolderId] = useState<number | null | 'all'>('all')
+    const [selectedGroupId, setSelectedGroupId] = useState<number | null | 'all'>('all')
     const dropdownRef = useRef<HTMLDivElement>(null)
 
     // 外側クリックで閉じる
@@ -45,11 +45,11 @@ export function TagFilterDropdown({
     const getFilteredTags = () => {
         let filtered = tags
 
-        // フォルダーフィルタ
-        if (selectedFolderId === null) {
-            filtered = filtered.filter(t => !t.folderId)
-        } else if (selectedFolderId !== 'all') {
-            filtered = filtered.filter(t => t.folderId === selectedFolderId)
+        // グループフィルタ
+        if (selectedGroupId === null) {
+            filtered = filtered.filter(t => !t.groupId)
+        } else if (selectedGroupId !== 'all') {
+            filtered = filtered.filter(t => t.groupId === selectedGroupId)
         }
 
         // 検索フィルタ
@@ -196,23 +196,23 @@ export function TagFilterDropdown({
 
             {/* メインコンテンツ */}
             <div className="tag-filter-content">
-                {/* 左: フォルダー一覧 */}
-                <div className="tag-filter-folders">
+                {/* 左: グループ一覧 */}
+                <div className="tag-filter-groups">
                     <div
-                        className={`folder-item ${selectedFolderId === 'all' ? 'active' : ''}`}
-                        onClick={() => setSelectedFolderId('all')}
+                        className={`group-item ${selectedGroupId === 'all' ? 'active' : ''}`}
+                        onClick={() => setSelectedGroupId('all')}
                     >
                         <span>全てのタグ</span>
                         <span className="count">{tags.length}</span>
                     </div>
-                    {tagFolders.map(folder => (
+                    {tagGroups.map(group => (
                         <div
-                            key={folder.id}
-                            className={`folder-item ${selectedFolderId === folder.id ? 'active' : ''}`}
-                            onClick={() => setSelectedFolderId(folder.id)}
+                            key={group.id}
+                            className={`group-item ${selectedGroupId === group.id ? 'active' : ''}`}
+                            onClick={() => setSelectedGroupId(group.id)}
                         >
-                            <span>{folder.name}</span>
-                            <span className="count">{tags.filter(t => t.folderId === folder.id).length}</span>
+                            <span>{group.name}</span>
+                            <span className="count">{tags.filter(t => t.groupId === group.id).length}</span>
                         </div>
                     ))}
                 </div>

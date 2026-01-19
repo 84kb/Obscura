@@ -205,6 +205,16 @@ export function startServer(port: number): Promise<void> {
                 } catch (e) { res.status(500).json({ error: { code: 'SERVER_ERROR' } }) }
             })
 
+            expressApp.get('/api/media/:id/duplicates', authMiddleware, requirePermission('READ_ONLY'), (req: AuthenticatedRequest, res: Response) => {
+                try {
+                    const id = parseInt(String(req.params.id))
+                    if (isNaN(id)) return res.status(400).json({ error: { code: 'INVALID_INPUT' } })
+
+                    const duplicates = library.getDuplicatesForMedia(id)
+                    res.json(duplicates)
+                } catch (e) { res.status(500).json({ error: { code: 'SERVER_ERROR' } }) }
+            })
+
             expressApp.post('/api/media/:id/comments', authMiddleware, requirePermission('READ_ONLY'), (req: AuthenticatedRequest, res: Response) => {
                 try {
                     const { text, time } = req.body
@@ -219,7 +229,7 @@ export function startServer(port: number): Promise<void> {
                 res.json(library.getAllTags())
             })
 
-            expressApp.get('/api/genres', authMiddleware, requirePermission('READ_ONLY'), (_req, res) => {
+            expressApp.get('/api/folders', authMiddleware, requirePermission('READ_ONLY'), (_req, res) => {
                 res.json(library.getAllFolders())
             })
 

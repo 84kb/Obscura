@@ -37,7 +37,7 @@ export default function App() {
         filterOptions,
         setFilterOptions,
         tags,
-        tagFolders,
+        tagGroups,
         folders,
         libraries,
         activeLibrary,
@@ -937,6 +937,14 @@ export default function App() {
                     onCreateTag={createTag}
                     onDeleteTag={deleteTag}
                     disabled={!hasActiveLibrary && !activeRemoteLibrary}
+                    onRefresh={refreshLibrary}
+                    onInternalDragStart={() => {
+                        isInternalDrag.current = true
+                    }}
+                    onInternalDragEnd={() => {
+                        isInternalDrag.current = false
+                    }}
+                    allMediaFiles={allMediaFiles}
                 />
             )
         } else {
@@ -959,7 +967,7 @@ export default function App() {
                         viewMode={viewMode}
                         onViewModeChange={setViewMode}
                         tags={tags}
-                        tagFolders={tagFolders}
+                        tagGroups={tagGroups}
                         allMediaFiles={allMediaFiles}
                         viewSettings={viewSettings}
                         onViewSettingsChange={setViewSettings}
