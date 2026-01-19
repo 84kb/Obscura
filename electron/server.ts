@@ -369,27 +369,7 @@ export function startServer(port: number): Promise<void> {
             })
 
 
-            // タグ操作API
-            expressApp.post('/api/tags', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res: Response) => {
-                try {
-                    const { name } = req.body
-                    if (!name) return res.status(400).json({ error: { code: 'INVALID_INPUT' } })
-                    const tag = library.createTag(name)
-                    res.status(201).json(tag)
-                    if (io) io.emit('library-updated')
-                } catch (e) { res.status(500).send() }
-            })
-
-            expressApp.delete('/api/tags/:id', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res: Response) => {
-                try {
-                    const id = parseInt(String(req.params.id))
-                    if (isNaN(id)) return res.status(400).send()
-                    library.deleteTag(id)
-                    res.json({ success: true })
-                    if (io) io.emit('library-updated')
-                } catch (e) { res.status(500).send() }
-            })
-
+            // タグ操作API (関係)
             expressApp.post('/api/tags/media', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res: Response) => {
                 try {
                     const { mediaId, tagId, mediaIds, tagIds } = req.body
@@ -413,14 +393,32 @@ export function startServer(port: number): Promise<void> {
 
             expressApp.delete('/api/tags/media', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res: Response) => {
                 try {
-                    console.log('[DELETE /api/tags/media] req.body:', req.body)
-                    console.log('[DELETE /api/tags/media] req.query:', req.query)
                     const mediaId = req.body.mediaId ?? req.query.mediaId
                     const tagId = req.body.tagId ?? req.query.tagId
-                    console.log('[DELETE /api/tags/media] mediaId:', mediaId, 'tagId:', tagId)
                     if (mediaId === undefined || tagId === undefined) return res.status(400).json({ error: { code: 'INVALID_INPUT' } })
 
                     library.removeTagFromMedia(mediaId, tagId)
+                    res.json({ success: true })
+                    if (io) io.emit('library-updated')
+                } catch (e) { res.status(500).send() }
+            })
+
+            // タグ基本API
+            expressApp.post('/api/tags', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res: Response) => {
+                try {
+                    const { name } = req.body
+                    if (!name) return res.status(400).json({ error: { code: 'INVALID_INPUT' } })
+                    const tag = library.createTag(name)
+                    res.status(201).json(tag)
+                    if (io) io.emit('library-updated')
+                } catch (e) { res.status(500).send() }
+            })
+
+            expressApp.delete('/api/tags/:id', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res: Response) => {
+                try {
+                    const id = parseInt(String(req.params.id))
+                    if (isNaN(id)) return res.status(400).send()
+                    library.deleteTag(id)
                     res.json({ success: true })
                     if (io) io.emit('library-updated')
                 } catch (e) { res.status(500).send() }

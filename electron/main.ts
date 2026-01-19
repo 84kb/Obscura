@@ -1610,15 +1610,7 @@ ipcMain.handle('add-remote-tag-to-media', async (_event, { url, token, mediaId, 
 })
 
 ipcMain.handle('remove-remote-tag-from-media', async (_event, { url, token, mediaId, tagId }: { url: string; token: string; mediaId: number; tagId: number }) => {
-    console.log('[remove-remote-tag-from-media] Called with:', { url, token: token.substring(0, 20) + '...', mediaId, tagId })
-    try {
-        const result = await callRemoteApi(url, token, `/api/tags/media?mediaId=${mediaId}&tagId=${tagId}`, 'DELETE')
-        console.log('[remove-remote-tag-from-media] Success:', result)
-        return result
-    } catch (error) {
-        console.error('[remove-remote-tag-from-media] Error:', error)
-        throw error
-    }
+    return callRemoteApi(url, token, `/api/tags/media?mediaId=${mediaId}&tagId=${tagId}`, 'DELETE')
 })
 
 // ヘルパー関数
@@ -1640,17 +1632,11 @@ async function callRemoteApi(baseUrl: string, token: string, path: string, metho
             headers['Content-Type'] = 'application/json'
         }
 
-        console.log(`[callRemoteApi] ${method} ${baseUrl}${path}`)
-        console.log('[callRemoteApi] headers:', headers)
-        console.log('[callRemoteApi] body:', body)
-
         const response = await fetch(`${baseUrl}${path}`, {
             method,
             headers,
             body: body ? JSON.stringify(body) : undefined
         })
-
-        console.log(`[callRemoteApi] Response status: ${response.status} ${response.statusText}`)
 
         if (!response.ok) {
             throw new Error(`API Error: ${response.status} ${response.statusText}`)
