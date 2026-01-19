@@ -5,6 +5,7 @@ import './TagManager.css'
 
 interface TagManagerProps {
     tags: Tag[]
+    tagGroups?: TagGroup[]
     onCreateTag: (name: string) => void
     onDeleteTag: (id: number) => void
     disabled?: boolean
@@ -14,7 +15,7 @@ interface TagManagerProps {
     allMediaFiles: MediaFile[]
 }
 
-export function TagManager({ tags, onCreateTag, onDeleteTag, disabled = false, onRefresh, onInternalDragStart, onInternalDragEnd, allMediaFiles }: TagManagerProps) {
+export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDeleteTag, disabled = false, onRefresh, onInternalDragStart, onInternalDragEnd, allMediaFiles }: TagManagerProps) {
     const [newTagName, setNewTagName] = useState('')
     // const [newFolderName, setNewFolderName] = useState('') // Removed
     const [tagGroups, setTagGroups] = useState<TagGroup[]>([])
@@ -42,8 +43,12 @@ export function TagManager({ tags, onCreateTag, onDeleteTag, disabled = false, o
 
     // グループ一覧を取得
     useEffect(() => {
-        loadTagGroups()
-    }, [])
+        if (propTagGroups) {
+            setTagGroups(propTagGroups)
+        } else {
+            loadTagGroups()
+        }
+    }, [propTagGroups])
 
     const loadTagGroups = async () => {
         try {

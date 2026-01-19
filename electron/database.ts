@@ -18,7 +18,7 @@ interface Database {
   mediaFiles: any[]
   tags: any[]
   tagGroups: any[]
-  folders: any[] // Renamed from genres
+  folders: any[]
   mediaTags: { mediaId: number; tagId: number }[]
   mediaFolders: { mediaId: number; folderId: number }[] // Renamed from mediaGenres
   comments: any[]
@@ -72,7 +72,7 @@ export class MediaLibrary {
   public path: string
   private dbPath: string // Legacy support
   private tagsPath: string
-  private foldersPath: string // Was genresPath (now storing Folders)
+  private foldersPath: string
   private tagGroupsPath: string // Was foldersPath (now storing TagGroups)
 
   private db: Database
@@ -104,28 +104,8 @@ export class MediaLibrary {
 
   private load() {
     try {
-      // 0. File Migration (Renaming)
-      // Migrate old users who had 'folders.json' as TagGroups
-      const legacyTagFoldersPath = path.join(this.path, 'folders.json')
-
-      // If we have 'folders.json' but NOT 'tag_folders.json', and we also have 'genres.json' (implying old structure),
-      // OR if we just want to be safe: If 'folders.json' exists and 'tag_folders.json' does not.
-      // BUT WAIT: 'folders.json' will be the NEW name for genres.
-      // So checking if 'genres.json' exists is a good indicator we are in "Old Mode".
-      const legacyGenresPath = path.join(this.path, 'genres.json')
-
-      if (fs.existsSync(legacyTagFoldersPath) && !fs.existsSync(this.tagGroupsPath)) {
-        // Check if this 'folders.json' is actually TagGroups. 
-        // In the previous version, folders.json WAS TagFolders.
-        // We must move it to tag_folders.json before we potentially overwrite it with Genres.
-        console.log('[MediaLibrary] Migrating folders.json (TagFolders) to tag_folders.json')
-        fs.renameSync(legacyTagFoldersPath, this.tagGroupsPath)
-      }
-
-      if (fs.existsSync(legacyGenresPath) && !fs.existsSync(this.foldersPath)) {
-        console.log('[MediaLibrary] Migrating genres.json to folders.json')
-        fs.renameSync(legacyGenresPath, this.foldersPath)
-      }
+      // 0. Legacy Migration (Removed)
+      // Genres are fully migrated to Folders.
 
       // 1. Check for legacy database and migrate if needed
       if (fs.existsSync(this.dbPath) && !fs.existsSync(this.tagsPath)) {

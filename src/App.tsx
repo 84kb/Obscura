@@ -938,6 +938,7 @@ export default function App() {
             mainContent = (
                 <TagManager
                     tags={tags}
+                    tagGroups={tagGroups}
                     onCreateTag={createTag}
                     onDeleteTag={deleteTag}
                     disabled={!hasActiveLibrary && !activeRemoteLibrary}

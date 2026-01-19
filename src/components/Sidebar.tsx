@@ -565,7 +565,7 @@ export function Sidebar({
 
                 {/* 子要素（再帰） */}
                 {isExpanded && hasChildren && (
-                    <div className="sidebar-sub-genres">
+                    <div className="sidebar-sub-folders">
                         {node.children.map(renderFolderNode)}
                     </div>
                 )}
