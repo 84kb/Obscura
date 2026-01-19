@@ -169,13 +169,18 @@ export class MediaLibrary {
                 // Restore tags/genres/comments relationships from embedded data if it exists
                 // Note: The new design keeps them in metadata.json, so we parse them out to in-memory relations if needed
                 // However, for the app to work with existing structure `mediaTags`, we might need to populate them on load
-                if (meta.tags) {
-                  meta.tags.forEach(() => {
-                    // t is Tag object. We need relation.
-                    // But we loaded tags from tags.json.
-                    // Here we assume metadata.json stores the RELATION or full tag?
-                    // Plan says: "metadata.json: per-file metadata".
-                    // Usually we store IDs.
+                // Restore tags/genres/comments relationships from embedded data if it exists
+                // Note: The new design keeps them in metadata.json, so we parse them out to in-memory relations if needed
+                if (meta.tags && Array.isArray(meta.tags)) {
+                  meta.tags.forEach((t: any) => {
+                    const tId = typeof t === 'object' ? t.id : t
+                    this.db.mediaTags.push({ mediaId: meta.id, tagId: tId })
+                  })
+                }
+                if (meta.folders && Array.isArray(meta.folders)) {
+                  meta.folders.forEach((f: any) => {
+                    const fId = typeof f === 'object' ? f.id : f
+                    this.db.mediaFolders.push({ mediaId: meta.id, folderId: fId })
                   })
                 }
               }
@@ -912,13 +917,18 @@ export class MediaLibrary {
     }
   }
   public removeTagFromMedia(mediaId: number, tagId: number) {
-    // this.db.mediaTags = this.db.mediaTags.filter((mt) => !(mt.mediaId === mediaId && mt.tagId === tagId))
-    // Update relationships and media objects
-    this.db.mediaTags = this.db.mediaTags.filter((mt) => !(mt.mediaId === mediaId && mt.tagId === tagId))
+    const mId = Number(mediaId)
+    const tId = Number(tagId)
 
-    const media = this.db.mediaFiles.find(m => m.id === mediaId)
+    // Update relationships and media objects
+    this.db.mediaTags = this.db.mediaTags.filter((mt) => !(mt.mediaId === mId && mt.tagId === tId))
+
+    const media = this.db.mediaFiles.find(m => m.id === mId)
     if (media && media.tags) {
-      media.tags = media.tags.filter((t: any) => t.id !== tagId)
+      media.tags = media.tags.filter((t: any) => {
+        const id = typeof t === 'object' ? t.id : t
+        return id !== tId
+      })
       this.saveMediaMetadata(media)
     }
   }
