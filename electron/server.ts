@@ -5,7 +5,7 @@ import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
 import { Server as SocketIOServer } from 'socket.io'
 import { createServer } from 'http'
-import { libraryRegistry, libraryDB } from './database'
+import { libraryRegistry, libraryDB, tagDB } from './database'
 import { sharedUserDB, auditLogDB, Permission, serverConfigDB } from './shared-library'
 import { validateUserToken, validateAccessToken } from './crypto-utils'
 import { logError } from './error-logger'
@@ -220,7 +220,7 @@ export function startServer(port: number): Promise<void> {
             })
 
             expressApp.get('/api/genres', authMiddleware, requirePermission('READ_ONLY'), (_req, res) => {
-                res.json(library.getAllGenres())
+                res.json(library.getAllFolders())
             })
 
             expressApp.get('/api/profile', authMiddleware, (req: AuthenticatedRequest, res) => {
@@ -352,6 +352,60 @@ export function startServer(port: number): Promise<void> {
                     library.moveToTrash(id)
                 }
                 res.json({ success: true })
+            })
+
+
+            // タグ操作API
+            expressApp.post('/api/tags', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res: Response) => {
+                try {
+                    const { name } = req.body
+                    if (!name) return res.status(400).json({ error: { code: 'INVALID_INPUT' } })
+                    const tag = tagDB.createTag(name)
+                    res.status(201).json(tag)
+                    if (io) io.emit('library-updated')
+                } catch (e) { res.status(500).send() }
+            })
+
+            expressApp.delete('/api/tags/:id', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res: Response) => {
+                try {
+                    const id = parseInt(String(req.params.id))
+                    if (isNaN(id)) return res.status(400).send()
+                    tagDB.deleteTag(id)
+                    res.json({ success: true })
+                    if (io) io.emit('library-updated')
+                } catch (e) { res.status(500).send() }
+            })
+
+            expressApp.post('/api/tags/media', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res: Response) => {
+                try {
+                    const { mediaId, tagId, mediaIds, tagIds } = req.body
+
+                    // 単体追加
+                    if (mediaId !== undefined && tagId !== undefined) {
+                        tagDB.addTagToMedia(mediaId, tagId)
+                    }
+                    // 一括追加
+                    else if (mediaIds && tagIds && Array.isArray(mediaIds) && Array.isArray(tagIds)) {
+                        tagDB.addTagsToMedia(mediaIds, tagIds)
+                    }
+                    else {
+                        return res.status(400).json({ error: { code: 'INVALID_INPUT' } })
+                    }
+
+                    res.json({ success: true })
+                    if (io) io.emit('library-updated')
+                } catch (e) { res.status(500).send() }
+            })
+
+            expressApp.delete('/api/tags/media', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res: Response) => {
+                try {
+                    const { mediaId, tagId } = req.body
+                    if (mediaId === undefined || tagId === undefined) return res.status(400).json({ error: { code: 'INVALID_INPUT' } })
+
+                    tagDB.removeTagFromMedia(mediaId, tagId)
+                    res.json({ success: true })
+                    if (io) io.emit('library-updated')
+                } catch (e) { res.status(500).send() }
             })
 
             if (config.requireHttps && config.sslCertPath && config.sslKeyPath) {

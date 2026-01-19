@@ -6,7 +6,8 @@
     flex-direction: column;
     height: 100%;
     padding: var(--spacing-lg);
-    gap: var(--spacing-lg);
+    gap: 0;
+    /* ギャップを削除して個別に制御 */
     position: relative;
     z-index: 100;
 }
@@ -15,6 +16,10 @@
     display: flex;
     flex-direction: column;
     gap: var(--spacing-md);
+    flex-shrink: 0;
+    padding-bottom: var(--spacing-md);
+    border-bottom: 1px solid var(--border);
+    margin-bottom: var(--spacing-md);
 }
 
 .sidebar-section-header {
@@ -483,14 +488,16 @@
 }
 
 .folder-toggle-btn {
-    opacity: 0.7;
-    transition: opacity 0.2s;
-    z-index: 2;
+    /* CRITICAL: Must be visible and above items but below footer */
+    opacity: 1;
+    /* 常に表示 */
+    transition: color 0.2s;
+    z-index: 5;
+    /* アイテムより手前、フッターより奥 */
     /* 線の上に表示 */
 }
 
 .folder-toggle-btn:hover {
-    opacity: 1;
     color: var(--primary);
 }
 
@@ -581,11 +588,43 @@
     margin-bottom: 4px;
 }
 
+
+/* サイドバーのスクロール可能領域 */
+.sidebar-content {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-lg);
+    min-height: 0;
+
+    /* スクロールバーの分を調整 (右) */
+    margin-right: -8px;
+    padding-right: 8px;
+
+    /* トグルボタンのクリッピングを防ぐため左側を拡張 */
+    /* CRITICAL: Do not remove this negative margin layout. It allows the toggle button to be visible outside the content area. */
+    margin-left: calc(var(--spacing-lg) * -1);
+    padding-left: var(--spacing-lg);
+}
+
 /* サイドバーフッター */
 .sidebar-footer {
-    margin-top: auto;
-    padding-top: var(--spacing-md);
+    flex-shrink: 0;
+    margin-top: 0;
+    /* flexで制御するためauto解除 */
+    padding-top: var(--spacing-sm);
     border-top: 1px solid var(--border);
+    background: linear-gradient(180deg, var(--bg-sidebar) 0%, #1a1614 100%);
+    /* 背景を追加して透過を防ぐ */
+    z-index: 10;
+
+    /* 親のpaddingを打ち消して全幅にする */
+    margin-left: calc(var(--spacing-lg) * -1);
+    margin-right: calc(var(--spacing-lg) * -1);
+    padding-left: var(--spacing-lg);
+    padding-right: var(--spacing-lg);
 }
 
 .sidebar-settings-btn {

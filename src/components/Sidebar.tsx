@@ -189,7 +189,10 @@ export function Sidebar({
     const handleCreateClick = async (e: React.MouseEvent) => {
         e.preventDefault()
         try {
-            const newFolder = await onCreateFolder("無題")
+            // ユーザー要望により、選択状態に関わらず常にルートに作成する
+            const parentId = null
+
+            const newFolder = await onCreateFolder("無題", parentId)
             if (newFolder) {
                 setRenamingFolderId(newFolder.id)
                 setRenamingName(newFolder.name)
@@ -473,7 +476,7 @@ export function Sidebar({
         }
     }
 
-    const handleContainerDrop = (e: React.DragEvent) => {
+    const handleContainerDrop = (_e: React.DragEvent) => {
         // 子要素（renderFolderNode）でキャッチされなかったドロップを処理
         // 何もせずに dragEnd に任せるか、必要なら末尾への移動などを検討
         console.log('[Sidebar] Container drop (ignored or fallback)')
@@ -692,77 +695,79 @@ export function Sidebar({
                 </div>
             </div>
 
-            <div className="sidebar-section">
-                <div className="sidebar-nav">
-                    <div
-                        className={`sidebar-nav-item ${filterOptions.filterType === 'all' && filterOptions.selectedFolders.length === 0 ? 'active' : ''}`}
-                        onClick={() => setFilterType('all')}
-                    >
-                        <Icons.All />
-                        <span>すべて</span>
-                    </div>
-                    <div
-                        className={`sidebar-nav-item ${filterOptions.filterType === 'uncategorized' ? 'active' : ''}`}
-                        onClick={() => setFilterType('uncategorized')}
-                    >
-                        <Icons.Uncategorized />
-                        <span>未分類</span>
-                    </div>
-                    <div
-                        className={`sidebar-nav-item ${filterOptions.filterType === 'untagged' ? 'active' : ''}`}
-                        onClick={() => setFilterType('untagged')}
-                    >
-                        <Icons.Untagged />
-                        <span>タグなし</span>
-                    </div>
-                    <div
-                        className={`sidebar-nav-item ${filterOptions.filterType === 'recent' ? 'active' : ''}`}
-                        onClick={() => setFilterType('recent')}
-                    >
-                        <Icons.Recent />
-                        <span>最近使用</span>
-                    </div>
-                    <div
-                        className={`sidebar-nav-item ${filterOptions.filterType === 'random' ? 'active' : ''}`}
-                        onClick={() => setFilterType('random')}
-                    >
-                        <Icons.Random />
-                        <span>ランダム</span>
-                    </div>
-                    <div
-                        className={`sidebar-nav-item ${filterOptions.filterType === 'tag_manager' ? 'active' : ''}`}
-                        onClick={() => setFilterType('tag_manager')}
-                    >
-                        <Icons.Tags />
-                        <span>すべてのタグ</span>
-                    </div>
-                    <div
-                        className={`sidebar-nav-item ${filterOptions.filterType === 'trash' ? 'active' : ''}`}
-                        onClick={() => setFilterType('trash')}
-                    >
-                        <Icons.Trash />
-                        <span>ゴミ箱</span>
-                    </div>
-                </div>
-            </div>
-
-            <div className="sidebar-section">
-                <div className="flex justify-between items-center px-2 mb-1">
-                    <div className="sidebar-section-header">
-                        <span>フォルダー</span>
-                        <button
-                            className="sidebar-action-btn"
-                            onClick={handleCreateClick}
-                            title={(!hasActiveLibrary && !activeRemoteLibrary) ? "ライブラリが選択されていません" : "フォルダーを作成"}
-                            disabled={!hasActiveLibrary && !activeRemoteLibrary}
+            <div className="sidebar-content">
+                <div className="sidebar-section">
+                    <div className="sidebar-nav">
+                        <div
+                            className={`sidebar-nav-item ${filterOptions.filterType === 'all' && filterOptions.selectedFolders.length === 0 ? 'active' : ''}`}
+                            onClick={() => setFilterType('all')}
                         >
-                            +
-                        </button>
+                            <Icons.All />
+                            <span>すべて</span>
+                        </div>
+                        <div
+                            className={`sidebar-nav-item ${filterOptions.filterType === 'uncategorized' ? 'active' : ''}`}
+                            onClick={() => setFilterType('uncategorized')}
+                        >
+                            <Icons.Uncategorized />
+                            <span>未分類</span>
+                        </div>
+                        <div
+                            className={`sidebar-nav-item ${filterOptions.filterType === 'untagged' ? 'active' : ''}`}
+                            onClick={() => setFilterType('untagged')}
+                        >
+                            <Icons.Untagged />
+                            <span>タグなし</span>
+                        </div>
+                        <div
+                            className={`sidebar-nav-item ${filterOptions.filterType === 'recent' ? 'active' : ''}`}
+                            onClick={() => setFilterType('recent')}
+                        >
+                            <Icons.Recent />
+                            <span>最近使用</span>
+                        </div>
+                        <div
+                            className={`sidebar-nav-item ${filterOptions.filterType === 'random' ? 'active' : ''}`}
+                            onClick={() => setFilterType('random')}
+                        >
+                            <Icons.Random />
+                            <span>ランダム</span>
+                        </div>
+                        <div
+                            className={`sidebar-nav-item ${filterOptions.filterType === 'tag_manager' ? 'active' : ''}`}
+                            onClick={() => setFilterType('tag_manager')}
+                        >
+                            <Icons.Tags />
+                            <span>すべてのタグ</span>
+                        </div>
+                        <div
+                            className={`sidebar-nav-item ${filterOptions.filterType === 'trash' ? 'active' : ''}`}
+                            onClick={() => setFilterType('trash')}
+                        >
+                            <Icons.Trash />
+                            <span>ゴミ箱</span>
+                        </div>
                     </div>
                 </div>
 
-                <div className="sidebar-genre-list">
-                    {folderTree.map(renderFolderNode)}
+                <div className="sidebar-section">
+                    <div className="flex justify-between items-center px-2 mb-1">
+                        <div className="sidebar-section-header">
+                            <span>フォルダー</span>
+                            <button
+                                className="sidebar-action-btn"
+                                onClick={handleCreateClick}
+                                title={(!hasActiveLibrary && !activeRemoteLibrary) ? "ライブラリが選択されていません" : "フォルダーを作成"}
+                                disabled={!hasActiveLibrary && !activeRemoteLibrary}
+                            >
+                                +
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="sidebar-genre-list">
+                        {folderTree.map(renderFolderNode)}
+                    </div>
                 </div>
             </div>
 

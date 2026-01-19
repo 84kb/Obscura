@@ -529,7 +529,7 @@ export function Inspector({
             <div className="inspector-content">
                 <div className="inspector-preview">
                     {media.length === 1 ? (
-                        <div className="preview-container" onDoubleClick={() => onPlay(media[0])}>
+                        <div className="inspector-preview-container" onDoubleClick={() => onPlay(media[0])}>
                             {media[0].thumbnail_path ? (
                                 <img src={toMediaUrl(media[0].thumbnail_path)} alt={media[0].file_name} />
                             ) : (

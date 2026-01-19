@@ -20,6 +20,7 @@ interface MediaCardProps extends React.HTMLAttributes<HTMLDivElement> {
     onRenameSubmit?: (newName: string) => void
     onRenameCancel?: () => void
     thumbnailMode?: 'speed' | 'quality'
+    width?: number
 }
 
 export function MediaCard({
@@ -39,40 +40,47 @@ export function MediaCard({
     onRenameSubmit,
     onRenameCancel,
     thumbnailMode = 'speed',
+    width = 250,
     ...props
 }: MediaCardProps) {
-    const getInitialThumbnailUrl = () => {
-        if (!media.thumbnail_path) return null
-        const url = toMediaUrl(media.thumbnail_path)
-        if (thumbnailMode === 'speed') {
-            return `${url}?width=250`
-        }
-        return url
-    }
-
-    const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(getInitialThumbnailUrl())
+    const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null)
+    const [isLoaded, setIsLoaded] = useState(false)
 
     // サムネイルがない場合は自動生成をトリガー（品質優先モードの場合のみ）
     useEffect(() => {
-        // propが変わったときにURLを更新
-        if (media.thumbnail_path) {
-            const url = toMediaUrl(media.thumbnail_path)
-            setThumbnailUrl(thumbnailMode === 'speed' ? `${url}?width=250` : url)
+        let timeoutId: NodeJS.Timeout | null = null;
+
+        // メディアが変わったらリセット
+        setIsLoaded(false);
+        setThumbnailUrl(null);
+
+        const updateThumbnail = () => {
+            // propが変わったときにURLを更新
+            if (media.thumbnail_path) {
+                const url = toMediaUrl(media.thumbnail_path)
+                setThumbnailUrl(thumbnailMode === 'speed' ? `${url}?width=${width}` : url)
+            } else if (thumbnailMode === 'quality' && media.file_type === 'video' && window.electronAPI) {
+                window.electronAPI.generateThumbnail(media.id, media.file_path)
+                    .then((path: string | null) => {
+                        if (path) {
+                            setThumbnailUrl(toMediaUrl(path))
+                        }
+                    })
+                    .catch((err: Error) => console.error('Thumbnail generation failed:', err))
+            }
+        };
+
+        // 高速スクロール対策: 150ms待機してからリクエスト
+        if (thumbnailMode === 'speed') {
+            timeoutId = setTimeout(updateThumbnail, 150);
+        } else {
+            updateThumbnail();
         }
 
-        // speedモードの場合は生成をスキップ (既存のサムネイルがあれば利用される)
-        if (thumbnailMode === 'speed') return
-
-        if (!media.thumbnail_path && media.file_type === 'video' && window.electronAPI) {
-            window.electronAPI.generateThumbnail(media.id, media.file_path)
-                .then((path: string | null) => {
-                    if (path) {
-                        setThumbnailUrl(toMediaUrl(path))
-                    }
-                })
-                .catch((err: Error) => console.error('Thumbnail generation failed:', err))
-        }
-    }, [media.id, media.file_path, media.thumbnail_path, media.file_type, thumbnailMode])
+        return () => {
+            if (timeoutId) clearTimeout(timeoutId);
+        };
+    }, [media.id, media.file_path, media.thumbnail_path, media.file_type, thumbnailMode, width])
 
     // ファイルタイプに応じたアイコン
     const getIcon = () => {
@@ -187,15 +195,6 @@ export function MediaCard({
         onInternalDragEnd?.()
     }
 
-    // 画像読み込み完了状態
-    const [isLoaded, setIsLoaded] = useState(false)
-
-    useEffect(() => {
-        // メディアが変わったらリセット
-        setIsLoaded(false)
-        setThumbnailUrl(getInitialThumbnailUrl())
-    }, [media.id, media.file_path, media.thumbnail_path, thumbnailMode])
-
     return (
         <div
             className={`media-card ${isSelected ? 'selected' : ''}`}
@@ -235,7 +234,7 @@ export function MediaCard({
                     />
                 ) : (
                     <div className="media-card-placeholder" style={{ opacity: 1 }}>
-                        {getIcon()}
+                        {!media.thumbnail_path && getIcon()}
                     </div>
                 )}
             </div>

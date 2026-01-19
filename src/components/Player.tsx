@@ -179,6 +179,67 @@ export const Player: React.FC<PlayerProps> = ({
     }, [autoPlayEnabled, isLooping, media])
 
 
+    // Discord RPC Integration
+    useEffect(() => {
+        if (!media || !window.electronAPI) return
+
+        const updateDiscord = () => {
+            const el = videoRef.current || audioRef.current
+            // 実際の要素の状態を優先取得
+            const curTime = el ? el.currentTime : currentTime
+            const dur = el ? el.duration : duration
+            const rate = el ? el.playbackRate : playbackRate
+
+            // 状態に応じたアクティビティ更新
+            if (isPlaying) {
+                const now = Date.now()
+                // 残り時間を計算
+                const remainingSec = (dur - curTime) / (rate || 1)
+                const endTimestamp = Math.floor(now + remainingSec * 1000)
+
+                window.electronAPI.updateDiscordActivity({
+                    details: media.file_name,
+                    state: 'Playing',
+                    endTimestamp: (dur && isFinite(endTimestamp)) ? endTimestamp : undefined,
+                    largeImageKey: 'app_icon',
+                    largeImageText: 'Obscura',
+                    smallImageKey: 'play_icon',
+                    smallImageText: 'Playing'
+                })
+            } else {
+                window.electronAPI.updateDiscordActivity({
+                    details: media.file_name,
+                    state: 'Paused',
+                    largeImageKey: 'app_icon',
+                    largeImageText: 'Obscura',
+                    smallImageKey: 'pause_icon',
+                    smallImageText: 'Paused'
+                })
+            }
+        }
+
+        // 初期実行
+        updateDiscord()
+
+        // Seekイベントの監視 (シーク時に時間を更新するため)
+        const el = videoRef.current || audioRef.current
+        if (el) {
+            const handleSeeked = () => {
+                // シーク直後はステートが安定しない場合があるため少し待つか、
+                // 単に再実行する。
+                updateDiscord()
+            }
+            el.addEventListener('seeked', handleSeeked)
+            return () => {
+                el.removeEventListener('seeked', handleSeeked)
+            }
+        }
+    }, [media, isPlaying, playbackRate]) // currentTimeを含めないことで過剰な更新を防ぐ
+
+
+
+
+
     // シークバーのマウス移動ハンドラ
     const handleSeekMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
         if (!media || !duration || previews.length === 0) return

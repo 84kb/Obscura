@@ -28,6 +28,8 @@ interface MainHeaderProps {
     onReload: () => void
 }
 
+import { DuplicateResolutionModal } from './DuplicateResolutionModal'
+
 export function MainHeader({
     title,
     filterOptions,
@@ -58,12 +60,15 @@ export function MainHeader({
     const ratingFilterBtnRef = useRef<HTMLDivElement>(null)
     const typeFilterBtnRef = useRef<HTMLDivElement>(null)
     const artistFilterBtnRef = useRef<HTMLDivElement>(null)
+    const [isSearchMenuOpen, setIsSearchMenuOpen] = useState(false)
+    const searchContainerRef = useRef<HTMLDivElement>(null)
     const [isDurationFilterOpen, setIsDurationFilterOpen] = useState(false)
     const durationFilterBtnRef = useRef<HTMLDivElement>(null)
     const [isDateFilterOpen, setIsDateFilterOpen] = useState(false)
     const dateFilterBtnRef = useRef<HTMLDivElement>(null)
 
     const [isRefreshModalOpen, setIsRefreshModalOpen] = useState(false)
+    const [duplicateResults, setDuplicateResults] = useState<{ [key: string]: MediaFile[] }[] | null>(null)
 
     const handleConfirmRefresh = () => {
         setIsRefreshModalOpen(false)
@@ -93,6 +98,9 @@ export function MainHeader({
             }
             if (durationFilterBtnRef.current && !durationFilterBtnRef.current.contains(event.target as Node)) {
                 setIsDurationFilterOpen(false)
+            }
+            if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
+                setIsSearchMenuOpen(false)
             }
             if (dateFilterBtnRef.current && !dateFilterBtnRef.current.contains(event.target as Node)) {
                 setIsDateFilterOpen(false)
@@ -341,6 +349,8 @@ export function MainHeader({
                                     </div>
                                 </div>
 
+
+
                                 <div className="dropdown-row">
                                     <span className="dropdown-label">並べ替え</span>
                                     <div className="dropdown-controls">
@@ -491,6 +501,29 @@ export function MainHeader({
                                         ライブラリを更新
                                     </button>
                                 </div>
+                                <div className="dropdown-row" style={{ marginTop: '5px' }}>
+                                    <button
+                                        className="btn btn-full btn-outline-secondary"
+                                        onClick={async () => {
+                                            setIsViewMenuOpen(false)
+                                            if (confirm('ライブラリ内の重複ファイル（名前とサイズが一致）を検索しますか？')) {
+                                                try {
+                                                    const duplicates = await (window.electronAPI as unknown as ElectronAPI).findLibraryDuplicates()
+                                                    if (duplicates && duplicates.length > 0) {
+                                                        setDuplicateResults(duplicates)
+                                                    } else {
+                                                        alert('重複ファイルは見つかりませんでした。')
+                                                    }
+                                                } catch (e) {
+                                                    console.error(e)
+                                                    alert('エラーが発生しました')
+                                                }
+                                            }
+                                        }}
+                                    >
+                                        重複を検索
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>
@@ -503,14 +536,87 @@ export function MainHeader({
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
                     </button>
 
-                    <div className="header-search">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    <div className="header-search" ref={searchContainerRef}>
+                        <button
+                            className={`header-search-icon-btn ${isSearchMenuOpen ? 'active' : ''}`}
+                            onClick={() => setIsSearchMenuOpen(!isSearchMenuOpen)}
+                            title="検索範囲"
+                        >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            </svg>
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginLeft: 2 }}>
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </button>
                         <input
                             type="text"
                             placeholder="検索..."
                             value={filterOptions.searchQuery}
                             onChange={(e) => onFilterChange({ ...filterOptions, searchQuery: e.target.value })}
+                            onFocus={() => {
+                                // オプション: フォーカス時にメニューを開く挙動が必要ならここ
+                            }}
                         />
+                        {filterOptions.searchQuery && (
+                            <button
+                                className="header-search-clear-btn"
+                                onClick={() => onFilterChange({ ...filterOptions, searchQuery: '' })}
+                                title="クリア"
+                            >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                            </button>
+                        )}
+
+                        {isSearchMenuOpen && (
+                            <div className="search-options-dropdown">
+                                <div className="search-options-header">検索範囲:</div>
+                                {([
+                                    { key: 'name', label: '名前', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="8" y1="12" x2="16" y2="12"></line></svg> },
+                                    { key: 'folder', label: 'フォルダ名', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg> },
+                                    { key: 'description', label: 'フォルダーの説明', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg> },
+                                    { key: 'extension', label: '拡張子', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg> },
+                                    { key: 'tags', label: 'タグ', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg> },
+                                    { key: 'url', label: 'URL', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg> },
+                                    { key: 'comments', label: 'コメント', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg> },
+                                    { key: 'memo', label: 'メモ', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg> },
+                                    { key: 'artist', label: '投稿者', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg> },
+                                ] as const).map(item => {
+                                    const isChecked = filterOptions.searchTargets?.[item.key] ?? true
+                                    return (
+                                        <div
+                                            key={item.key}
+                                            className="search-option-row"
+                                            onClick={() => {
+                                                const current = filterOptions.searchTargets || {
+                                                    name: true, folder: true, description: true, extension: true,
+                                                    tags: true, url: true, comments: true, memo: true, artist: true
+                                                }
+                                                onFilterChange({
+                                                    ...filterOptions,
+                                                    searchTargets: {
+                                                        ...current,
+                                                        [item.key]: !isChecked
+                                                    }
+                                                })
+                                            }}
+                                        >
+                                            <span className="search-option-icon">{item.icon}</span>
+                                            <span className="search-option-label">{item.label}</span>
+                                            {isChecked && (
+                                                <svg className="search-option-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                                </svg>
+                                            )}
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        )}
                     </div>
 
 
@@ -683,6 +789,13 @@ export function MainHeader({
                     isDestructive={true}
                     onConfirm={handleConfirmRefresh}
                     onCancel={() => setIsRefreshModalOpen(false)}
+                />
+            )}
+
+            {duplicateResults && (
+                <DuplicateResolutionModal
+                    duplicates={duplicateResults}
+                    onClose={() => setDuplicateResults(null)}
                 />
             )}
         </div>

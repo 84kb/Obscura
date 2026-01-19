@@ -1,6 +1,6 @@
 
 import { getMediaMetadata } from './ffmpeg';
-import * as path from 'path';
+
 
 async function main() {
     const file = "e:\\Library\\音MAD.library\\images\\747f06b0501c\\合作単品④_②③_⑬ [N409D1kTQMA].mp4";

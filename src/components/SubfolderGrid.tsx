@@ -1,10 +1,10 @@
-import { Genre } from '../types'
+import { Folder } from '../types'
 import './SubfolderGrid.css'
 
 interface SubfolderGridProps {
-    subfolders: Genre[]
-    onSelectFolder: (genreId: number) => void
-    getMediaCount: (genreId: number) => number
+    subfolders: Folder[]
+    onSelectFolder: (folderId: number) => void
+    getMediaCount: (folderId: number) => number
 }
 
 // フォルダーアイコン

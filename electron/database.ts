@@ -76,6 +76,7 @@ export class MediaLibrary {
   private tagFoldersPath: string // Was foldersPath (now storing TagFolders)
 
   private db: Database
+  private importQueue: Promise<any> = Promise.resolve()
 
   constructor(libraryPath: string) {
     this.path = libraryPath
@@ -141,7 +142,7 @@ export class MediaLibrary {
       // 3. Load media files metadata from dispersed files
       this.db.mediaFiles = []
       this.db.mediaTags = []
-      this.db.mediaGenres = []
+      this.db.mediaFolders = []
       this.db.comments = []
 
       const imagesDir = path.join(this.path, 'images')
@@ -224,6 +225,17 @@ export class MediaLibrary {
       }
     })
     console.log(`[MediaLibrary] Indices rebuilt: ${this.db.mediaTags.length} tags, ${this.db.mediaFolders.length} folders, ${this.db.comments.length} comments.`)
+
+    // Initialize counters based on loaded data
+    if (this.db.mediaFiles.length > 0) {
+      this.db.nextMediaId = Math.max(...this.db.mediaFiles.map(m => m.id)) + 1
+    }
+    // Tag, Folder, TagFolder use random IDs now, so no need to init counters for them.
+
+    if (this.db.comments.length > 0) {
+      this.db.nextCommentId = Math.max(...this.db.comments.map(c => c.id)) + 1
+    }
+    console.log(`[MediaLibrary] Counters initialized: Media=${this.db.nextMediaId}`)
   }
 
   private migrateFromLegacyDatabase() {
@@ -313,66 +325,229 @@ export class MediaLibrary {
   }
 
   // メディア操作
-  public async importMediaFiles(filePaths: string[]) {
-    const importedFiles = []
-    for (const srcPath of filePaths) {
-      try {
-        if (!fs.existsSync(srcPath)) continue
-        const ext = path.extname(srcPath).toLowerCase()
-        if (!['.mp4', '.mkv', '.avi', '.mov', '.webm', '.mp3', '.wav', '.flac', '.m4a', '.ogg'].includes(ext)) continue
+  public async importMediaFiles(filePaths: string[], onProgress?: (data: { current: number, total: number, fileName: string, step: string, percentage: number }) => void, options: { checkDuplicates?: boolean } = {}) {
+    return (this.importQueue = this.importQueue.then(async () => {
+      // 1. 重複チェック (オプション有効時)
+      let filesToImport = filePaths
+      if (options.checkDuplicates) {
+        // 重複チェック (厳密モード: 名前+サイズ)
+        const duplicates = await this.checkDuplicates(filePaths, true)
+        if (duplicates.length > 0) {
+          console.log(`[MediaLibrary] Found ${duplicates.length} duplicates. Skipping...`)
+          // 重複しているファイルを除外
+          const duplicatePaths = new Set(duplicates.map(d => d.newFile.path))
+          filesToImport = filePaths.filter(p => !duplicatePaths.has(p))
 
-        const fileName = path.basename(srcPath)
-        const fileType = ['.mp3', '.wav', '.flac', '.m4a', '.ogg'].includes(ext) ? 'audio' : 'video'
-
-        const id = this.db.nextMediaId++
-        const uniqueId = crypto.randomBytes(6).toString('hex')
-        const destDir = path.join(this.path, 'images', uniqueId)
-        await fs.ensureDir(destDir)
-
-        const destPath = path.join(destDir, fileName)
-        await fs.copy(srcPath, destPath)
-
-        const stats = fs.statSync(destPath) // Use destPath for stats
-        const { width, height, duration, artist, description, url } = await getMediaMetadata(destPath)
-        const artists: string[] = []
-
-        const metadata = {
-          id, uniqueId, file_path: destPath, file_name: fileName, file_type: fileType,
-          file_size: stats.size, duration, width, height, rating: 0,
-          created_date: stats.birthtime.toISOString(), modified_date: stats.mtime.toISOString(),
-          thumbnail_path: null as string | null, created_at: new Date().toISOString(), is_deleted: false,
-          last_played_at: null, artist, artists, description, url, dominant_color: null as string | null,
-          tags: [], folders: [], comments: [] // Renamed genres -> folders
-        }
-
-        // サムネイル生成を強制実行
-        try {
-          const thumbPath = await getThumbnailPath(this.path, id, destPath)
-          const mode = getClientConfig().thumbnailMode || 'speed'
-          if (await createThumbnail(destPath, thumbPath, mode)) {
-            metadata.thumbnail_path = thumbPath
-
-            // ドミナントカラー抽出
-            try {
-              const color = await extractDominantColor(thumbPath)
-              if (color) {
-                metadata.dominant_color = color
-              }
-            } catch (colorError) {
-              console.error(`Failed to extract dominant color for ${fileName}:`, colorError)
-            }
+          // 全て重複の場合は終了
+          if (filesToImport.length === 0) {
+            console.log('[MediaLibrary] All files were duplicates. Import skipped.')
+            return []
           }
-        } catch (e) {
-          console.error(`Failed to generate initial thumbnail for ${fileName}:`, e)
+        }
+      }
+
+      const importedFiles = []
+      const totalFiles = filesToImport.length
+      console.log(`[MediaLibrary] Batch import started: ${totalFiles} files. Queueing...`)
+
+      for (let i = 0; i < totalFiles; i++) {
+        const srcPath = filesToImport[i]
+        const currentFileIndex = i + 1
+
+        const report = (step: string, subStepWeight: number) => {
+          if (onProgress) {
+            // total percentage = (completed_files / total) + (current_file_progress / total)
+            // subStepWeight: 0 (start), 0.2 (moved), 0.4 (meta), 0.8 (thumb), 1.0 (done)
+            const fileBaseProgress = i / totalFiles
+            const currentFileProgress = subStepWeight / totalFiles
+            const percentage = Math.round((fileBaseProgress + currentFileProgress) * 100)
+            onProgress({
+              current: currentFileIndex,
+              total: totalFiles,
+              fileName: path.basename(srcPath),
+              step,
+              percentage
+            })
+          }
         }
 
-        this.db.mediaFiles.push(metadata)
-        this.saveMediaMetadata(metadata)
-        importedFiles.push(metadata)
-      } catch (error) { console.error(`Failed to import file: ${srcPath}`, error) }
+        try {
+          if (!fs.existsSync(srcPath)) {
+            console.warn(`[MediaLibrary] Source file not found, skipping: ${srcPath}`)
+            continue
+          }
+          const ext = path.extname(srcPath).toLowerCase()
+          if (!['.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv', '.mp3', '.wav', '.flac', '.m4a', '.ogg', '.aac', '.wma'].includes(ext)) {
+            console.warn(`[MediaLibrary] Unsupported extension, skipping: ${srcPath}`)
+            continue
+          }
+
+          let fileName = path.basename(srcPath)
+          // ファイル名のサニタイズ
+          fileName = fileName.replace(/[\\/:*?"<>|]/g, '_')
+          if (fileName.length > 200) {
+            const namePart = path.parse(fileName).name.substring(0, 150)
+            fileName = namePart + ext
+          }
+
+          report('Starting...', 0)
+
+          const fileType = ['.mp3', '.wav', '.flac', '.m4a', '.ogg', '.aac', '.wma'].includes(ext) ? 'audio' : 'video'
+
+          // IDの整合性チェック
+          if (isNaN(this.db.nextMediaId) || this.db.nextMediaId <= 0) {
+            console.warn(`[MediaLibrary] Invalid nextMediaId detected (${this.db.nextMediaId}). Resetting...`)
+            this.db.nextMediaId = (this.db.mediaFiles.length > 0) ? Math.max(...this.db.mediaFiles.map(m => m.id)) + 1 : 1
+          }
+
+          const id = this.db.nextMediaId++
+          const uniqueId = crypto.randomBytes(6).toString('hex')
+          const destDir = path.join(this.path, 'images', uniqueId)
+
+          console.log(`[MediaLibrary] [Step 1/5] Starting import ${id}: ${fileName}`)
+
+          await fs.ensureDir(destDir)
+          const destPath = path.join(destDir, fileName)
+
+          // 移動/コピー処理 (タイムアウト10分)
+          console.log(`[MediaLibrary] [Step 2/5] Moving file to library...`)
+          report('Moving...', 0.1)
+          await Promise.race([
+            fs.move(srcPath, destPath, { overwrite: true }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('File move timeout (600s)')), 600000))
+          ])
+
+          const stats = fs.statSync(destPath)
+          console.log(`[MediaLibrary] [Step 3/5] Extracting metadata...`)
+          report('Metadata...', 0.3)
+          const { width, height, duration, artist, description, url } = await getMediaMetadata(destPath)
+          const artists: string[] = []
+
+          const metadata = {
+            id, uniqueId, file_path: destPath, file_name: fileName, file_type: fileType,
+            file_size: stats.size, duration, width, height, rating: 0,
+            created_date: stats.birthtime.toISOString(), modified_date: stats.mtime.toISOString(),
+            thumbnail_path: null as string | null, created_at: new Date().toISOString(), is_deleted: false,
+            last_played_at: null, artist, artists, description, url, dominant_color: null as string | null,
+            tags: [], folders: [], comments: []
+          }
+
+          console.log(`[MediaLibrary] [Step 4/5] Generating thumbnail...`)
+          report('Thumbnail...', 0.5)
+          try {
+            const thumbPath = await getThumbnailPath(this.path, id, destPath)
+            const mode = getClientConfig().thumbnailMode || 'speed'
+            if (await createThumbnail(destPath, thumbPath, mode)) {
+              metadata.thumbnail_path = thumbPath
+
+              console.log(`[MediaLibrary] [Step 5/5] Extracting dominant color...`)
+              report('Color...', 0.8)
+              try {
+                const color = await extractDominantColor(thumbPath)
+                if (color) metadata.dominant_color = color
+              } catch (e) { console.error(`Failed to extract color:`, e) }
+            }
+          } catch (e) { console.error(`Failed to generate thumbnail:`, e) }
+
+          this.db.mediaFiles.push(metadata)
+          this.saveMediaMetadata(metadata)
+          importedFiles.push(metadata)
+          report('Done', 1.0)
+          console.log(`[MediaLibrary] Import completed: ${id} (${fileName})`)
+        } catch (error) {
+          console.error(`[MediaLibrary] Failed to import: ${srcPath}`, error)
+        }
+      }
+      return importedFiles
+    })).catch(e => {
+      console.error("[MediaLibrary] Critical Queue Error:", e)
+      return []
+    })
+  }
+
+  public async checkDuplicates(filePaths: string[], strict: boolean = false) {
+    const duplicates = []
+
+    for (const srcPath of filePaths) {
+      if (!fs.existsSync(srcPath)) continue
+      const stats = fs.statSync(srcPath)
+      const fileName = path.basename(srcPath)
+
+      // サイズが一致するファイルを探す
+      // strict=true の場合はファイル名も一致する必要がある
+      const existing = this.db.mediaFiles.find(m => {
+        const sizeMatch = m.file_size === stats.size
+        const nameMatch = m.file_name === fileName
+        const notDeleted = !m.is_deleted
+
+        if (strict) {
+          return sizeMatch && nameMatch && notDeleted
+        } else {
+          return sizeMatch && notDeleted
+        }
+      })
+
+      if (existing) {
+        duplicates.push({
+          newFile: {
+            path: srcPath,
+            name: fileName,
+            size: stats.size,
+            btime: stats.birthtime,
+            mtime: stats.mtime
+          },
+          existing
+        })
+      }
     }
-    // No monolithic save needed
-    return importedFiles
+    return duplicates
+  }
+
+  /**
+   * インポート済みのメディアIDに対して重複をチェックする
+   */
+  public getDuplicatesForMedia(mediaId: number) {
+    const target = this.db.mediaFiles.find(m => m.id === mediaId)
+    if (!target || target.is_deleted) return []
+
+    // 自分以外の同じサイズのファイルを探す
+    const matches = this.db.mediaFiles.filter(m =>
+      m.id !== mediaId &&
+      m.file_size === target.file_size &&
+      !m.is_deleted
+    )
+
+    return matches.map(existing => ({
+      newMedia: target,
+      existingMedia: existing
+    }))
+  }
+
+  /**
+   * ライブラリ内の重複ファイルを一括検索する
+   * Name + Size が一致するグループを返す
+   */
+  public async findLibraryDuplicates(strict: boolean = true) {
+    const groups: { [key: string]: any[] } = {}
+
+    // 1. グループ化 (Size + Name)
+    for (const media of this.db.mediaFiles) {
+      if (media.is_deleted) continue
+
+      let key = ''
+      if (strict) {
+        key = `${media.file_size}_${media.file_name}`
+      } else {
+        key = `${media.file_size}`
+      }
+
+      if (!groups[key]) groups[key] = []
+      groups[key].push(media)
+    }
+
+    // 2. 重複のみ抽出
+    const duplicateGroups = Object.values(groups).filter(group => group.length > 1)
+    return duplicateGroups
   }
 
   public addMediaFile(filePath: string, fileName: string, fileType: string, options: any = {}) {
@@ -460,13 +635,11 @@ export class MediaLibrary {
    * 複数のメディアファイルを一括でゴミ箱へ移動/復元する
    */
   public moveMediaFilesToTrash(ids: number[], isDeleted: boolean) {
-    let changed = false
     ids.forEach(id => {
       const media = this.db.mediaFiles.find(m => m.id === id)
       if (media && media.is_deleted !== isDeleted) {
         media.is_deleted = isDeleted
-        changed = true
-        this.saveMediaMetadata(media) // Loop save? Optimization opportunity but safe for now.
+        this.saveMediaMetadata(media)
       }
     })
   }
@@ -642,12 +815,23 @@ export class MediaLibrary {
     console.log('[MediaLibrary] Library refresh completed.')
   }
 
+  // ヘルパー: ランダムなユニークIDを生成 (1 ~ 1,000,000,000)
+  private generateUniqueId(existingItems: { id: number }[]): number {
+    let id: number
+    do {
+      id = Math.floor(Math.random() * 1000000000) + 1
+    } while (existingItems.some(item => item.id === id))
+    return id
+  }
+
   // タグ操作
   public getAllTags() { return this.db.tags.sort((a, b) => a.name.localeCompare(b.name)) }
   public createTag(name: string) {
     const existing = this.db.tags.find((t) => t.name === name)
     if (existing) return existing
-    const id = this.db.nextTagId++
+
+    // ランダムID生成
+    const id = this.generateUniqueId(this.db.tags)
     const tag = { id, name }
     this.db.tags.push(tag)
     this.saveTags()
@@ -703,7 +887,6 @@ export class MediaLibrary {
   public removeTagFromMedia(mediaId: number, tagId: number) {
     // this.db.mediaTags = this.db.mediaTags.filter((mt) => !(mt.mediaId === mediaId && mt.tagId === tagId))
     // Update relationships and media objects
-    const startLen = this.db.mediaTags.length
     this.db.mediaTags = this.db.mediaTags.filter((mt) => !(mt.mediaId === mediaId && mt.tagId === tagId))
 
     const media = this.db.mediaFiles.find(m => m.id === mediaId)
@@ -720,7 +903,6 @@ export class MediaLibrary {
       // Need to update tags in mediaFiles?
       // Since we store COPY of tags in media.tags (full object), yes we do.
       // This is the downside of dispersed denormalized data.
-      let changed = false
       this.db.mediaFiles.forEach(m => {
         if (m.tags) {
           const t = m.tags.find((mt: any) => mt.id === tagId)
@@ -738,7 +920,9 @@ export class MediaLibrary {
   public createTagFolder(name: string) {
     const existing = this.db.tagFolders.find((f: any) => f.name === name)
     if (existing) return existing
-    const id = this.db.nextTagFolderId++
+
+    // ランダムID生成
+    const id = this.generateUniqueId(this.db.tagFolders)
     const folder = { id, name }
     this.db.tagFolders.push(folder)
     this.saveFolders()
@@ -777,11 +961,24 @@ export class MediaLibrary {
       return a.name.localeCompare(b.name)
     })
   }
-  public createFolder(name: string, parentId: number | null = null) {
-    const existing = this.db.folders.find((g) => g.name === name && g.parentId === parentId)
-    if (existing) return existing
-    const id = this.db.nextFolderId++
-    const folder = { id, name, parentId, orderIndex: 0 }
+  public createFolder(baseName: string, parentId: number | null = null) {
+    let name = baseName
+    let counter = 1
+    // 同じ名前の兄弟がなくなるまで連番をつける
+    while (this.db.folders.find((g) => g.name === name && g.parentId === parentId)) {
+      name = `${baseName} (${counter})`
+      counter++
+    }
+
+    // ランダムID生成
+    const id = this.generateUniqueId(this.db.folders)
+
+    // 新しいフォルダーを末尾に追加するため、兄弟の中で最大のorderIndexを取得
+    const siblings = this.db.folders.filter(f => f.parentId === parentId)
+    const maxOrder = siblings.reduce((max, f) => Math.max(max, f.orderIndex || 0), 0)
+
+    // 他のD&D実装に合わせて +100 しておく
+    const folder = { id, name, parentId, orderIndex: maxOrder + 100 }
     this.db.folders.push(folder)
     this.saveFolders()
     return folder
@@ -965,6 +1162,9 @@ export const mediaDB = {
   moveMediaFilesToTrash: (ids: number[], isDeleted: boolean) => getActiveMediaLibrary()?.moveMediaFilesToTrash(ids, isDeleted),
   deleteMediaFilesPermanently: (ids: number[]) => getActiveMediaLibrary()?.deleteMediaFilesPermanently(ids) || Promise.resolve(),
   updateDominantColor: (id: number, color: string) => getActiveMediaLibrary()?.updateDominantColor(id, color),
+  checkDuplicates: (filePaths: string[]) => getActiveMediaLibrary()?.checkDuplicates(filePaths) || Promise.resolve([]),
+  getDuplicatesForMedia: (mediaId: number) => getActiveMediaLibrary()?.getDuplicatesForMedia(mediaId) || [],
+  findLibraryDuplicates: (strict?: boolean) => getActiveMediaLibrary()?.findLibraryDuplicates(strict) || Promise.resolve([]),
   refreshLibraryMetadata: (onProgress: (c: number, t: number) => void) => getActiveMediaLibrary()?.refreshLibraryMetadata(onProgress) || Promise.resolve(),
 }
 

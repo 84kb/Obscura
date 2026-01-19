@@ -1,0 +1,192 @@
+.list-view-container {
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
+    background-color: var(--bg-main);
+}
+
+.list-view-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 13px;
+}
+
+.list-view-header {
+    background-color: var(--bg-dark);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    border-bottom: 1px solid var(--border);
+}
+
+.list-view-header th {
+    padding: 8px 12px;
+    text-align: left;
+    color: var(--text-muted);
+    font-weight: 500;
+    user-select: none;
+    white-space: nowrap;
+    background-color: var(--bg-dark);
+    /* Ensure solid background */
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.list-view-header th:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-main);
+}
+
+.header-cell-content {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.sort-icon {
+    font-size: 10px;
+    color: var(--primary);
+    opacity: 0.8;
+}
+
+.list-view-row {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    cursor: default;
+    transition: background-color 0.1s;
+}
+
+.list-view-row:hover {
+    background-color: var(--bg-hover);
+}
+
+.list-view-row.selected {
+    background-color: rgba(255, 140, 66, 0.15);
+}
+
+.list-view-cell {
+    padding: 6px 12px;
+    color: var(--text-main);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+}
+
+.list-view-cell.name-cell {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    /* Important for flex children truncation */
+}
+
+.list-view-cell.name-cell span {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.list-view-thumbnail {
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    object-fit: cover;
+    background-color: var(--bg-card);
+    flex-shrink: 0;
+}
+
+.list-view-cell.rating-cell {
+    color: #ffd700;
+}
+
+.list-view-icon {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--bg-secondary);
+    border-radius: 4px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+/* ヘッダー用コンテキストメニュー */
+.list-view-header-menu {
+    position: fixed;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 8px;
+    z-index: 1000;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    min-width: 180px;
+    user-select: none;
+}
+
+.header-menu-item {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    cursor: pointer;
+    border-radius: 4px;
+    color: #ccc;
+    font-size: 13px;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.header-menu-item:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-main);
+}
+
+.menu-icon {
+    margin-right: 12px;
+    width: 14px;
+    height: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    opacity: 0.8;
+}
+
+.menu-icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+.menu-label {
+    flex: 1;
+}
+
+.menu-check {
+    margin-left: 12px;
+    color: var(--primary);
+    font-weight: bold;
+    font-size: 14px;
+}
+
+/* タグチップの調整 */
+.list-view-tags {
+    display: flex;
+    gap: 4px;
+    flex-wrap: nowrap;
+    overflow: hidden;
+}
+
+.list-view-tag-chip {
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    padding: 0 6px;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.tag-more {
+    font-size: 11px;
+    color: #888;
+}

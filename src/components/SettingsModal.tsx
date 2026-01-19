@@ -136,7 +136,7 @@ const PERMISSION_LABELS: Record<string, string> = {
 }
 
 export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsModalProps) {
-    const [activeCategory, setActiveCategory] = useState<Category | 'media-engine'>('viewer')
+    const [activeCategory, setActiveCategory] = useState<'general' | 'import' | 'network' | 'media-engine' | 'profile'>('general')
     const [appVersion, setAppVersion] = useState<string>('Unknown')
 
     useEffect(() => {
@@ -1713,11 +1713,151 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         </div>
                     </div>
                 </section>
+
+                <section className="settings-section">
+                    <h4 className="section-title">Discord リッチプレゼンス</h4>
+                    <div className="settings-card">
+                        <div className="settings-row">
+                            <div className="settings-info">
+                                <span className="settings-label">Discord に再生状況を表示</span>
+                                <span className="settings-description">
+                                    再生中のメディア情報を Discord のステータスに表示します。
+                                </span>
+                            </div>
+                            <label className="toggle-switch">
+                                <input
+                                    type="checkbox"
+                                    checked={clientConfig.discordRichPresenceEnabled || false}
+                                    onChange={(e) => {
+                                        const newConfig = { ...clientConfig, discordRichPresenceEnabled: e.target.checked }
+                                        setClientConfig(newConfig);
+                                        (window.electronAPI as any).updateClientConfig({ discordRichPresenceEnabled: e.target.checked })
+                                    }}
+                                />
+                                <span className="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </section>
             </div>
         )
     }
 
     // ... (renderNetworkSettingsなど)
+
+    // === Profile Settings ===
+    const [nickname, setNickname] = useState('')
+    const [selectedIcon, setSelectedIcon] = useState('👤')
+    // デフォルトのアイコンオプション
+    const DEFAULT_ICONS = [
+        '👤', '😀', '😎', '🐱', '🐶', '🦊', '🐻', '🐼',
+        '🐸', '🦁', '🐯', '🐨', '🐰', '🦄', '🐉', '🌟'
+    ]
+
+    useEffect(() => {
+        if (activeCategory === 'profile' && clientConfig) {
+            setNickname(clientConfig.nickname || '')
+            setSelectedIcon(clientConfig.iconUrl || DEFAULT_ICONS[0])
+        }
+    }, [activeCategory, clientConfig])
+
+    const handleSaveProfile = async () => {
+        if (!window.electronAPI) return
+        try {
+            await window.electronAPI.updateClientConfig({
+                nickname: nickname.trim(),
+                iconUrl: selectedIcon
+            })
+            // 更新後のconfを再取得して反映
+            const config = await window.electronAPI.getClientConfig()
+            setClientConfig(config)
+            alert('プロファイルを保存しました')
+        } catch (e: any) {
+            console.error('Failed to save profile:', e)
+            alert('保存に失敗しました: ' + e.message)
+        }
+    }
+
+    const renderProfileSettings = () => {
+        return (
+            <div className="settings-page">
+                <h3 className="settings-page-title">プロファイル設定</h3>
+                <section className="settings-section">
+                    <div className="settings-card">
+                        <div className="settings-info" style={{ marginBottom: '16px' }}>
+                            <span className="settings-description">
+                                ここで設定したニックネームとアイコンは、リモートライブラリへの接続時や、ホストとしてライブラリを公開する際に使用されます。
+                            </span>
+                        </div>
+
+                        <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '12px' }}>
+                            <label className="settings-label">ニックネーム</label>
+                            <input
+                                type="text"
+                                className="settings-input"
+                                placeholder="あなたの表示名"
+                                value={nickname}
+                                onChange={e => setNickname(e.target.value)}
+                                maxLength={50}
+                                style={{ width: '100%' }}
+                            />
+                        </div>
+
+                        <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '12px', marginTop: '16px' }}>
+                            <label className="settings-label">アイコン</label>
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                {DEFAULT_ICONS.map(icon => (
+                                    <button
+                                        key={icon}
+                                        type="button"
+                                        style={{
+                                            fontSize: '24px',
+                                            width: '40px',
+                                            height: '40px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            background: selectedIcon === icon ? 'var(--primary)' : '#27272a',
+                                            border: selectedIcon === icon ? '1px solid var(--primary-light)' : '1px solid #3f3f46',
+                                            borderRadius: '8px',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.2s'
+                                        }}
+                                        onClick={() => setSelectedIcon(icon)}
+                                    >
+                                        {icon}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="settings-row" style={{ marginTop: '24px', justifyContent: 'flex-start', gap: '16px', borderTop: '1px solid #333', paddingTop: '16px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <div style={{
+                                    width: '48px', height: '48px',
+                                    background: '#27272a',
+                                    borderRadius: '50%',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    fontSize: '24px',
+                                    border: '2px solid #3f3f46'
+                                }}>
+                                    {selectedIcon}
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                    <span style={{ fontWeight: 'bold', fontSize: '16px' }}>{nickname || '（未設定）'}</span>
+                                    <span style={{ fontSize: '12px', color: '#888' }}>プレビュー</span>
+                                </div>
+                            </div>
+                            <div style={{ flex: 1 }}></div>
+                            <button className="btn btn-primary" onClick={handleSaveProfile} disabled={!nickname.trim()}>
+                                保存
+                            </button>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        )
+    }
 
     return (
         <div className="settings-modal-overlay" onClick={onClose}>
@@ -1741,12 +1881,21 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                 <span>{cat.label}</span>
                             </button>
                         ))}
+                        {/* Add Profile button */}
+                        <button
+                            key="profile"
+                            className={`nav-item ${activeCategory === 'profile' ? 'active' : ''}`}
+                            onClick={() => setActiveCategory('profile')}
+                        >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                            <span>プロフィール</span>
+                        </button>
                     </nav>
                 </div>
 
                 <div className="settings-modal-main">
                     <header className="settings-header">
-                        <span className="category-title">{categories.find(c => c.id === activeCategory)?.label}</span>
+                        <span className="category-title">{categories.find(c => c.id === activeCategory)?.label || (activeCategory === 'profile' ? 'プロフィール' : '')}</span>
                         <button className="close-btn" onClick={onClose}>
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="6"></line></svg>
                         </button>
@@ -1754,15 +1903,16 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
                     <div className="main-content">
                         {activeCategory === 'general' ? renderGeneralSettings() :
-                            activeCategory === 'import' ? renderImportSettings() :
-                                activeCategory === 'viewer' ? renderViewerSettings() :
-                                    activeCategory === 'network' ? renderNetworkSettings() :
-                                        activeCategory === 'media-engine' ? renderMediaEngineSettings() :
-                                            activeCategory === 'developer' ? renderDeveloperSettings() : (
-                                                <div className="empty-state">
-                                                    <p>このセクションの設定は準備中です。</p>
-                                                </div>
-                                            )}
+                            activeCategory === 'profile' ? renderProfileSettings() : // Render Profile Settings
+                                activeCategory === 'import' ? renderImportSettings() :
+                                    activeCategory === 'viewer' ? renderViewerSettings() :
+                                        activeCategory === 'network' ? renderNetworkSettings() :
+                                            activeCategory === 'media-engine' ? renderMediaEngineSettings() :
+                                                activeCategory === 'developer' ? renderDeveloperSettings() : (
+                                                    <div className="empty-state">
+                                                        <p>このセクションの設定は準備中です。</p>
+                                                    </div>
+                                                )}
                     </div>
 
                     <footer className="main-footer">

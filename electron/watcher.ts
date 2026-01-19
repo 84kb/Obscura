@@ -2,6 +2,7 @@ import chokidar from 'chokidar'
 import fs from 'fs-extra'
 import { libraryRegistry } from './database'
 import { ClientConfig } from './settings'
+import { mainWindow } from './main'
 
 interface WatcherState {
     // Map<watchPath, WatcherInstance>
@@ -47,7 +48,9 @@ export function updateWatcher(config: ClientConfig, onImport?: (files: string[])
             console.log(`[Watcher] Starting watch on: ${cfg.path} -> Library: ${cfg.targetLibraryId}`)
 
             const watcher = chokidar.watch(cfg.path, {
-                ignored: /(^|[\/\\])\../,
+                // Default ignores dotfiles, so we override it.
+                // explicitly ignore .git and node_modules, but allow other dotfiles (e.g. .video.mp4)
+                ignored: /(^|[\/\\])(\.git|node_modules)/,
                 persistent: true,
                 ignoreInitial: false,
                 awaitWriteFinish: {
@@ -57,31 +60,30 @@ export function updateWatcher(config: ClientConfig, onImport?: (files: string[])
             })
 
             watcher.on('add', async (filePath: string) => {
-                console.log(`[Watcher] File detected in ${cfg.path}: ${filePath}`)
+                // mojibake 調査用の Hex Dump
+                const hasNonAscii = /[^\x20-\x7E]/.test(filePath)
+                if (hasNonAscii) {
+                    const hex = Buffer.from(filePath, 'utf-8').toString('hex')
+                    console.log(`[Watcher] File detected (Non-ASCII): ${filePath} [Hex: ${hex}]`)
+                } else {
+                    console.log(`[Watcher] File detected: ${filePath}`)
+                }
+
                 try {
-                    // Get specific library instance (even if closed/background)
-                    // targetLibraryId is treated as library PATH
                     const lib = libraryRegistry.getLibrary(cfg.targetLibraryId)
-
-                    // Import
-                    const imported = await lib.importMediaFiles([filePath])
-
-                    if (imported && imported.length > 0) {
-                        console.log(`[Watcher] Imported to ${lib.path}: ${filePath}`)
-
-                        // Remove source file
-                        await fs.remove(filePath)
-                        console.log(`[Watcher] Source removed: ${filePath}`)
-
-                        // Notification (Global)
-                        if (onImport) {
-                            onImport(imported.map(m => m.file_path))
+                    // Library handles sequential execution internally via importQueue
+                    const imported = await lib.importMediaFiles([filePath], (data: any) => {
+                        // main.ts で定義されている global mainWindow を使用
+                        if (mainWindow && !mainWindow.isDestroyed()) {
+                            mainWindow.webContents.send('import-progress', { id: 'auto-import', ...data })
                         }
-                    } else {
-                        console.warn(`[Watcher] Skipped/Failed import: ${filePath}`)
+                    }, { checkDuplicates: true })
+
+                    if (imported && imported.length > 0 && onImport) {
+                        onImport(imported.map((m: any) => m.file_path))
                     }
                 } catch (error: any) {
-                    console.error(`[Watcher] Error processing ${filePath}:`, error)
+                    console.error(`[Watcher] Failed to trigger import: ${filePath}`, error)
                 }
             })
 

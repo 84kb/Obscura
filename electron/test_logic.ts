@@ -1,6 +1,6 @@
 
 import { spawn } from 'child_process';
-import * as path from 'path';
+
 
 async function getMediaMetadataTest(filePath: string) {
     return new Promise((resolve) => {

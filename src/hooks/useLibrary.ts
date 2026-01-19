@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { MediaFile, Tag, TagFolder, Folder, FilterOptions, Library, RemoteLibrary, ElectronAPI } from '../types'
+import { MediaFile, Tag, TagFolder, Folder, FilterOptions, Library, RemoteLibrary } from '../types'
 import { useNotification } from '../contexts/NotificationContext'
 
 export function useLibrary() {
@@ -15,6 +15,17 @@ export function useLibrary() {
     const [randomSeed, setRandomSeed] = useState<number>(Date.now())
     const [filterOptions, setFilterOptions] = useState<FilterOptions>({
         searchQuery: '',
+        searchTargets: {
+            name: true,
+            folder: true,
+            description: true,
+            extension: true,
+            tags: true,
+            url: true,
+            comments: true,
+            memo: true,
+            artist: true
+        },
         selectedTags: [],
         excludedTags: [],
         selectedFolders: [], // Renamed from selectedGenres
@@ -24,8 +35,8 @@ export function useLibrary() {
         folderFilterMode: 'or',
         filterType: 'all',
         fileType: 'all',
-        sortOrder: (localStorage.getItem('sort_order') as any) || 'name',
-        sortDirection: (localStorage.getItem('sort_direction') as any) || 'desc',
+        sortOrder: 'name',
+        sortDirection: 'desc',
         selectedRatings: [],
         selectedExtensions: [],
         excludedExtensions: [],
@@ -33,7 +44,83 @@ export function useLibrary() {
         excludedArtists: []
     })
 
-    // ... (intermediate lines skipped)
+    // ソート設定読み込み・保存のヘルパー
+    const getLibraryIdForConfig = useCallback(() => {
+        if (activeRemoteLibrary) {
+            return `remote_${activeRemoteLibrary.id}`
+        }
+        if (activeLibrary) {
+            return `local_${activeLibrary.path}`
+        }
+        return null
+    }, [activeLibrary, activeRemoteLibrary])
+
+    // 簡易的な実装として、ロード完了を待つ (useRefで管理)
+    const isViewSettingsLoaded = useRef<string | null>(null)
+
+    // ロードエフェクト
+    useEffect(() => {
+        const load = async () => {
+            const libId = getLibraryIdForConfig()
+            if (!libId) {
+                isViewSettingsLoaded.current = null
+                return
+            }
+            // 既にロード済みならスキップ…はできない（ライブラリ切り替え時）
+
+            try {
+                const config = await (window.electronAPI as any).getClientConfig()
+                if (config && config.libraryViewSettings && config.libraryViewSettings[libId]) {
+                    const saved = config.libraryViewSettings[libId]
+                    setFilterOptions(prev => ({
+                        ...prev,
+                        sortOrder: saved.sortOrder as any,
+                        sortDirection: saved.sortDirection
+                    }))
+                } else {
+                    setFilterOptions(prev => ({
+                        ...prev,
+                        sortOrder: 'name',
+                        sortDirection: 'desc'
+                    }))
+                }
+                isViewSettingsLoaded.current = libId
+            } catch (e) {
+                console.error('Failed to load view settings', e)
+            }
+        }
+        load()
+    }, [getLibraryIdForConfig])
+
+    // 保存エフェクト
+    useEffect(() => {
+        const save = async () => {
+            const libId = getLibraryIdForConfig()
+            if (!libId) return
+            // まだロードが完了していない（あるいはロードしたIDと違う）なら保存しない
+            if (isViewSettingsLoaded.current !== libId) return
+
+            try {
+                const currentConfig = await (window.electronAPI as any).getClientConfig()
+                const newSettings = {
+                    ...currentConfig.libraryViewSettings,
+                    [libId]: {
+                        sortOrder: filterOptions.sortOrder,
+                        sortDirection: filterOptions.sortDirection
+                    }
+                }
+                await (window.electronAPI as any).updateClientConfig({ libraryViewSettings: newSettings })
+            } catch (e) {
+                console.error('Failed to save view settings', e)
+            }
+        }
+
+        // デバウンス的に少し待ってもいいが、頻繁に変えるものでもないので直実行
+        // ただしロード直後の発火を防ぐため、依存配列等注意
+        save()
+    }, [filterOptions.sortOrder, filterOptions.sortDirection, getLibraryIdForConfig])
+
+    // ... 
 
     // フォルダー (ex-Genre) 読み込み
     const loadFolders = useCallback(async () => {
@@ -112,24 +199,61 @@ export function useLibrary() {
 
     const { addNotification, removeNotification, updateProgress } = useNotification()
 
-    // アップロード進捗リスナー
+    // インポート進捗リスナー
     useEffect(() => {
         if (!window.electronAPI || !window.electronAPI.on) return
 
-        const handleProgress = (_: any, data: { id: string, progress: number }) => {
+        const activeNotifications = new Map<string, string>() // sessionId -> notificationId
+
+        const handleProgress = (_: any, data: { id: string, current: number, total: number, fileName: string, step: string, percentage: number }) => {
+            let notificationId = activeNotifications.get(data.id)
+
+            const message = data.total > 1
+                ? `[${data.current}/${data.total}] ${data.fileName}\n${data.step}`
+                : `${data.fileName}\n${data.step}`
+
+            if (!notificationId) {
+                const title = data.id === 'auto-import' ? '自動インポート' : 'インポート中'
+                notificationId = addNotification({
+                    type: 'progress',
+                    title,
+                    message,
+                    progress: data.percentage,
+                    duration: 0
+                })
+                activeNotifications.set(data.id, notificationId)
+            } else {
+                updateProgress(notificationId, data.percentage)
+                // メッセージも更新したいが NotificationContext が現在メッセージ更新をサポートしていない場合は
+                // コンテキストを拡張するか、一旦プログレスのみとする。
+                // 現状の updateProgress は progress のみ。
+            }
+
+            if (data.percentage >= 100 && data.current === data.total) {
+                setTimeout(() => {
+                    if (notificationId) removeNotification(notificationId)
+                    activeNotifications.delete(data.id)
+                }, 1000)
+            }
+        }
+
+        const handleUploadProgress = (_: any, data: { id: string, progress: number }) => {
             updateProgress(data.id, data.progress)
         }
 
-        const removeUploadListener = window.electronAPI.on('upload-progress', handleProgress)
-        const removeDownloadListener = window.electronAPI.on('download-progress', handleProgress)
+        const removeImportListener = window.electronAPI.on('import-progress', handleProgress)
+        const removeUploadListener = window.electronAPI.on('upload-progress', handleUploadProgress)
+        const removeDownloadListener = window.electronAPI.on('download-progress', handleUploadProgress)
 
         return () => {
+            // @ts-ignore
+            if (removeImportListener) (removeImportListener as any)()
             // @ts-ignore
             if (removeUploadListener) (removeUploadListener as any)()
             // @ts-ignore
             if (removeDownloadListener) (removeDownloadListener as any)()
         }
-    }, [updateProgress])
+    }, [addNotification, updateProgress, removeNotification])
 
     // クライアント設定（UserToken）読み込み
     useEffect(() => {
@@ -195,7 +319,12 @@ export function useLibrary() {
                     }
                 })
 
-                if (!response.ok) throw new Error('Failed to fetch remote media')
+                if (!response.ok) {
+                    if (response.status === 403) {
+                        addNotification({ type: 'error', title: '権限不足', message: 'この操作を行う権限がありません。管理者にお問い合わせください。' })
+                    }
+                    throw new Error('Failed to fetch remote media')
+                }
 
                 const data = await response.json()
                 // パス変換してセット
@@ -290,6 +419,18 @@ export function useLibrary() {
     const createTag = useCallback(async (name: string): Promise<Tag | null> => {
         if (!activeLibrary && !activeRemoteLibrary) return null
         try {
+            if (activeRemoteLibrary) {
+                try {
+                    const newTag = await (window.electronAPI as any).createRemoteTag(activeRemoteLibrary.url, activeRemoteLibrary.token, name)
+                    await loadTags()
+                    return newTag
+                } catch (e: any) {
+                    if (e.message && e.message.includes('403')) {
+                        addNotification({ type: 'error', title: '権限不足', message: 'タグ作成の権限がありません。' })
+                    }
+                    throw e
+                }
+            }
             const newTag = await window.electronAPI.createTag(name)
             await loadTags()
             return newTag
@@ -297,52 +438,89 @@ export function useLibrary() {
             console.error('Failed to create tag:', error)
             return null
         }
-    }, [loadTags, activeLibrary, activeRemoteLibrary])
+    }, [loadTags, activeLibrary, activeRemoteLibrary, addNotification])
 
     // タグ削除
     const deleteTag = useCallback(async (id: number) => {
         try {
+            if (activeRemoteLibrary) {
+                try {
+                    await (window.electronAPI as any).deleteRemoteTag(activeRemoteLibrary.url, activeRemoteLibrary.token, id)
+                    await loadTags()
+                    return
+                } catch (e: any) {
+                    if (e.message && e.message.includes('403')) {
+                        addNotification({ type: 'error', title: '権限不足', message: 'タグ削除の権限がありません。' })
+                    }
+                    throw e
+                }
+            }
             await window.electronAPI.deleteTag(id)
             await loadTags()
         } catch (error) {
             console.error('Failed to delete tag:', error)
         }
-    }, [loadTags, activeLibrary, activeRemoteLibrary])
+    }, [loadTags, activeLibrary, activeRemoteLibrary, addNotification])
 
 
 
     // メディアにタグ追加
     const addTagToMedia = useCallback(async (mediaId: number, tagId: number) => {
         try {
+            if (activeRemoteLibrary) {
+                try {
+                    await (window.electronAPI as any).addRemoteTagToMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, mediaId, tagId)
+                    await loadMediaFiles()
+                    return
+                } catch (e: any) {
+                    if (e.message && e.message.includes('403')) {
+                        addNotification({ type: 'error', title: '権限不足', message: 'タグ追加の権限がありません。' })
+                    }
+                    throw e
+                }
+            }
             await window.electronAPI.addTagToMedia(mediaId, tagId)
             await loadMediaFiles()
         } catch (error) {
             console.error('Failed to add tag to media:', error)
         }
-    }, [loadMediaFiles])
+    }, [loadMediaFiles, activeRemoteLibrary, addNotification])
 
     // メディアからタグ削除
     const removeTagFromMedia = useCallback(async (mediaId: number, tagId: number) => {
         try {
+            if (activeRemoteLibrary) {
+                try {
+                    await (window.electronAPI as any).removeRemoteTagFromMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, mediaId, tagId)
+                    await loadMediaFiles()
+                    return
+                } catch (e: any) {
+                    if (e.message && e.message.includes('403')) {
+                        addNotification({ type: 'error', title: '権限不足', message: 'タグ削除の権限がありません。' })
+                    }
+                    throw e
+                }
+            }
             await window.electronAPI.removeTagFromMedia(mediaId, tagId)
             await loadMediaFiles()
         } catch (error) {
             console.error('Failed to remove tag from media:', error)
         }
-    }, [loadMediaFiles])
+    }, [loadMediaFiles, activeRemoteLibrary, addNotification])
 
     // メディアにタグ一括追加
     const addTagsToMedia = useCallback(async (mediaIds: number[], tagIds: number[]) => {
         try {
             if (activeRemoteLibrary) {
-                // リモートの場合は個別に呼ぶか、新しいAPIが必要（今回はローカル優先で実装し、リモートは未対応かループで対応）
-                // 暫定的にループで対応
-                for (const mId of mediaIds) {
-                    for (const tId of tagIds) {
-                        await (window.electronAPI as any).addRemoteTagToMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, mId, tId)
+                try {
+                    await (window.electronAPI as any).addRemoteTagsToMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, mediaIds, tagIds)
+                    await loadMediaFiles()
+                } catch (e: any) {
+                    if (e.message && e.message.includes('403')) {
+                        addNotification({ type: 'error', title: '権限不足', message: 'タグ一括追加の権限がありません。' })
                     }
+                    throw e
                 }
-                await loadMediaFiles()
                 return
             }
             await window.electronAPI.addTagsToMedia(mediaIds, tagIds)
@@ -350,7 +528,7 @@ export function useLibrary() {
         } catch (error) {
             console.error('Failed to add tags to media:', error)
         }
-    }, [loadMediaFiles, activeRemoteLibrary])
+    }, [loadMediaFiles, activeRemoteLibrary, addNotification])
 
     // メディアにフォルダー追加
     const addFolderToMedia = useCallback(async (mediaId: number, folderId: number) => {
@@ -431,10 +609,17 @@ export function useLibrary() {
     const deleteFilesPermanently = useCallback(async (ids: number[]) => {
         try {
             if (activeRemoteLibrary) {
-                for (const id of ids) {
-                    await (window.electronAPI as any).deleteRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id)
+                try {
+                    for (const id of ids) {
+                        await (window.electronAPI as any).deleteRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id)
+                    }
+                    await loadMediaFiles()
+                } catch (e: any) {
+                    if (e.message && e.message.includes('403')) {
+                        addNotification({ type: 'error', title: '権限不足', message: '削除権限がありません。' })
+                    }
+                    throw e
                 }
-                await loadMediaFiles()
                 return
             }
 
@@ -452,9 +637,16 @@ export function useLibrary() {
     const updateDescription = useCallback(async (id: number, description: string | null) => {
         try {
             if (activeRemoteLibrary) {
-                await (window.electronAPI as any).updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { description })
-                await loadMediaFiles()
-                return
+                try {
+                    await (window.electronAPI as any).updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { description })
+                    await loadMediaFiles()
+                    return
+                } catch (e: any) {
+                    if (e.message && e.message.includes('403')) {
+                        addNotification({ type: 'error', title: '権限不足', message: '説明を更新する権限がありません。' })
+                    }
+                    throw e
+                }
             }
             await window.electronAPI.updateDescription(id, description)
             await loadMediaFiles()
@@ -467,11 +659,12 @@ export function useLibrary() {
     const updateLastPlayed = useCallback(async (id: number) => {
         try {
             await window.electronAPI.updateLastPlayed(id)
-            await loadMediaFiles()
+            // ローカルステートを即座に更新して再読み込みを回避
+            setMediaFiles(prev => prev.map(m => m.id === id ? { ...m, last_played_at: new Date().toISOString() } : m))
         } catch (error) {
             console.error('Failed to update last played:', error)
         }
-    }, [loadMediaFiles, activeLibrary, activeRemoteLibrary])
+    }, [])
 
     // メディアインポート
     const importMedia = useCallback(async (filePaths: string[]) => {
@@ -501,14 +694,16 @@ export function useLibrary() {
                 return
             }
 
-            await window.electronAPI.importMedia(filePaths)
+            const importedFiles = await window.electronAPI.importMedia(filePaths)
             removeNotification(notificationId)
             addNotification({ type: 'success', title: 'インポート完了', message: `${filePaths.length}個のファイルを追加しました。` })
             await loadMediaFiles()
+            return importedFiles
         } catch (error) {
             console.error('Failed to import media:', error)
             removeNotification(notificationId)
             addNotification({ type: 'error', title: 'インポート失敗', message: String(error) })
+            return []
         } finally {
             setLoading(false)
         }
@@ -518,46 +713,68 @@ export function useLibrary() {
     const updateRating = useCallback(async (id: number, rating: number) => {
         try {
             if (activeRemoteLibrary) {
-                await (window.electronAPI as any).updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { rating })
-                await loadMediaFiles()
-                return
+                try {
+                    await (window.electronAPI as any).updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { rating })
+                    await loadMediaFiles()
+                    return
+                } catch (e: any) {
+                    if (e.message && e.message.includes('403')) {
+                        addNotification({ type: 'error', title: '権限不足', message: '評価を更新する権限がありません。' })
+                    }
+                    throw e
+                }
             }
             await window.electronAPI.updateRating(id, rating)
             await loadMediaFiles()
         } catch (error) {
             console.error('Failed to update rating:', error)
         }
-    }, [loadMediaFiles, activeRemoteLibrary])
+    }, [loadMediaFiles, activeRemoteLibrary, addNotification])
 
     // メディア名変更
     const renameMedia = useCallback(async (id: number, newName: string) => {
         try {
             if (activeRemoteLibrary) {
-                await (window.electronAPI as any).renameRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, newName)
-                await loadMediaFiles()
-                return
+                try {
+                    await (window.electronAPI as any).renameRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, newName)
+                    await loadMediaFiles()
+                    return
+                } catch (e: any) {
+                    if (e.message && e.message.includes('403')) {
+                        addNotification({ type: 'error', title: '権限不足', message: 'ファイル名変更の権限がありません。' })
+                    }
+                    throw e
+                }
             }
             await window.electronAPI.renameMedia(id, newName)
             await loadMediaFiles()
         } catch (error) {
             console.error('Failed to rename media:', error)
         }
-    }, [loadMediaFiles, activeRemoteLibrary])
+    }, [loadMediaFiles, activeRemoteLibrary, addNotification])
+
 
     // 投稿者更新
     const updateArtist = useCallback(async (id: number, artist: string | null) => {
         try {
             if (activeRemoteLibrary) {
-                await (window.electronAPI as any).updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { artist })
-                await loadMediaFiles()
-                return
+                try {
+                    await (window.electronAPI as any).updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { artist })
+                    await loadMediaFiles()
+                    return
+                } catch (e: any) {
+                    if (e.message && e.message.includes('403')) {
+                        addNotification({ type: 'error', title: '権限不足', message: '編集権限がありません。' })
+                    }
+                    throw e
+                }
             }
             await window.electronAPI.updateArtist(id, artist)
             await loadMediaFiles()
         } catch (error) {
             console.error('Failed to update artist:', error)
         }
-    }, [loadMediaFiles, activeRemoteLibrary])
+    }, [loadMediaFiles, activeRemoteLibrary, addNotification])
 
     // フィルタリングされたメディアファイル
     const filteredMediaFiles = useMemo(() => {
@@ -601,7 +818,70 @@ export function useLibrary() {
         // 検索クエリフィルター
         if (filterOptions.searchQuery) {
             const query = filterOptions.searchQuery.toLowerCase()
-            result = result.filter(m => m.file_name.toLowerCase().includes(query))
+            const targets = filterOptions.searchTargets || {
+                name: true,
+                folder: true,
+                description: true,
+                extension: true,
+                tags: true,
+                url: true,
+                comments: true,
+                memo: true,
+                artist: true
+            }
+
+            result = result.filter(m => {
+                let match = false
+
+                // 名前
+                if (targets.name && m.file_name.toLowerCase().includes(query)) match = true
+                if (match) return true
+
+                // 拡張子
+                if (targets.extension) {
+                    const ext = m.file_name.split('.').pop()?.toLowerCase() || ''
+                    if (ext.includes(query)) match = true
+                }
+                if (match) return true
+
+                // フォルダ名
+                if (targets.folder && m.folders) {
+                    if (m.folders.some(f => f.name.toLowerCase().includes(query))) match = true
+                }
+                if (match) return true
+
+                // タグ
+                if (targets.tags && m.tags) {
+                    if (m.tags.some(t => t.name.toLowerCase().includes(query))) match = true
+                }
+                if (match) return true
+
+                // URL
+                if (targets.url && m.url) {
+                    if (m.url.toLowerCase().includes(query)) match = true
+                }
+                if (match) return true
+
+                // 説明 (Memo含む)
+                if ((targets.description || targets.memo) && m.description) {
+                    if (m.description.toLowerCase().includes(query)) match = true
+                }
+                if (match) return true
+
+                // コメント
+                if (targets.comments && m.comments) {
+                    if (m.comments.some(c => c.text.toLowerCase().includes(query))) match = true
+                }
+                if (match) return true
+
+                // 投稿者 (artist / artists)
+                if (targets.artist) {
+                    if (m.artist && m.artist.toLowerCase().includes(query)) match = true
+                    if (m.artists && m.artists.some(a => a.toLowerCase().includes(query))) match = true
+                }
+
+                return match
+            })
         }
 
         // フォルダーフィルター (Sidebarのジャンル選択 & FolderFilterDropdown)
@@ -765,6 +1045,11 @@ export function useLibrary() {
                     const modB = b.modified_date ? new Date(b.modified_date).getTime() : 0
                     comparison = modA - modB
                     break
+                case 'artist':
+                    const artistA = a.artist || (a.artists && a.artists[0]) || ''
+                    const artistB = b.artist || (b.artists && b.artists[0]) || ''
+                    comparison = artistA.toLocaleLowerCase().localeCompare(artistB.toLocaleLowerCase())
+                    break
             }
             return filterOptions.sortDirection === 'asc' ? comparison : -comparison
         })
@@ -810,29 +1095,20 @@ export function useLibrary() {
         }
     }, [activeLibrary, activeRemoteLibrary])
 
-    // ライブラリの再読み込み (ソフトリロード + 再ランダム化 + メタデータ更新)
+    // ライブラリの再読み込み (ソフトリロード + 再ランダム化)
     const reloadLibrary = useCallback(async () => {
         // ランダムモードならシードを更新
         if (filterOptions.filterType === 'random') {
             setRandomSeed(Date.now())
         }
 
-        // リモートでない場合はローカルライブラリのハードリフレッシュを実行
-        if (!activeRemoteLibrary) {
-            try {
-                await (window.electronAPI as unknown as ElectronAPI).refreshLibrary()
-            } catch (e) {
-                console.error('Failed to refresh library:', e)
-            }
-        }
-
-        // データの再取得
+        // データの再取得 (データベースからの最新情報の取得)
         await Promise.all([
             loadMediaFiles(),
             loadTags(),
             loadFolders()
         ])
-    }, [filterOptions.filterType, loadMediaFiles, loadTags, loadFolders, activeRemoteLibrary])
+    }, [filterOptions.filterType, loadMediaFiles, loadTags, loadFolders])
 
     // ライブラリ統計
     const libraryStats = useMemo(() => {
@@ -1010,7 +1286,9 @@ export function useLibrary() {
         myUserToken,
         updateDescription,
         setMediaFiles,
-        addTagsToMedia
+        addTagsToMedia,
+        checkImportDuplicates: (filePaths: string[]) => window.electronAPI.checkImportDuplicates(filePaths),
+        checkEntryDuplicates: (mediaId: number) => window.electronAPI.checkEntryDuplicates(mediaId)
     }), [
         filteredMediaFiles, mediaFiles, tags, tagFolders, folders, libraries, loading, activeLibrary,
         filterOptions, setFilterOptions, createLibrary, switchLibrary, selectAndScanFolder,

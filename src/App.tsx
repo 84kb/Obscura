@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { useNotification } from './contexts/NotificationContext'
 import { LibraryGrid } from './components/LibraryGrid'
+import { ListView } from './components/ListView'
 import { Player } from './components/Player'
 import { Inspector } from './components/Inspector'
 import { TagManager } from './components/TagManager'
@@ -15,6 +16,7 @@ import { useLibrary } from './hooks/useLibrary'
 import { MediaFile, AppSettings, RemoteLibrary, ViewSettings, defaultViewSettings, ElectronAPI } from './types'
 import { MainHeader } from './components/MainHeader'
 import { useSocket } from './hooks/useSocket'
+import { DuplicateModal } from './components/DuplicateModal'
 import './styles/index.css'
 import './styles/drag-overlay.css'
 
@@ -71,7 +73,8 @@ export default function App() {
         myUserToken,
         addTagsToMedia,
         setMediaFiles,
-        reloadLibrary
+        reloadLibrary,
+        checkEntryDuplicates
     } = useLibrary()
 
     const { addNotification, removeNotification, updateProgress } = useNotification()
@@ -148,6 +151,8 @@ export default function App() {
         }
     }, [addNotification])
 
+
+
     // 選択されたメディアのIDリスト
     const [selectedMediaIds, setSelectedMediaIds] = useState<number[]>([])
     // 最後に選択されたメディアID (Shift選択用)
@@ -156,6 +161,29 @@ export default function App() {
 
     // 再生中のメディア(プレイヤー用)
     const [playingMedia, setPlayingMedia] = useState<MediaFile | null>(null)
+
+    // Discord RPC: Idle State Handling
+    useEffect(() => {
+        if (!window.electronAPI) return
+
+        if (!playingMedia) {
+            const libName = activeRemoteLibrary
+                ? activeRemoteLibrary.name
+                : (activeLibrary ? activeLibrary.name : 'No Library')
+
+            // ライブラリが開かれていない場合はクリア、開かれていればライブラリ名を表示
+            if (!activeLibrary && !activeRemoteLibrary) {
+                window.electronAPI.clearDiscordActivity()
+            } else {
+                window.electronAPI.updateDiscordActivity({
+                    details: 'Browsing Library',
+                    state: libName,
+                    largeImageKey: 'app_icon',
+                    largeImageText: 'Obscura'
+                }).catch(err => console.error('Failed to update idle activity:', err))
+            }
+        }
+    }, [playingMedia, activeLibrary, activeRemoteLibrary])
 
     // 設定
     const [settings, setSettings] = useState<AppSettings>(() => {
@@ -303,9 +331,10 @@ export default function App() {
             console.log('[Global D&D] Global Dropped paths:', filePaths)
 
             if (filePaths.length > 0) {
-                await importMedia(filePaths)
+                await handleSmartImport(filePaths)
             }
         }
+
 
         const handleGlobalDragEnd = () => {
             console.log('[Global D&D] Global DragEnd')
@@ -363,7 +392,7 @@ export default function App() {
             console.log('[App] Received trigger-import:', filePaths)
             // Refを使用して最新の状態を確認
             if ((hasActiveLibraryRef.current || activeRemoteLibraryRef.current) && filePaths.length > 0) {
-                importMedia(filePaths).catch(e => console.error('Import failed via trigger:', e))
+                handleSmartImport(filePaths).catch(e => console.error('Import failed via trigger:', e))
             }
         }
 
@@ -429,6 +458,10 @@ export default function App() {
         localStorage.setItem('view_settings', JSON.stringify(viewSettings))
     }, [viewSettings])
 
+    const handleUpdateViewSettings = useCallback((updates: Partial<ViewSettings>) => {
+        setViewSettings(prev => ({ ...prev, ...updates }))
+    }, [])
+
     useEffect(() => {
         setSettings(prev => ({ ...prev, gridSize, viewMode }))
     }, [gridSize, viewMode])
@@ -440,6 +473,58 @@ export default function App() {
 
     // リモートライブラリ管理
     const [remoteLibraries, setRemoteLibraries] = useState<RemoteLibrary[]>([])
+
+    // 重複検知・解決用ステート
+    const [duplicateQueue, setDuplicateQueue] = useState<{ newMedia: MediaFile; existingMedia: MediaFile; onResolve?: (media: MediaFile) => void }[]>([])
+
+    // 最初の重複アイテムに対する処理
+    const handleResolveDuplicate = async (action: 'skip' | 'replace' | 'both') => {
+        const current = duplicateQueue[0]
+        if (!current) return
+
+        try {
+            if (action === 'replace') {
+                // 元ファイルをゴミ箱へ -> 新しく入れた方は維持
+                await moveToTrash(current.existingMedia.id)
+                // コールバック実行 (新しく入れた方を有効なファイルとして渡す)
+                if (current.onResolve) await current.onResolve(current.newMedia)
+            } else if (action === 'both') {
+                // 両方そのまま (すでにインポート済み)
+                if (current.onResolve) await current.onResolve(current.newMedia)
+            } else if (action === 'skip') {
+                // 新しく入れた方を「完全に削除」(重複なので) -> 元ファイルを維持
+                await deletePermanently(current.newMedia.id)
+                // コールバック実行 (既存の方を有効なファイルとして渡す)
+                if (current.onResolve) await current.onResolve(current.existingMedia)
+            }
+        } catch (e) {
+            console.error('Failed to resolve duplicate:', e)
+        }
+
+        // 次のキューへ
+        setDuplicateQueue(prev => prev.slice(1))
+    }
+
+    const handleSmartImport = async (filePaths: string[], onImported?: (media: MediaFile) => void) => {
+        // 先にインポート実行
+        const imported = await importMedia(filePaths)
+        if (!imported) return
+
+        for (const media of imported) {
+            // インポート済みのメディアに対して重複チェック
+            const duplicates = await checkEntryDuplicates(media.id)
+
+            if (duplicates.length > 0) {
+                // 重複あり -> キューに追加 (onResolveとしてonImportedを渡す)
+                // 複数の既存重複がある場合も考慮
+                const queueItems = duplicates.map((d: any) => ({ ...d, onResolve: onImported }))
+                setDuplicateQueue(prev => [...prev, ...queueItems])
+            } else {
+                // 重複なし -> 通常通りコールバック実行
+                if (onImported) await onImported(media)
+            }
+        }
+    }
 
     // プロファイル設定モーダル
     const [showProfileSetup, setShowProfileSetup] = useState(false)
@@ -561,7 +646,7 @@ export default function App() {
         return () => document.removeEventListener('keydown', handleKeyDown)
     }, [selectedMediaIds, moveToTrash, filterOptions.filterType])
 
-    const handleMediaClick = (media: MediaFile, e: React.MouseEvent) => {
+    const handleMediaClick = useCallback((media: MediaFile, e: React.MouseEvent) => {
         const isCtrl = e.ctrlKey || e.metaKey
         const isShift = e.shiftKey
 
@@ -593,14 +678,14 @@ export default function App() {
         }
 
         setLastSelectedId(media.id)
-    }
+    }, [mediaFiles, lastSelectedId])
 
-    const handleMediaDoubleClick = (media: MediaFile) => {
+    const handleMediaDoubleClick = useCallback((media: MediaFile) => {
         setPlayingMedia(media)
         setSelectedMediaIds([media.id]) // 再生時も単一選択に
         setLastSelectedId(media.id)
         updateLastPlayed(media.id)
-    }
+    }, [updateLastPlayed])
 
     const handleClosePlayer = () => {
         setPlayingMedia(null)
@@ -612,14 +697,17 @@ export default function App() {
     }
 
     // コンテキストメニューハンドラー
-    const handleContextMenu = (media: MediaFile, e: React.MouseEvent) => {
+    const handleContextMenu = useCallback((media: MediaFile, e: React.MouseEvent) => {
         setContextMenu({ x: e.clientX, y: e.clientY, media })
         // 右クリック時には、そのアイテムが選択されていなければそれのみを選択
-        if (!selectedMediaIds.includes(media.id)) {
-            setSelectedMediaIds([media.id])
-            setLastSelectedId(media.id)
-        }
-    }
+        setSelectedMediaIds(prev => {
+            if (!prev.includes(media.id)) {
+                return [media.id]
+            }
+            return prev
+        })
+        setLastSelectedId(media.id)
+    }, [])
 
     const closeContextMenu = () => {
         setContextMenu(null)
@@ -727,19 +815,12 @@ export default function App() {
                 await addFolderToMedia(mediaId, folderId)
             }
         } else {
-            // 外部ドラッグ：インポートしてから追加
-            try {
-                const importedFiles = await window.electronAPI.importMedia(filePaths)
-                if (importedFiles && importedFiles.length > 0) {
-                    for (const media of importedFiles) {
-                        await addFolderToMedia(media.id, folderId)
-                    }
-                    // ライブラリをリフレッシュ
-                    await refreshLibrary()
-                }
-            } catch (error) {
-                console.error("Failed to import and add to folder:", error)
-            }
+            // 外部ドラッグ：Smartインポートを使用して解決
+            await handleSmartImport(filePaths, async (media) => {
+                await addFolderToMedia(media.id, folderId)
+            })
+            // ライブラリをリフレッシュ (addFolderToMedia内でloadMediaFilesしていれば不要だが念のため)
+            await refreshLibrary()
         }
     }
 
@@ -907,39 +988,53 @@ export default function App() {
                         </div>
                     )}
 
-                    <LibraryGrid
-                        mediaFiles={mediaFiles}
-                        onMediaClick={handleMediaClick}
-                        onMediaDoubleClick={handleMediaDoubleClick}
-                        onMediaContextMenu={handleContextMenu}
-                        gridSize={gridSize}
-                        viewMode={viewMode}
-                        selectedMediaIds={selectedMediaIds}
-                        viewSettings={viewSettings}
-                        onClearSelection={() => {
-                            setSelectedMediaIds([])
-                            setLastSelectedId(null)
-                        }}
-                        onSelectionChange={(ids) => {
-                            setSelectedMediaIds(ids)
-                            if (ids.length > 0) setLastSelectedId(ids[ids.length - 1])
-                        }}
-                        onInternalDragStart={() => {
-                            isInternalDrag.current = true
-                        }}
-                        onInternalDragEnd={() => {
-                            // Global dragend でケアするため、ここでは何もしないか、
-                            // 脱落防止に短いタイマーを置く程度にする
-                        }}
-                        renamingMediaId={renamingMediaId}
-                        onRenameSubmit={async (id, newName) => {
-                            // DB更新
-                            await window.electronAPI.renameMedia(id, newName)
-                            setRenamingMediaId(null)
-                            refreshLibrary()
-                        }}
-                        onRenameCancel={() => setRenamingMediaId(null)}
-                    />
+                    {viewMode === 'grid' ? (
+                        <LibraryGrid
+                            mediaFiles={mediaFiles}
+                            onMediaClick={handleMediaClick}
+                            onMediaDoubleClick={handleMediaDoubleClick}
+                            onMediaContextMenu={handleContextMenu}
+                            gridSize={gridSize}
+                            viewMode={viewMode}
+                            selectedMediaIds={selectedMediaIds}
+                            viewSettings={viewSettings}
+                            onClearSelection={() => {
+                                setSelectedMediaIds([])
+                                setLastSelectedId(null)
+                            }}
+                            onSelectionChange={(ids) => {
+                                setSelectedMediaIds(ids)
+                                if (ids.length > 0) setLastSelectedId(ids[ids.length - 1])
+                            }}
+                            onInternalDragStart={() => {
+                                isInternalDrag.current = true
+                            }}
+                            onInternalDragEnd={() => {
+                                // Global dragend でケアするため、ここでは何もしないか、
+                                // 脱落防止に短いタイマーを置く程度にする
+                            }}
+                            renamingMediaId={renamingMediaId}
+                            onRenameSubmit={async (id, newName) => {
+                                // DB更新
+                                await window.electronAPI.renameMedia(id, newName)
+                                setRenamingMediaId(null)
+                                refreshLibrary()
+                            }}
+                            onRenameCancel={() => setRenamingMediaId(null)}
+                        />
+                    ) : (
+                        <ListView
+                            mediaFiles={mediaFiles}
+                            selectedIds={selectedMediaIds}
+                            onSelect={handleMediaClick}
+                            onDoubleClick={handleMediaDoubleClick}
+                            onContextMenu={handleContextMenu}
+                            viewSettings={viewSettings}
+                            updateViewSettings={handleUpdateViewSettings}
+                            filterOptions={filterOptions}
+                            onFilterChange={setFilterOptions}
+                        />
+                    )}
                 </div>
             )
         }
@@ -972,7 +1067,10 @@ export default function App() {
 
             <Sidebar
                 filterOptions={filterOptions}
-                onFilterChange={setFilterOptions}
+                onFilterChange={(options) => {
+                    setPlayingMedia(null)
+                    setFilterOptions(options)
+                }}
                 folders={folders}
                 libraries={libraries}
                 remoteLibraries={remoteLibraries}
@@ -983,8 +1081,14 @@ export default function App() {
                 onDeleteFolder={deleteFolder}
                 onOpenLibraryModal={() => setShowLibraryModal(true)}
                 onOpenLibrary={openLibrary}
-                onSwitchLibrary={switchToLocalLibrary}
-                onSwitchRemoteLibrary={switchToRemoteLibrary}
+                onSwitchLibrary={(path) => {
+                    setPlayingMedia(null)
+                    switchToLocalLibrary(path)
+                }}
+                onSwitchRemoteLibrary={(lib) => {
+                    setPlayingMedia(null)
+                    switchToRemoteLibrary(lib)
+                }}
                 onOpenSettings={() => setShowSettingsModal(true)}
                 hasActiveLibrary={hasActiveLibrary}
                 onRefreshFolders={loadFolders}
@@ -1201,6 +1305,14 @@ export default function App() {
                         <p>ライブラリにインポートされます</p>
                     </div>
                 </div>
+            )}
+
+            {/* 重複チェックモーダル */}
+            {duplicateQueue.length > 0 && (
+                <DuplicateModal
+                    duplicate={duplicateQueue[0]}
+                    onResolve={handleResolveDuplicate}
+                />
             )}
         </div>
     )

@@ -44,6 +44,8 @@ npm install
 
 ## 使い方
 
+詳細な操作説明書は [USER_GUIDE.md](./USER_GUIDE.md) にまとめています。
+
 ### 開発モードで起動
 
 ```bash

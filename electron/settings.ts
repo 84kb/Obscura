@@ -23,6 +23,11 @@ export interface AutoImportConfig {
     watchPaths: AutoImportPath[]
 }
 
+export interface LibraryViewSettings {
+    sortOrder: string
+    sortDirection: 'asc' | 'desc'
+}
+
 export interface ClientConfig {
     downloadPath: string
     theme: 'dark' | 'light' | 'system'
@@ -31,6 +36,8 @@ export interface ClientConfig {
     myUserToken?: string
     autoImport: AutoImportConfig
     thumbnailMode: 'speed' | 'quality'
+    discordRichPresenceEnabled: boolean
+    libraryViewSettings: { [libraryId: string]: LibraryViewSettings }
 }
 
 const defaultConfig: ClientConfig = {
@@ -43,7 +50,9 @@ const defaultConfig: ClientConfig = {
         enabled: false,
         watchPaths: []
     },
-    thumbnailMode: 'speed'
+    thumbnailMode: 'speed',
+    discordRichPresenceEnabled: false,
+    libraryViewSettings: {}
 }
 
 const homeDir = app ? app.getPath('home') : '.'

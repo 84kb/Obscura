@@ -69,12 +69,14 @@
 .inspector-preview {
     width: 100%;
     padding: var(--spacing-md);
+    display: flex;
+    justify-content: center;
+    align-items: center;
 }
 
-.preview-container {
+.inspector-preview-container {
     width: 100%;
     height: auto;
-    background-color: #000;
     border-radius: var(--radius-md);
     overflow: hidden;
     position: relative;
@@ -82,11 +84,14 @@
     display: flex;
     justify-content: center;
     align-items: center;
+    line-height: 0;
 }
 
-.preview-container img {
+.inspector-preview-container img {
     width: 100%;
+    /* Force upscale to fill container */
     height: auto;
+    max-height: 400px;
     object-fit: contain;
     display: block;
 }

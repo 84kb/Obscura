@@ -353,26 +353,47 @@ export function usePlayer({ media, onNext, onPrev, pipControlMode = 'navigation'
 
         const hasNext = !!onNext
         const hasPrev = !!onPrev
+        let objectUrl: string | null = null
+        let isMounted = true
 
-        // Update Metadata
-        const artworks = []
-        if (media.thumbnail_path) {
-            // ローカルパスをブラウザが扱えるURLに変換
-            // window.electronAPIが存在する場合のみ有効（レンダラープロセス）
-            const artUrl = window.electronAPI ? toMediaUrl(media.thumbnail_path) : media.thumbnail_path
-            artworks.push({ src: artUrl, sizes: '512x512', type: 'image/jpeg' })
+        const updateMetadata = async () => {
+            const artworks = []
+            if (media.thumbnail_path) {
+                // ローカルパスをブラウザが扱えるURLに変換
+                // window.electronAPIが存在する場合のみ有効（レンダラープロセス）
+                const artUrl = window.electronAPI ? toMediaUrl(media.thumbnail_path) : media.thumbnail_path
+
+                // media:// 等のカスタムスキームは MediaSession で警告が出る可能性があるため Blob URL に変換
+                if (artUrl.startsWith('media://') && window.electronAPI) {
+                    try {
+                        const res = await fetch(artUrl)
+                        const blob = await res.blob()
+                        if (!isMounted) return
+                        objectUrl = URL.createObjectURL(blob)
+                        artworks.push({ src: objectUrl, sizes: '512x512', type: 'image/jpeg' })
+                    } catch (e) {
+                        console.warn('Failed to convert artwork to blob:', e)
+                        // フォールバック
+                        artworks.push({ src: artUrl, sizes: '512x512', type: 'image/jpeg' })
+                    }
+                } else {
+                    artworks.push({ src: artUrl, sizes: '512x512', type: 'image/jpeg' })
+                }
+            }
+
+            if (!isMounted) return
+
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: media.file_name,
+                artist: (media.artists || [media.artist]).filter(Boolean).join(', ') || 'Unknown Artist',
+                artwork: artworks
+            })
         }
 
-        navigator.mediaSession.metadata = new MediaMetadata({
-            title: media.file_name,
-            artist: (media.artists || [media.artist]).filter(Boolean).join(', ') || 'Unknown Artist',
-            artwork: artworks
-        })
+        updateMetadata()
 
         // Action Handlers
         const handlePlayPause = () => togglePlay()
-        const handleSeekBackward = () => rewind()
-        const handleSeekForward = () => forward()
 
         const handlePrevAction = () => {
             if (hasPrev && onPrev) onPrev()
@@ -412,6 +433,10 @@ export function usePlayer({ media, onNext, onPrev, pipControlMode = 'navigation'
 
         // Cleanup
         return () => {
+            isMounted = false
+            if (objectUrl) {
+                URL.revokeObjectURL(objectUrl)
+            }
             if (navigator.mediaSession) {
                 navigator.mediaSession.setActionHandler('play', null)
                 navigator.mediaSession.setActionHandler('pause', null)

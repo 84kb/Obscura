@@ -1,0 +1,215 @@
+.duplicate-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.85);
+    /* Slightly darker */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+    backdrop-filter: blur(8px);
+    /* More blur for 'settings screen' feel */
+    animation: fadeIn 0.2s ease-out;
+}
+
+.duplicate-modal {
+    background-color: #1a1a1a;
+    width: 800px;
+    max-width: 95vw;
+    border-radius: 12px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid #333;
+}
+
+.duplicate-modal-header {
+    padding: 12px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #1a1a1a;
+}
+
+.duplicate-modal-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    color: #666;
+    font-size: 20px;
+    cursor: pointer;
+    line-height: 1;
+    transition: color 0.2s;
+}
+
+.close-btn:hover {
+    color: #fff;
+}
+
+.duplicate-comparison {
+    display: flex;
+    padding: 30px 40px;
+    /* More horizontal padding as in image */
+    gap: 20px;
+    background-color: #1a1a1a;
+}
+
+.duplicate-card {
+    flex: 1;
+    background-color: #222;
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.duplicate-card.active {
+    border-color: #3b82f6;
+}
+
+.preview-container {
+    height: 180px;
+    background-color: #2a2a2a;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    overflow: hidden;
+}
+
+/* Green preview for 'New' in the image looks like a placeholder, but I'll use real image if available */
+.preview-container.new-file-preview {
+    background-color: #1a4a1a;
+}
+
+.preview-container img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.status-badge {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+    color: white;
+    background-color: rgba(30, 60, 114, 0.8);
+    /* Muted blue */
+    white-space: nowrap;
+}
+
+.file-info {
+    padding: 20px 15px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    /* Centered as in image */
+    text-align: center;
+    gap: 4px;
+}
+
+.file-name {
+    font-size: 13px;
+    font-weight: 400;
+    color: #ddd;
+    word-break: break-all;
+    line-height: 1.4;
+}
+
+.file-meta {
+    font-size: 12px;
+    color: #888;
+}
+
+.card-footer {
+    margin-top: 10px;
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-height: 24px;
+}
+
+.info-tag {
+    background-color: #333;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    color: #aaa;
+}
+
+.info-tag.empty {
+    opacity: 0.5;
+    font-style: italic;
+}
+
+.duplicate-modal-footer {
+    padding: 16px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid #222;
+}
+
+.option-group {
+    display: flex;
+    gap: 20px;
+}
+
+.radio-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #ddd;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.radio-option input {
+    accent-color: #3b82f6;
+    width: 14px;
+    height: 14px;
+}
+
+.confirm-btn {
+    background-color: #1e70e0;
+    color: white;
+    border: none;
+    padding: 8px 20px;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.confirm-btn:hover {
+    background-color: #2563eb;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}

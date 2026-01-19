@@ -5,7 +5,7 @@ import { fileURLToPath, URL } from 'node:url'
 import crypto from 'crypto'
 import http from 'node:http'
 import https from 'node:https'
-import { initDatabase, mediaDB, tagDB, tagFolderDB, folderDB, libraryDB, commentDB } from './database'
+import { initDatabase, mediaDB, tagDB, tagFolderDB, folderDB, libraryDB, commentDB, getActiveMediaLibrary } from './database'
 import { ServerConfig, RemoteLibrary } from '../src/types'
 import { getThumbnailPath } from './utils'
 import { generatePreviewImages, getMediaMetadata, createThumbnail, embedMetadata } from './ffmpeg'
@@ -19,6 +19,7 @@ import { initClientSettings, getConfig as getClientConfig, updateConfig as updat
 import { updateWatcher } from './watcher'
 import { downloadFile } from './downloader'
 import { initUpdater } from './updater'
+import { initDiscordRpc, updateActivity, clearActivity, destroyDiscordRpc } from './discord'
 
 // クラッシュハンドリング
 process.on('uncaughtException', (error) => {
@@ -39,12 +40,13 @@ const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 try {
     console.log('[Main] Initializing client settings...')
     initClientSettings()
-    // ウォッチャー初期化
-    console.log('[Main] Updating watcher...')
-    updateWatcher(getClientConfig(), (files) => {
-        console.log('[Main] Auto-import notification:', files.length, 'files')
-        mainWindow?.webContents.send('auto-import-complete', files)
-    })
+
+    // Discord RPC 初期化
+    const config = getClientConfig()
+    if (config.discordRichPresenceEnabled) {
+        initDiscordRpc()
+    }
+
     console.log('[Main] Initialization complete.')
 } catch (e) {
     console.error('[Main] Initialization failed:', e)
@@ -67,7 +69,7 @@ protocol.registerSchemesAsPrivileged([
     }
 ])
 
-let mainWindow: BrowserWindow | null = null
+export let mainWindow: BrowserWindow | null = null
 
 // サポートされるメディアフォーマット
 const VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv', '.wmv']
@@ -165,8 +167,8 @@ function createWindow() {
 
     // --- セキュリティとナビゲーション制御 ---
     // メディアファイル拡張子の判定用
-    const isMediaFile = (url: string) => {
-        const ext = path.extname(url.split('?')[0]).toLowerCase()
+    const isMediaFile = (filePath: string) => {
+        const ext = path.extname(filePath).toLowerCase()
         return VIDEO_EXTENSIONS.includes(ext) || AUDIO_EXTENSIONS.includes(ext)
     }
 
@@ -175,16 +177,16 @@ function createWindow() {
         // fileプロトコルかつメディアファイルの場合はインポートトリガー
         if (url.startsWith('file://')) {
             try {
-                const urlObj = new URL(url)
-                if (isMediaFile(urlObj.pathname)) {
-                    // fileURLToPath で安全にパス変換
-                    const localPath = fileURLToPath(url)
+                // fileURLToPath で安全にパス変換 (URLデコードなども処理される)
+                const localPath = fileURLToPath(url)
+
+                if (isMediaFile(localPath)) {
                     // Windowsパスのバックスラッシュをスラッシュに正規化して送る
                     const normalizedPath = localPath.replace(/\\/g, '/')
                     console.log('[Security] Intercepted media navigation, triggering import:', normalizedPath)
 
                     event.preventDefault()
-                    mainWindow?.webContents.send('trigger-import', [normalizedPath])
+                    mainWindow?.webContents.send('trigger-import', [normalizedPath]) // 配列で送る
                     return
                 }
             } catch (e) {
@@ -228,15 +230,39 @@ function createWindow() {
     })
 }
 
+// サムネイルキャッシュ (LRU形式の簡易実装)
+const thumbnailCache = new Map<string, Buffer>()
+const MAX_CACHE_SIZE = 200 // メモリ使用量を考慮して200枚程度
+
 // アプリ起動時
 app.whenReady().then(() => {
     // カスタムプロトコル登録: media://
     protocol.handle('media', async (request) => {
         try {
+            // 中断リクエストのチェック
+            if (request.signal.aborted) {
+                return new Response('Aborted', { status: 499 })
+            }
+
             console.log(`[Media Protocol] Request URL: ${request.url}`)
 
             // URLオブジェクトを使用してパスを解析
             const url = new URL(request.url)
+            const cacheKey = `${url.pathname}${url.search}`
+
+            // キャッシュヒットの確認 (Speedモードリクエストのみ)
+            const widthParam = url.searchParams.get('width')
+            if (widthParam && thumbnailCache.has(cacheKey)) {
+                const cachedBuffer = thumbnailCache.get(cacheKey)!
+                return new Response(cachedBuffer as any, {
+                    status: 200,
+                    headers: {
+                        'Content-Type': 'image/jpeg',
+                        'Content-Length': cachedBuffer.length.toString(),
+                        'Cache-Control': 'max-age=3600'
+                    }
+                })
+            }
 
             let decodedPath: string
             if (url.hostname) {
@@ -284,24 +310,38 @@ app.whenReady().then(() => {
             }
 
             // 画像リサイズ処理 (Speedモード用)
-            const widthParam = url.searchParams.get('width')
             if (widthParam && IMAGE_EXTENSIONS.includes(ext)) {
                 try {
                     const width = parseInt(widthParam, 10)
                     if (!isNaN(width) && width > 0) {
                         const buffer = await fs.promises.readFile(finalPath)
+
+                        // 生成開始前に中断チェック
+                        if (request.signal.aborted) {
+                            return new Response('Aborted', { status: 499 })
+                        }
+
                         const image = nativeImage.createFromBuffer(buffer)
 
-                        // アスペクト比を維持してリサイズ
+                        // アスペクト比を維持してリサイズ (quality: 'good' は 'better' より速い)
                         const resized = image.resize({ width, quality: 'good' })
-                        const resizedBuffer = resized.toPNG() // PNGとして出力
+
+                        // JPEGとして出力 (PNGより圧倒的に速く、軽量)
+                        const resizedBuffer = resized.toJPEG(85)
+
+                        // キャッシュへの追加 (簡易LRU: 古い順に削除)
+                        if (thumbnailCache.size >= MAX_CACHE_SIZE) {
+                            const firstKey = thumbnailCache.keys().next().value
+                            if (firstKey) thumbnailCache.delete(firstKey)
+                        }
+                        thumbnailCache.set(cacheKey, resizedBuffer)
 
                         return new Response(resizedBuffer as any, {
                             status: 200,
                             headers: {
-                                'Content-Type': 'image/png',
+                                'Content-Type': 'image/jpeg',
                                 'Content-Length': resizedBuffer.length.toString(),
-                                'Cache-Control': 'max-age=3600' // キャッシュ有効化
+                                'Cache-Control': 'max-age=3600'
                             }
                         })
                     }
@@ -412,6 +452,13 @@ app.whenReady().then(() => {
         }
 
         initDatabase()
+        // ウォッチャー初期化をDB初期化後に移動
+        console.log('[Main] Updating watcher (after DB init)...')
+        updateWatcher(getClientConfig(), (files) => {
+            console.log('[Main] Auto-import notification:', files.length, 'files')
+            mainWindow?.webContents.send('auto-import-complete', files)
+        })
+
         createWindow()
     } catch (error) {
         console.error('Critical initialization error:', error)
@@ -569,13 +616,33 @@ ipcMain.handle('scan-folder', async (_, folderPath: string) => {
 })
 
 // メディアインポート
-ipcMain.handle('import-media', async (_, filePaths: string[]) => {
-    return await mediaDB.importMediaFiles(filePaths)
+ipcMain.handle('import-media', async (event, filePaths: string[]) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const sessionId = `manual-${Date.now()}`
+
+    return await getActiveMediaLibrary()?.importMediaFiles(filePaths, (data: any) => {
+        if (win && !win.isDestroyed()) {
+            win.webContents.send('import-progress', { id: sessionId, ...data })
+        }
+    })
 })
 
 // 全メディアファイル取得
 ipcMain.handle('get-media-files', async () => {
     return mediaDB.getAllMediaFiles()
+})
+
+ipcMain.handle('check-import-duplicates', async (_, filePaths: string[]) => {
+    return await mediaDB.checkDuplicates(filePaths)
+})
+
+ipcMain.handle('check-entry-duplicates', async (_, mediaId: number) => {
+    return mediaDB.getDuplicatesForMedia(mediaId)
+})
+
+ipcMain.handle('find-library-duplicates', async () => {
+    console.log('[Main] Finding library duplicates...')
+    return mediaDB.findLibraryDuplicates(true) // Strict mode by default
 })
 
 ipcMain.handle('update-rating', async (_, mediaId: number, rating: number) => {
@@ -1220,9 +1287,28 @@ ipcMain.handle('update-client-config', async (_, updates: Partial<ClientConfig>)
         console.log('[Main] Auto-import notification (updated config):', files.length, 'files')
         mainWindow?.webContents.send('auto-import-complete', files)
     })
+
+    // Discord RPC Toggle
+    if (updates.discordRichPresenceEnabled !== undefined) {
+        if (newConfig.discordRichPresenceEnabled) {
+            initDiscordRpc()
+        } else {
+            destroyDiscordRpc()
+        }
+    }
+
     return newConfig
 })
 console.log('[Main] client-config handlers registered.')
+
+// === Discord RPC Handlers ===
+ipcMain.handle('discord-update-activity', async (_, activity: any) => {
+    updateActivity(activity)
+})
+
+ipcMain.handle('discord-clear-activity', async () => {
+    clearActivity()
+})
 
 
 
@@ -1503,6 +1589,22 @@ ipcMain.handle('delete-remote-media', async (_event, { url, token, id, options }
 
 ipcMain.handle('update-remote-media', async (_event, { url, token, id, updates }: { url: string; token: string; id: number; updates: any }) => {
     return callRemoteApi(url, token, `/api/media/${id}`, 'PUT', updates)
+})
+
+ipcMain.handle('create-remote-tag', async (_event, { url, token, name }: { url: string; token: string; name: string }) => {
+    return callRemoteApi(url, token, `/api/tags`, 'POST', { name })
+})
+
+ipcMain.handle('delete-remote-tag', async (_event, { url, token, id }: { url: string; token: string; id: number }) => {
+    return callRemoteApi(url, token, `/api/tags/${id}`, 'DELETE')
+})
+
+ipcMain.handle('add-remote-tag-to-media', async (_event, { url, token, mediaId, tagId, mediaIds, tagIds }: { url: string; token: string; mediaId?: number; tagId?: number; mediaIds?: number[]; tagIds?: number[] }) => {
+    return callRemoteApi(url, token, `/api/tags/media`, 'POST', { mediaId, tagId, mediaIds, tagIds })
+})
+
+ipcMain.handle('remove-remote-tag-from-media', async (_event, { url, token, mediaId, tagId }: { url: string; token: string; mediaId: number; tagId: number }) => {
+    return callRemoteApi(url, token, `/api/tags/media`, 'DELETE', { mediaId, tagId })
 })
 
 // ヘルパー関数

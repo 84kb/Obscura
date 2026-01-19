@@ -78,6 +78,9 @@ try {
 
         // インポート
         importMedia: (filePaths) => ipcRenderer.invoke('import-media', filePaths),
+        checkImportDuplicates: (filePaths) => ipcRenderer.invoke('check-import-duplicates', filePaths),
+        checkEntryDuplicates: (mediaId) => ipcRenderer.invoke('check-entry-duplicates', mediaId),
+        findLibraryDuplicates: () => ipcRenderer.invoke('find-library-duplicates'),
 
         // コメント
         addComment: (mediaId, text, time) => ipcRenderer.invoke('add-comment', mediaId, text, time),
@@ -148,6 +151,11 @@ try {
         renameRemoteMedia: (url, token, id, newName) => ipcRenderer.invoke('rename-remote-media', { url, token, id, newName }),
         deleteRemoteMedia: (url, token, id, options) => ipcRenderer.invoke('delete-remote-media', { url, token, id, options }),
         updateRemoteMedia: (url, token, id, updates) => ipcRenderer.invoke('update-remote-media', { url, token, id, updates }),
+        createRemoteTag: (url, token, name) => ipcRenderer.invoke('create-remote-tag', { url, token, name }),
+        deleteRemoteTag: (url, token, id) => ipcRenderer.invoke('delete-remote-tag', { url, token, id }),
+        addRemoteTagToMedia: (url, token, mediaId, tagId) => ipcRenderer.invoke('add-remote-tag-to-media', { url, token, mediaId, tagId }),
+        addRemoteTagsToMedia: (url, token, mediaIds, tagIds) => ipcRenderer.invoke('add-remote-tag-to-media', { url, token, mediaIds, tagIds }),
+        removeRemoteTagFromMedia: (url, token, mediaId, tagId) => ipcRenderer.invoke('remove-remote-tag-from-media', { url, token, mediaId, tagId }),
 
         // === 自動アップデート ===
         checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
@@ -169,6 +177,11 @@ try {
             ipcRenderer.on('ffmpeg-update-progress', subscription);
             return () => ipcRenderer.off('ffmpeg-update-progress', subscription);
         },
+
+
+        // Discord RPC
+        updateDiscordActivity: (activity) => ipcRenderer.invoke('discord-update-activity', activity),
+        clearDiscordActivity: () => ipcRenderer.invoke('discord-clear-activity'),
 
         // ウィンドウ操作
         minimizeWindow: () => ipcRenderer.invoke('window-minimize'),

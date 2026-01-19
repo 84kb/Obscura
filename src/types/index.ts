@@ -59,6 +59,17 @@ export interface Library {
 
 export interface FilterOptions {
     searchQuery: string
+    searchTargets?: { // Optional for backward compatibility init
+        name: boolean
+        folder: boolean
+        description: boolean
+        extension: boolean
+        tags: boolean
+        url: boolean
+        comments: boolean
+        memo: boolean
+        artist: boolean
+    }
     selectedTags: number[]
     excludedTags: number[]
     selectedFolders: number[] // Renamed from selectedGenres (for Virtual Folders)
@@ -68,7 +79,7 @@ export interface FilterOptions {
     folderFilterMode: 'and' | 'or'
     filterType: 'all' | 'uncategorized' | 'untagged' | 'recent' | 'random' | 'trash' | 'tag_manager'
     fileType: 'all' | 'video' | 'audio' // 内部フィルタリング用として残す
-    sortOrder: 'name' | 'date' | 'size' | 'duration' | 'last_played' | 'rating' | 'modified'
+    sortOrder: 'name' | 'date' | 'size' | 'duration' | 'last_played' | 'rating' | 'modified' | 'artist'
     sortDirection: 'asc' | 'desc'
     selectedRatings: number[] // 0-5, 0 は「評価なし」
     selectedExtensions: string[]
@@ -153,6 +164,9 @@ export interface ElectronAPI {
     updateLastPlayed: (id: number) => Promise<void>
 
     importMedia: (filePaths: string[]) => Promise<MediaFile[]>
+    checkImportDuplicates: (filePaths: string[]) => Promise<{ newFile: any; existing: any }[]>
+    checkEntryDuplicates: (mediaId: number) => Promise<{ newMedia: MediaFile; existingMedia: MediaFile }[]>
+    findLibraryDuplicates: () => Promise<{ [key: string]: MediaFile[] }[]>
 
     // キャプチャ
     onTriggerFrameCapture: (callback: (action: string) => void) => () => void
@@ -225,6 +239,11 @@ export interface ElectronAPI {
     renameRemoteMedia: (url: string, token: string, id: number, newName: string) => Promise<any>
     deleteRemoteMedia: (url: string, token: string, id: number, options?: { permanent?: boolean }) => Promise<any>
     updateRemoteMedia: (url: string, token: string, id: number, updates: any) => Promise<any>
+    createRemoteTag: (url: string, token: string, name: string) => Promise<Tag>
+    deleteRemoteTag: (url: string, token: string, id: number) => Promise<void>
+    addRemoteTagToMedia: (url: string, token: string, mediaId: number, tagId: number) => Promise<void>
+    addRemoteTagsToMedia: (url: string, token: string, mediaIds: number[], tagIds: number[]) => Promise<void>
+    removeRemoteTagFromMedia: (url: string, token: string, mediaId: number, tagId: number) => Promise<void>
 
     // === 自動アップデート ===
     checkForUpdates: () => Promise<any>
@@ -250,6 +269,10 @@ export interface ElectronAPI {
 
     // その他
     focusWindow: () => Promise<void>
+
+    // Discord RPC
+    updateDiscordActivity: (activity: any) => Promise<void>
+    clearDiscordActivity: () => Promise<void>
 }
 
 export interface RemoteLibrary {
@@ -276,6 +299,11 @@ export interface AutoImportConfig {
     targetLibraryId?: string
 }
 
+export interface LibraryViewSettings {
+    sortOrder: string
+    sortDirection: 'asc' | 'desc'
+}
+
 export interface ClientConfig {
     downloadPath: string
     theme: 'dark' | 'light' | 'system'
@@ -283,7 +311,11 @@ export interface ClientConfig {
     remoteLibraries: RemoteLibrary[]
     myUserToken?: string
     autoImport: AutoImportConfig
+    libraryViewSettings: { [libraryId: string]: LibraryViewSettings }
     thumbnailMode: 'speed' | 'quality'
+    discordRichPresenceEnabled: boolean
+    nickname?: string
+    iconUrl?: string
 }
 
 export interface AppSettings {
@@ -307,6 +339,16 @@ export interface ViewSettings {
     showSidebar: boolean
     showInspector: boolean
     thumbnailMode: 'speed' | 'quality'
+    listColumns?: {
+        tags: boolean
+        resolution: boolean
+        rating: boolean
+        extension: boolean
+        size: boolean
+        modified: boolean
+        created: boolean
+        artist: boolean
+    }
 }
 
 export const defaultViewSettings: ViewSettings = {
@@ -318,5 +360,21 @@ export const defaultViewSettings: ViewSettings = {
     showSubfolderContent: false,
     showSidebar: true,
     showInspector: true,
-    thumbnailMode: 'speed'
+    thumbnailMode: 'speed',
+    listColumns: {
+        tags: true,
+        resolution: true,
+        rating: true,
+        extension: true,
+        size: true,
+        modified: true,
+        created: true,
+        artist: true
+    }
+}
+
+declare global {
+    interface Window {
+        electronAPI: ElectronAPI
+    }
 }

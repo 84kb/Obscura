@@ -86,11 +86,19 @@ export async function getMediaMetadata(filePath: string): Promise<{ width?: numb
         const ffprobe = spawn(ffprobePath, args)
         let outputData = ''
 
+        // タイムアウト設定 (10秒)
+        const timeout = setTimeout(() => {
+            console.error(`[ffprobe] Timeout (10s) for: ${filePath}`)
+            ffprobe.kill()
+            resolve({})
+        }, 10000)
+
         ffprobe.stdout.on('data', (data) => {
             outputData += data.toString()
         })
 
         ffprobe.on('close', (code) => {
+            clearTimeout(timeout)
             if (code === 0) {
                 try {
                     const json = JSON.parse(outputData)
@@ -259,11 +267,19 @@ export async function extractDominantColor(imagePath: string): Promise<string | 
 
         let buffer: Buffer = Buffer.alloc(0)
 
+        // タイムアウト設定 (30秒)
+        const timeout = setTimeout(() => {
+            console.error(`[ffmpeg] extractDominantColor timeout (30s): ${imagePath}`)
+            ffmpeg.kill()
+            resolve(null)
+        }, 30000)
+
         ffmpeg.stdout.on('data', (data) => {
             buffer = Buffer.concat([buffer, data])
         })
 
         ffmpeg.on('close', (code) => {
+            clearTimeout(timeout)
             if (code === 0 && buffer.length >= 3) {
                 const r = buffer[0]
                 const g = buffer[1]
@@ -302,7 +318,15 @@ export async function createThumbnail(sourcePath: string, destPath: string, mode
             const ffmpegPath = getFFmpegPath()
             const ffmpeg = spawn(ffmpegPath, args)
 
+            // タイムアウト設定 (30秒)
+            const timeout = setTimeout(() => {
+                console.error(`[Thumbnail] extractEmbedded timeout (30s): ${sourcePath}`)
+                ffmpeg.kill()
+                resolve(false)
+            }, 30000)
+
             ffmpeg.on('close', (code: number) => {
+                clearTimeout(timeout)
                 if (code === 0 && fs.existsSync(destPath)) {
                     const stats = fs.statSync(destPath)
                     if (stats.size > 1000) { // 最低1KB以上のファイルを有効とみなす
@@ -373,7 +397,15 @@ export async function createThumbnail(sourcePath: string, destPath: string, mode
             const ffmpegPath = getFFmpegPath()
             const ffmpeg = spawn(ffmpegPath, args)
 
+            // タイムアウト設定 (30秒)
+            const timeout = setTimeout(() => {
+                console.error(`[Thumbnail] generateFromFrame timeout (30s): ${sourcePath}`)
+                ffmpeg.kill()
+                resolve(false)
+            }, 30000)
+
             ffmpeg.on('close', (code: number) => {
+                clearTimeout(timeout)
                 if (code === 0 && fs.existsSync(destPath)) {
                     console.log(`[Thumbnail] Generated from frame: ${destPath}`)
                     resolve(true)

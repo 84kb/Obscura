@@ -363,6 +363,7 @@ export function LibraryGrid({
                                 showExtension={viewSettings?.showExtension ?? true}
                                 showExtensionLabel={viewSettings?.showExtensionLabel ?? true}
                                 thumbnailMode={viewSettings?.thumbnailMode ?? 'speed'}
+                                width={itemWidth}
                                 data-id={media.id}
                                 onInternalDragStart={onInternalDragStart}
                                 onInternalDragEnd={onInternalDragEnd}
