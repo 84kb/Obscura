@@ -1632,11 +1632,17 @@ async function callRemoteApi(baseUrl: string, token: string, path: string, metho
             headers['Content-Type'] = 'application/json'
         }
 
+        console.log(`[callRemoteApi] ${method} ${baseUrl}${path}`)
+        console.log('[callRemoteApi] headers:', headers)
+        console.log('[callRemoteApi] body:', body)
+
         const response = await fetch(`${baseUrl}${path}`, {
             method,
             headers,
             body: body ? JSON.stringify(body) : undefined
         })
+
+        console.log(`[callRemoteApi] Response status: ${response.status} ${response.statusText}`)
 
         if (!response.ok) {
             throw new Error(`API Error: ${response.status} ${response.statusText}`)
