@@ -94,13 +94,29 @@ export default function App() {
         const loadAll = async () => {
             try {
                 // リモートライブラリの場合は接続確認してから読み込み
+                // リモートライブラリの場合は接続確認してから読み込み
                 if (activeRemoteLibrary) {
                     const { waitForRemoteConnection } = await import('./utils/remoteHealth')
-                    const connected = await waitForRemoteConnection(activeRemoteLibrary, myUserToken)
+                    const connectedUrl = await waitForRemoteConnection(activeRemoteLibrary, myUserToken)
 
-                    if (!connected) {
+                    if (!connectedUrl) {
                         alert(`リモートライブラリ "${activeRemoteLibrary.name}" への接続に失敗しました。\nサーバーが起動していないか、ネットワークに問題があります。`)
                         return
+                    }
+
+                    // URLが正規化（プロトコル変更など）された場合は更新
+                    // 末尾のスラッシュを除去して比較
+                    const originalUrl = activeRemoteLibrary.url.replace(/\/$/, '')
+                    const newUrl = connectedUrl.replace(/\/$/, '')
+
+                    if (originalUrl !== newUrl) {
+                        console.log(`[App] Protocol switch detected: ${originalUrl} -> ${newUrl}`)
+                        const updatedLib = { ...activeRemoteLibrary, url: newUrl }
+                        switchToRemoteLibrary(updatedLib)
+                        // switchToRemoteLibraryが状態を更新するのを待つため、ここで一度中断しても良いが、
+                        // 続けて読み込み処理を行っても大きな問題はない（次回のレンダリングで正しいURLが使われるため）
+                        // ただし、即座に反映させるためにローカル変数も更新しておくべきかもしれないが、
+                        // useLibraryの内部状態依存が強いため、次回更新に任せるのが安全
                     }
                 }
 

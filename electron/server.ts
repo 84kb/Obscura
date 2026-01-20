@@ -480,34 +480,15 @@ export function startServer(port: number): Promise<void> {
                 try {
                     const credentials = { key: fs.readFileSync(config.sslKeyPath, 'utf8'), cert: fs.readFileSync(config.sslCertPath, 'utf8') }
                     httpServer = require('https').createServer(credentials, expressApp)
-
-                    // HTTPSサーバーは指定されたポートでリッスン
-                    httpServer.listen(port, '0.0.0.0', () => {
-                        console.log(`HTTPS server started on port ${port} with library ${publishPath}`)
-                        resolve()
-                    })
-
-                    // HTTPからHTTPSへの自動リダイレクト用のHTTPサーバーを起動（同じポート番号で）
-                    // ※実際には、HTTPとHTTPSで同じポートは使えないため、ここではHTTPリダイレクトサーバーは作成しない
-                    // ユーザーがhttp://でアクセスした場合は、クライアント側の自動検出機能でhttps://に切り替わる
-
                 } catch (e) {
                     console.warn('Failed to setup HTTPS, falling back to HTTP:', e)
                     httpServer = createServer(expressApp)
-                    httpServer.listen(port, '0.0.0.0', () => {
-                        console.log(`HTTP server started on port ${port} with library ${publishPath}`)
-                        resolve()
-                    })
                 }
             } else {
                 httpServer = createServer(expressApp)
-                httpServer.listen(port, '0.0.0.0', () => {
-                    console.log(`HTTP server started on port ${port} with library ${publishPath}`)
-                    resolve()
-                })
             }
 
-            // Socket.io初期化
+            // Socket.io初期化（サーバー起動前に実行）
             io = new SocketIOServer(httpServer, { cors: { origin: true, credentials: true } })
             io.use((socket, next) => {
                 const { token, userToken } = socket.handshake.auth
@@ -516,6 +497,13 @@ export function startServer(port: number): Promise<void> {
                 if (!user) return next(new Error('Invalid credentials'));
                 (socket.request as any).user = user
                 next()
+            })
+
+            // サーバー起動
+            httpServer.listen(port, '0.0.0.0', () => {
+                const protocol = config.requireHttps ? 'HTTPS' : 'HTTP'
+                console.log(`${protocol} server started on port ${port} with library ${publishPath}`)
+                resolve()
             })
         } catch (error) { reject(error) }
     })

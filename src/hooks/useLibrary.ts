@@ -1283,7 +1283,8 @@ export function useLibrary() {
 
     // リモートライブラリへの切り替え
     const switchToRemoteLibrary = useCallback((lib: RemoteLibrary) => {
-        if (activeRemoteLibrary?.id === lib.id && !activeLibrary) {
+        // IDが同じでもURLが違う場合は更新を許可する
+        if (activeRemoteLibrary?.id === lib.id && activeRemoteLibrary.url === lib.url && !activeLibrary) {
             return
         }
 

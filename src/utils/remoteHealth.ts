@@ -14,9 +14,11 @@ export async function waitForRemoteConnection(
     myUserToken: string,
     maxRetries: number = 5,
     retryDelay: number = 1000
-): Promise<boolean> {
+): Promise<string | null> {
     let userToken = myUserToken
     let accessToken = remoteLib.token
+    let currentUrl = remoteLib.url.replace(/\/$/, '')
+    let tryAlternateProtocol = true
 
     if (remoteLib.token.includes(':')) {
         const parts = remoteLib.token.split(':')
@@ -24,27 +26,43 @@ export async function waitForRemoteConnection(
         accessToken = parts[1]
     }
 
-    const baseUrl = remoteLib.url.replace(/\/$/, '')
-    const healthUrl = `${baseUrl}/api/health`
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const checkHealth = async (url: string): Promise<boolean> => {
+        const healthUrl = `${url}/api/health`
         try {
             const response = await fetch(healthUrl, {
                 headers: {
                     'Authorization': `Bearer ${accessToken}`,
                     'X-User-Token': userToken
                 },
-                signal: AbortSignal.timeout(3000) // 3秒タイムアウト
+                signal: AbortSignal.timeout(3000)
             })
+            return response.ok
+        } catch (e) {
+            return false
+        }
+    }
 
-            if (response.ok) {
-                console.log(`[Remote Health] Connection established to ${remoteLib.name} (attempt ${attempt}/${maxRetries})`)
-                return true
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        // 現在のURLで試行
+        if (await checkHealth(currentUrl)) {
+            console.log(`[Remote Health] Connection established to ${remoteLib.name} (attempt ${attempt}/${maxRetries})`)
+            return currentUrl
+        }
+
+        console.warn(`[Remote Health] Attempt ${attempt}/${maxRetries} failed for ${currentUrl}`)
+
+        // 失敗した場合、一度だけプロトコルを切り替えて試行
+        if (tryAlternateProtocol) {
+            const altUrl = currentUrl.startsWith('https://')
+                ? currentUrl.replace('https://', 'http://')
+                : currentUrl.replace('http://', 'https://')
+
+            console.log(`[Remote Health] Trying alternate protocol: ${altUrl}`)
+            if (await checkHealth(altUrl)) {
+                console.log(`[Remote Health] Connection established using alternate protocol: ${altUrl}`)
+                return altUrl
             }
-
-            console.warn(`[Remote Health] Attempt ${attempt}/${maxRetries} failed: ${response.status} ${response.statusText}`)
-        } catch (error: any) {
-            console.warn(`[Remote Health] Attempt ${attempt}/${maxRetries} failed:`, error.message)
+            // プロトコル切り替えは各リトライで1回試すが、成功しなかった場合は元のURLでリトライ継続
         }
 
         // 最後の試行でなければ待機
@@ -54,5 +72,5 @@ export async function waitForRemoteConnection(
     }
 
     console.error(`[Remote Health] Failed to connect to ${remoteLib.name} after ${maxRetries} attempts`)
-    return false
+    return null
 }
