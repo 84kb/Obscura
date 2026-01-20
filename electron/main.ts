@@ -227,6 +227,13 @@ function createWindow() {
 
         return { action: 'deny' }
     })
+
+    // 自己署名証明書を許可（リモートHTTPS接続用）
+    mainWindow.webContents.session.setCertificateVerifyProc((_request, callback) => {
+        // リモートライブラリのHTTPS接続の場合は証明書エラーを無視
+        // 本番環境では、信頼できる証明書のみを許可するようにフィルタリングすることを推奨
+        callback(0) // 0 = 成功, -2 = 失敗, -3 = エラー
+    })
 }
 
 // サムネイルキャッシュ (LRU形式の簡易実装)
