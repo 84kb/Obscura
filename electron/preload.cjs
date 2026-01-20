@@ -29,6 +29,9 @@ try {
         // フォルダ選択
         selectFolder: () => ipcRenderer.invoke('select-folder'),
 
+        // ファイル選択
+        selectFile: (options) => ipcRenderer.invoke('select-file', options),
+
         // メディアファイル操作
         scanFolder: (folderPath) => ipcRenderer.invoke('scan-folder', folderPath),
         getMediaFiles: () => ipcRenderer.invoke('get-media-files'),

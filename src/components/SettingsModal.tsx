@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { AppSettings, Library, ClientConfig, AutoImportPath } from '../types'
 import './SettingsModal.css'
 
@@ -9,7 +9,7 @@ interface SettingsModalProps {
 }
 
 // 削除された定義
-type Category = 'general' | 'sidebar' | 'controls' | 'viewer' | 'screenshot' | 'shortcuts' | 'notification' | 'password' | 'import' | 'network' | 'developer' | 'media-engine'
+type Category = 'general' | 'sidebar' | 'controls' | 'viewer' | 'screenshot' | 'shortcuts' | 'notification' | 'password' | 'import' | 'network' | 'developer' | 'media-engine' | 'profile'
 
 interface ApiEndpoint {
     method: 'GET' | 'POST' | 'PUT' | 'DELETE'
@@ -23,16 +23,22 @@ interface ApiEndpoint {
 const API_ENDPOINTS: ApiEndpoint[] = [
     {
         method: 'GET',
+        path: '/api/health',
+        label: 'ヘルスチェック',
+        description: 'サーバーの稼働状況を確認します。認証不要です。',
+        permission: 'none',
+        params: []
+    },
+    {
+        method: 'GET',
         path: '/api/media',
         label: 'メディア一覧',
         description: 'ライブラリ内のメディアアイテムを検索・取得します。',
-        permission: 'read:media',
+        permission: 'READ_ONLY',
         params: [
             { name: 'page', type: 'number', desc: 'ページ番号 (デフォルト: 1)', required: false },
             { name: 'limit', type: 'number', desc: '1ページあたりのアイテム数 (デフォルト: 50)', required: false },
             { name: 'search', type: 'string', desc: 'キーワード検索', required: false },
-            { name: 'tags', type: 'string[]', desc: 'タグIDの配列 (例: tags=1,2,3)', required: false },
-            { name: 'folders', type: 'string[]', desc: 'フォルダーIDの配列 (例: folders=a,b,c)', required: false },
         ]
     },
     {
@@ -40,21 +46,124 @@ const API_ENDPOINTS: ApiEndpoint[] = [
         path: '/api/media/:id',
         label: 'メディア詳細',
         description: '特定のメディアアイテムの詳細情報を取得します。',
-        permission: 'read:media',
+        permission: 'READ_ONLY',
         params: [
-            { name: 'id', type: 'string', desc: 'メディアID', required: true },
+            { name: 'id', type: 'number', desc: 'メディアID', required: true },
         ]
     },
     {
         method: 'GET',
-        path: '/api/stream/:id',
-        label: 'ストリーミング',
-        description: '特定のメディアアイテムをストリーミングします。URLクエリパラメータでのトークン指定も可能です。',
-        permission: 'read:media',
+        path: '/api/media/:id/duplicates',
+        label: '重複検出',
+        description: '指定したメディアの重複候補を取得します。',
+        permission: 'READ_ONLY',
         params: [
-            { name: 'id', type: 'string', desc: 'メディアID', required: true },
-            { name: 'accessToken', type: 'string', desc: 'アクセストークン (ヘッダー認証の代替)', required: false },
-            { name: 'userToken', type: 'string', desc: 'ユーザートークン (ヘッダー認証の代替)', required: false },
+            { name: 'id', type: 'number', desc: 'メディアID', required: true }
+        ]
+    },
+    {
+        method: 'POST',
+        path: '/api/media/:id/comments',
+        label: 'コメント追加',
+        description: 'メディアにコメントを追加します。',
+        permission: 'READ_ONLY',
+        params: [
+            { name: 'id', type: 'number', desc: 'メディアID', required: true },
+            { name: 'text', type: 'string', desc: 'コメント本文', required: true },
+            { name: 'time', type: 'number', desc: 'タイムスタンプ（動画の再生位置）', required: false },
+        ]
+    },
+    {
+        method: 'PUT',
+        path: '/api/media/:id',
+        label: 'メディア情報更新',
+        description: 'メディアのメタデータ（評価、アーティスト、説明、ファイル名）を更新します。',
+        permission: 'EDIT',
+        params: [
+            { name: 'id', type: 'number', desc: 'メディアID', required: true },
+            { name: 'rating', type: 'number', desc: '評価 (0-5)', required: false },
+            { name: 'artist', type: 'string', desc: 'アーティスト名', required: false },
+            { name: 'description', type: 'string', desc: '説明文', required: false },
+            { name: 'fileName', type: 'string', desc: 'ファイル名', required: false },
+        ]
+    },
+    {
+        method: 'DELETE',
+        path: '/api/media/:id',
+        label: 'メディア削除',
+        description: 'メディアをゴミ箱に移動します。permanent=trueで完全削除（FULL権限が必要）。',
+        permission: 'EDIT',
+        params: [
+            { name: 'id', type: 'number', desc: 'メディアID', required: true },
+            { name: 'permanent', type: 'boolean', desc: '完全削除フラグ (FULL権限必要)', required: false },
+        ]
+    },
+    {
+        method: 'GET',
+        path: '/api/tags',
+        label: 'タグ一覧',
+        description: '登録されているすべてのタグのリストを取得します。',
+        permission: 'READ_ONLY',
+        params: []
+    },
+    {
+        method: 'GET',
+        path: '/api/tag-groups',
+        label: 'タググループ一覧',
+        description: '登録されているすべてのタググループのリストを取得します。',
+        permission: 'READ_ONLY',
+        params: []
+    },
+    {
+        method: 'GET',
+        path: '/api/folders',
+        label: 'フォルダー一覧',
+        description: '登録されているすべてのフォルダーのリストを取得します。',
+        permission: 'READ_ONLY',
+        params: []
+    },
+    {
+        method: 'POST',
+        path: '/api/tags',
+        label: 'タグ作成',
+        description: '新しいタグを作成します。',
+        permission: 'EDIT',
+        params: [
+            { name: 'name', type: 'string', desc: 'タグ名', required: true }
+        ]
+    },
+    {
+        method: 'DELETE',
+        path: '/api/tags/:id',
+        label: 'タグ削除',
+        description: 'タグを削除します。',
+        permission: 'EDIT',
+        params: [
+            { name: 'id', type: 'number', desc: 'タグID', required: true }
+        ]
+    },
+    {
+        method: 'POST',
+        path: '/api/tags/media',
+        label: 'メディアにタグ追加',
+        description: 'メディアにタグを追加します。単体または一括追加が可能です。',
+        permission: 'EDIT',
+        params: [
+            { name: 'mediaId', type: 'number', desc: 'メディアID（単体）', required: false },
+            { name: 'tagId', type: 'number', desc: 'タグID（単体）', required: false },
+            { name: 'mediaIds', type: 'number[]', desc: 'メディアIDの配列（一括）', required: false },
+            { name: 'tagIds', type: 'number[]', desc: 'タグIDの配列（一括）', required: false },
+        ]
+    },
+    {
+        method: 'DELETE',
+        path: '/api/tags/media',
+        label: 'メディアからタグ削除',
+        description: 'メディアからタグを削除します。クエリパラメータまたはボディで指定可能です。',
+        permission: 'EDIT',
+        params: [
+            { name: 'mediaId', type: 'number', desc: 'メディアID', required: true },
+            { name: 'tagId', type: 'number', desc: 'タグID', required: true },
         ]
     },
     {
@@ -62,9 +171,22 @@ const API_ENDPOINTS: ApiEndpoint[] = [
         path: '/api/thumbnails/:id',
         label: 'サムネイル',
         description: '特定のメディアアイテムのサムネイル画像を取得します。',
-        permission: 'read:media',
+        permission: 'any',
         params: [
-            { name: 'id', type: 'string', desc: 'メディアID', required: true },
+            { name: 'id', type: 'number', desc: 'メディアID', required: true },
+            { name: 'width', type: 'number', desc: '幅（ピクセル）', required: false },
+        ]
+    },
+    {
+        method: 'GET',
+        path: '/api/stream/:id',
+        label: 'ストリーミング',
+        description: '特定のメディアアイテムをストリーミングします。Range requestsをサポートします。',
+        permission: 'any',
+        params: [
+            { name: 'id', type: 'number', desc: 'メディアID', required: true },
+            { name: 'accessToken', type: 'string', desc: 'アクセストークン (クエリ認証)', required: false },
+            { name: 'userToken', type: 'string', desc: 'ユーザートークン (クエリ認証)', required: false },
         ]
     },
     {
@@ -74,7 +196,7 @@ const API_ENDPOINTS: ApiEndpoint[] = [
         description: 'メディアファイルをダウンロードします。',
         permission: 'DOWNLOAD',
         params: [
-            { name: 'id', type: 'string', desc: 'メディアID', required: true },
+            { name: 'id', type: 'number', desc: 'メディアID', required: true },
         ]
     },
     {
@@ -88,42 +210,23 @@ const API_ENDPOINTS: ApiEndpoint[] = [
         ]
     },
     {
+        method: 'GET',
+        path: '/api/profile',
+        label: 'プロフィール取得',
+        description: '現在のユーザーのプロフィール情報を取得します。',
+        permission: 'any',
+        params: []
+    },
+    {
         method: 'PUT',
-        path: '/api/media/:id',
-        label: 'メディア情報更新',
-        description: 'メディアのメタデータ（評価、アーティスト、説明など）を更新します。',
-        permission: 'EDIT',
+        path: '/api/profile',
+        label: 'プロフィール更新',
+        description: 'ユーザーのニックネームやアイコンを更新します。',
+        permission: 'any',
         params: [
-            { name: 'rating', type: 'number', desc: '評価 (0-5)' },
-            { name: 'artist', type: 'string', desc: 'アーティスト名' },
-            { name: 'description', type: 'string', desc: '説明文' }
+            { name: 'nickname', type: 'string', desc: 'ニックネーム', required: false },
+            { name: 'iconUrl', type: 'string', desc: 'アイコンURL', required: false },
         ]
-    },
-    {
-        method: 'DELETE',
-        path: '/api/media/:id',
-        label: 'メディア削除',
-        description: 'メディアをゴミ箱に移動します。',
-        permission: 'FULL',
-        params: [
-            { name: 'id', type: 'string', desc: 'メディアID', required: true },
-        ]
-    },
-    {
-        method: 'GET',
-        path: '/api/tags',
-        label: 'タグ一覧',
-        description: '登録されているすべてのタグのリストを取得します。',
-        permission: 'read:tags',
-        params: []
-    },
-    {
-        method: 'GET',
-        path: '/api/folders',
-        label: 'フォルダー一覧',
-        description: '登録されているすべてのフォルダーのリストを取得します。',
-        permission: 'read:folders',
-        params: []
     },
 ]
 
@@ -136,7 +239,7 @@ const PERMISSION_LABELS: Record<string, string> = {
 }
 
 export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsModalProps) {
-    const [activeCategory, setActiveCategory] = useState<'general' | 'import' | 'network' | 'media-engine' | 'profile'>('general')
+    const [activeCategory, setActiveCategory] = useState<Category>('general')
     const [appVersion, setAppVersion] = useState<string>('Unknown')
 
     useEffect(() => {
@@ -168,10 +271,12 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }
 
     // === APIメニュー開閉 State ===
-    const [openApiId, setOpenApiId] = useState<string | null>(null)
-    const toggleApi = (path: string) => {
-        setOpenApiId(openApiId === path ? null : path)
-    }
+    const [openApiIds, setOpenApiIds] = useState<string[]>([])
+    const toggleApi = useCallback((id: string) => {
+        setOpenApiIds((prev) =>
+            prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+        )
+    }, [])
 
     // データ読み込み
     const [serverConfig, setServerConfig] = useState<any>(null)
@@ -766,15 +871,58 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle')
     const [connectionMsg, setConnectionMsg] = useState('')
 
+    // URLの正規化：プロトコルがない場合はhttp://を追加
+    const normalizeRemoteUrl = (url: string): string => {
+        const trimmed = url.trim()
+        if (!trimmed) return ''
+        // すでにプロトコルがある場合はそのまま
+        if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+            return trimmed
+        }
+        // プロトコルがない場合はhttp://を追加
+        return `http://${trimmed}`
+    }
+
     const handleTestConnection = async () => {
         if (!remoteUrl || !remoteKey || !window.electronAPI) return
         setConnectionStatus('testing')
         setConnectionMsg('接続確認中...')
         try {
-            const result = await (window.electronAPI as any).testConnection(remoteUrl, remoteKey)
+            const normalizedUrl = normalizeRemoteUrl(remoteUrl)
+
+            // まず指定されたプロトコル（またはデフォルトのhttp://）で試行
+            let result = await (window.electronAPI as any).testConnection(normalizedUrl, remoteKey)
+            let finalUrl = normalizedUrl
+
+            // HTTPで失敗し、かつURLがhttp://で始まる場合はhttps://で再試行
+            if (!result.success && normalizedUrl.startsWith('http://')) {
+                setConnectionMsg('HTTPS接続を試行中...')
+                const httpsUrl = normalizedUrl.replace('http://', 'https://')
+                const httpsResult = await (window.electronAPI as any).testConnection(httpsUrl, remoteKey)
+
+                if (httpsResult.success) {
+                    result = httpsResult
+                    finalUrl = httpsUrl
+                }
+            }
+            // HTTPSで失敗し、かつURLがhttps://で始まる場合はhttp://で再試行
+            else if (!result.success && normalizedUrl.startsWith('https://')) {
+                setConnectionMsg('HTTP接続を試行中...')
+                const httpUrl = normalizedUrl.replace('https://', 'http://')
+                const httpResult = await (window.electronAPI as any).testConnection(httpUrl, remoteKey)
+
+                if (httpResult.success) {
+                    result = httpResult
+                    finalUrl = httpUrl
+                }
+            }
+
             if (result.success) {
                 setConnectionStatus('success')
-                setConnectionMsg('接続成功！')
+                const protocol = finalUrl.startsWith('https://') ? 'HTTPS' : 'HTTP'
+                setConnectionMsg(`接続成功！ (${protocol})`)
+                // URLを成功したプロトコルで更新
+                setRemoteUrl(finalUrl)
                 // ホスト側のライブラリ名を自動反映
                 if (result.libraryName && !remoteName) {
                     setRemoteName(result.libraryName)
@@ -793,7 +941,8 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
         if (connectionStatus !== 'success' || !window.electronAPI) return
         try {
             const name = remoteName.trim() || 'Remote Library'
-            await (window.electronAPI as any).addRemoteLibrary(name, remoteUrl, remoteKey)
+            const normalizedUrl = normalizeRemoteUrl(remoteUrl)
+            await (window.electronAPI as any).addRemoteLibrary(name, normalizedUrl, remoteKey)
             // 設定を再読み込み
             const cConfig = await (window.electronAPI as any).getClientConfig()
             setClientConfig(cConfig)
@@ -1348,63 +1497,66 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         </p>
 
                         <div className="api-list">
-                            {API_ENDPOINTS.map((api) => (
-                                <div key={api.path + api.method} className={`api-item ${openApiId === api.path ? 'open' : ''}`} style={{ borderBottom: '1px solid #3a3a3c' }}>
-                                    <div
-                                        className="api-header"
-                                        onClick={() => toggleApi(api.path)}
-                                        style={{ display: 'flex', alignItems: 'center', padding: '12px 8px', cursor: 'pointer', gap: '10px' }}
-                                    >
-                                        <span className={`method-badge ${api.method.toLowerCase()}`} style={{
-                                            padding: '4px 8px',
-                                            borderRadius: '4px',
-                                            fontSize: '12px',
-                                            fontWeight: 'bold',
-                                            backgroundColor: api.method === 'GET' ? '#0ea5e9' : api.method === 'POST' ? '#22c55e' : api.method === 'PUT' ? '#eab308' : '#ef4444',
-                                            color: '#fff',
-                                            minWidth: '50px',
-                                            textAlign: 'center'
-                                        }}>{api.method}</span>
-                                        <span className="api-path" style={{ flex: 1, fontFamily: 'monospace', fontSize: '14px' }}>{api.path}</span>
-                                        <span className="api-label" style={{ fontSize: '13px', color: '#aaa' }}>{api.label}</span>
-                                        <svg
-                                            width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                                            style={{ transform: openApiId === api.path ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}
+                            {API_ENDPOINTS.map((api) => {
+                                const apiId = `${api.method}:${api.path}`
+                                return (
+                                    <div key={apiId} className={`api-item ${openApiIds.includes(apiId) ? 'open' : ''}`} style={{ borderBottom: '1px solid #3a3a3c' }}>
+                                        <div
+                                            className="api-header"
+                                            onClick={() => toggleApi(apiId)}
+                                            style={{ display: 'flex', alignItems: 'center', padding: '12px 8px', cursor: 'pointer', gap: '10px' }}
                                         >
-                                            <polyline points="6 9 12 15 18 9"></polyline>
-                                        </svg>
-                                    </div>
-
-                                    {openApiId === api.path && (
-                                        <div className="api-details" style={{ padding: '0 16px 16px 16px', fontSize: '13px', color: '#ddd' }}>
-                                            {api.description && <p style={{ marginBottom: '8px' }}>{api.description}</p>}
-                                            {api.permission && <div style={{ marginBottom: '8px' }}>
-                                                <span style={{ color: '#aaa' }}>必要な権限: </span>
-                                                <code style={{ backgroundColor: '#333', padding: '2px 4px', borderRadius: '4px' }}>{api.permission}</code>
-                                            </div>}
-                                            {api.params && api.params.length > 0 && (
-                                                <div style={{ marginTop: '8px' }}>
-                                                    <strong style={{ display: 'block', marginBottom: '4px', color: '#aaa' }}>Parameters:</strong>
-                                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                                                        <tbody>
-                                                            {api.params.map(p => (
-                                                                <tr key={p.name} style={{ borderBottom: '1px solid #333' }}>
-                                                                    <td style={{ padding: '4px', fontFamily: 'monospace', color: '#88ccff' }}>
-                                                                        {p.name}
-                                                                        {p.required && <span style={{ color: '#ef4444' }}>*</span>}
-                                                                    </td>
-                                                                    <td style={{ padding: '4px', color: '#aaa' }}>{p.type}</td>
-                                                                    <td style={{ padding: '4px' }}>{p.desc}</td>
-                                                                </tr>
-                                                            ))}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                            )}
+                                            <span className={`method-badge ${api.method.toLowerCase()}`} style={{
+                                                padding: '4px 8px',
+                                                borderRadius: '4px',
+                                                fontSize: '12px',
+                                                fontWeight: 'bold',
+                                                backgroundColor: api.method === 'GET' ? '#0ea5e9' : api.method === 'POST' ? '#22c55e' : api.method === 'PUT' ? '#eab308' : '#ef4444',
+                                                color: '#fff',
+                                                minWidth: '50px',
+                                                textAlign: 'center'
+                                            }}>{api.method}</span>
+                                            <span className="api-path" style={{ flex: 1, fontFamily: 'monospace', fontSize: '14px' }}>{api.path}</span>
+                                            <span className="api-label" style={{ fontSize: '13px', color: '#aaa' }}>{api.label}</span>
+                                            <svg
+                                                width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                                                style={{ transform: openApiIds.includes(apiId) ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}
+                                            >
+                                                <polyline points="6 9 12 15 18 9"></polyline>
+                                            </svg>
                                         </div>
-                                    )}
-                                </div>
-                            ))}
+
+                                        {openApiIds.includes(apiId) && (
+                                            <div className="api-details" style={{ padding: '0 16px 16px 16px', fontSize: '13px', color: '#ddd' }}>
+                                                {api.description && <p style={{ marginBottom: '8px' }}>{api.description}</p>}
+                                                {api.permission && <div style={{ marginBottom: '8px' }}>
+                                                    <span style={{ color: '#aaa' }}>必要な権限: </span>
+                                                    <code style={{ backgroundColor: '#333', padding: '2px 4px', borderRadius: '4px' }}>{api.permission}</code>
+                                                </div>}
+                                                {api.params && api.params.length > 0 && (
+                                                    <div style={{ marginTop: '8px' }}>
+                                                        <strong style={{ display: 'block', marginBottom: '4px', color: '#aaa' }}>Parameters:</strong>
+                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                                                            <tbody>
+                                                                {api.params.map(p => (
+                                                                    <tr key={p.name} style={{ borderBottom: '1px solid #333' }}>
+                                                                        <td style={{ padding: '4px', fontFamily: 'monospace', color: '#88ccff' }}>
+                                                                            {p.name}
+                                                                            {p.required && <span style={{ color: '#ef4444' }}>*</span>}
+                                                                        </td>
+                                                                        <td style={{ padding: '4px', color: '#aaa' }}>{p.type}</td>
+                                                                        <td style={{ padding: '4px' }}>{p.desc}</td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                )
+                            })}
                         </div>
                     </div>
                 </section>

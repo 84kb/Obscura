@@ -10,29 +10,17 @@ const getExecutableName = (name: string) => {
 }
 
 export function getFFmpegPath(): string {
-    // 1. ユーザーデータフォルダ (自動アップデートで配置される場所)
-    try {
-        const userDataPath = app ? app.getPath('userData') : '.'
-        const customPath = path.join(userDataPath, 'bin', getExecutableName('ffmpeg'))
-        if (fs.existsSync(customPath)) {
-            console.log(`[FFmpeg] Using custom path: ${customPath}`)
-            return customPath
-        }
-    } catch (e) {
-        console.warn('[FFmpeg] Failed to check user data path', e)
-    }
-
-    // 2. バンドルされたパス (本番環境)
+    // 1. バンドルされたパス (本番環境)
+    // electron-builder の extraResources で resources/bin に配置される
     if (!isDev) {
-        // electron-builder の extraResources で resources/bin に配置される
         const bundledPath = path.join(process.resourcesPath, 'bin', getExecutableName('ffmpeg'))
         if (fs.existsSync(bundledPath)) {
-            console.log(`[FFmpeg] Using bundled path: ${bundledPath}`)
+            // console.log(`[FFmpeg] Using bundled path: ${bundledPath}`)
             return bundledPath
         }
     }
 
-    // 3. 開発環境 (node_modules)
+    // 2. 開発環境 (node_modules)
     try {
         const ffmpegStatic = require('ffmpeg-static')
         if (ffmpegStatic && fs.existsSync(ffmpegStatic)) {
@@ -40,36 +28,24 @@ export function getFFmpegPath(): string {
             return ffmpegStatic
         }
     } catch (e) {
-        console.warn('[FFmpeg] Failed to load ffmpeg-static', e)
+        // console.warn('[FFmpeg] Failed to load ffmpeg-static', e)
     }
 
-    // 4. システムパス (フォールバック)
+    // 3. システムパス (フォールバック)
     return 'ffmpeg'
 }
 
 export function getFFprobePath(): string {
-    // 1. ユーザーデータフォルダ
-    try {
-        const userDataPath = app ? app.getPath('userData') : '.'
-        const customPath = path.join(userDataPath, 'bin', getExecutableName('ffprobe'))
-        if (fs.existsSync(customPath)) {
-            console.log(`[FFprobe] Using custom path: ${customPath}`)
-            return customPath
-        }
-    } catch (e) {
-        console.warn('[FFprobe] Failed to check user data path', e)
-    }
-
-    // 2. バンドルされたパス
+    // 1. バンドルされたパス
     if (!isDev) {
         const bundledPath = path.join(process.resourcesPath, 'bin', getExecutableName('ffprobe'))
         if (fs.existsSync(bundledPath)) {
-            console.log(`[FFprobe] Using bundled path: ${bundledPath}`)
+            // console.log(`[FFprobe] Using bundled path: ${bundledPath}`)
             return bundledPath
         }
     }
 
-    // 3. 開発環境
+    // 2. 開発環境
     try {
         const ffprobeStatic = require('ffprobe-static')
         if (ffprobeStatic && ffprobeStatic.path && fs.existsSync(ffprobeStatic.path)) {
@@ -77,9 +53,9 @@ export function getFFprobePath(): string {
             return ffprobeStatic.path
         }
     } catch (e) {
-        console.warn('[FFprobe] Failed to load ffprobe-static', e)
+        // console.warn('[FFprobe] Failed to load ffprobe-static', e)
     }
 
-    // 4. システムパス
+    // 3. システムパス
     return 'ffprobe'
 }

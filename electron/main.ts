@@ -10,7 +10,6 @@ import { ServerConfig, RemoteLibrary } from '../src/types'
 import { getThumbnailPath } from './utils'
 import { generatePreviewImages, getMediaMetadata, createThumbnail, embedMetadata } from './ffmpeg'
 import { getFFmpegPath } from './ffmpeg-path'
-import { getCurrentFFmpegVersion, checkForAppUpdates, updateFFmpeg } from './ffmpeg-updater'
 import { initErrorLogger } from './error-logger'
 import { initSharedLibrary, serverConfigDB, sharedUserDB, SharedUser } from './shared-library'
 import { startServer, stopServer, isServerRunning } from './server'
@@ -1333,6 +1332,18 @@ ipcMain.handle('select-download-directory', async () => {
     return null
 })
 
+// ファイル選択ダイアログ（SSL証明書など）
+ipcMain.handle('select-file', async (_event, options: { title?: string; filters?: { name: string; extensions: string[] }[] }) => {
+    if (!mainWindow) return null
+    const result = await dialog.showOpenDialog(mainWindow, {
+        title: options.title || 'ファイルを選択',
+        properties: ['openFile'],
+        filters: options.filters || [{ name: 'All Files', extensions: ['*'] }]
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return result.filePaths[0]
+})
+
 // メディアのエクスポート（メタデータ埋め込み付き）
 ipcMain.handle('export-media', async (event, mediaId: number, options?: { notificationId?: string }) => {
     try {
@@ -1648,22 +1659,8 @@ async function callRemoteApi(baseUrl: string, token: string, path: string, metho
     }
 }
 
-// === FFmpeg Update Handlers ===
-
-
+// === FFmpeg Info Handler ===
 ipcMain.handle('ffmpeg-get-info', async () => {
-    const version = await getCurrentFFmpegVersion()
     const path = getFFmpegPath()
-    return { version, path }
-})
-
-ipcMain.handle('ffmpeg-check-update', async () => {
-    return await checkForAppUpdates()
-})
-
-ipcMain.handle('ffmpeg-update', async (event, url: string) => {
-    const onProgress = (progress: number) => {
-        event.sender.send('ffmpeg-update-progress', progress)
-    }
-    return await updateFFmpeg(url, onProgress)
+    return { version: 'bundled', path }
 })

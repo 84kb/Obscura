@@ -88,10 +88,22 @@ export default function App() {
         accessToken: activeRemoteLibrary?.token
     })
 
+
     // データ読み込み (ライブラリ切り替え時などに再実行)
     useEffect(() => {
         const loadAll = async () => {
             try {
+                // リモートライブラリの場合は接続確認してから読み込み
+                if (activeRemoteLibrary) {
+                    const { waitForRemoteConnection } = await import('./utils/remoteHealth')
+                    const connected = await waitForRemoteConnection(activeRemoteLibrary, myUserToken)
+
+                    if (!connected) {
+                        alert(`リモートライブラリ "${activeRemoteLibrary.name}" への接続に失敗しました。\nサーバーが起動していないか、ネットワークに問題があります。`)
+                        return
+                    }
+                }
+
                 await refreshLibrary()
                 await loadFolders()
                 // 他のデータも必要に応じて
@@ -103,7 +115,7 @@ export default function App() {
             }
         }
         loadAll()
-    }, [refreshLibrary, loadFolders, activeRemoteLibrary])
+    }, [refreshLibrary, loadFolders, activeRemoteLibrary, myUserToken])
 
     // Socketイベントハンドリング
     useEffect(() => {
