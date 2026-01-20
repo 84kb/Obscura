@@ -62,7 +62,8 @@ export async function waitForRemoteConnection(
                 console.log(`[Remote Health] Connection established using alternate protocol: ${altUrl}`)
                 return altUrl
             }
-            // プロトコル切り替えは各リトライで1回試すが、成功しなかった場合は元のURLでリトライ継続
+            // 一度試したらフラグをfalseにして、次回以降は試さない
+            tryAlternateProtocol = false
         }
 
         // 最後の試行でなければ待機
