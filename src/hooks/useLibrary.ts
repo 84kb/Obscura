@@ -288,6 +288,7 @@ export function useLibrary() {
             ...m,
             // サムネイルとファイルパスをリモートURLに置換
             // クエリパラメータでトークンを渡す (imgタグなどで読み込むため)
+            // 呼び出し側で ?width=... 等を追加する場合があるため、& で接続できるようにクエリ文字列を構築
             thumbnail_path: m.thumbnail_path ? `${baseUrl}/api/thumbnails/${m.id}?userToken=${userToken}&accessToken=${accessToken}` : '',
             file_path: `${baseUrl}/api/stream/${m.id}?userToken=${userToken}&accessToken=${accessToken}`,
             // webViewLinkなどがもしあればそれも変換検討だが、現在は file_path が重要
@@ -517,6 +518,7 @@ export function useLibrary() {
                 }
             }
             await window.electronAPI.addTagToMedia(mediaId, tagId)
+            await loadMediaFiles()
         } catch (error) {
             console.error('Failed to add tag to media:', error)
             // Error recovery
@@ -584,6 +586,7 @@ export function useLibrary() {
                 return
             }
             await window.electronAPI.addTagsToMedia(mediaIds, tagIds)
+            await loadMediaFiles()
         } catch (error) {
             console.error('Failed to add tags to media:', error)
             await loadMediaFiles()
@@ -607,6 +610,7 @@ export function useLibrary() {
 
         try {
             await window.electronAPI.addFolderToMedia(mediaId, folderId)
+            await loadMediaFiles()
         } catch (error) {
             console.error('Failed to add folder to media:', error)
             await loadMediaFiles()
@@ -870,7 +874,10 @@ export function useLibrary() {
                     throw e
                 }
             }
-            await window.electronAPI.renameMedia(id, newName)
+            const updatedMedia = await window.electronAPI.renameMedia(id, newName)
+            if (updatedMedia) {
+                setMediaFiles(prev => prev.map(m => m.id === id ? updatedMedia : m))
+            }
         } catch (error) {
             console.error('Failed to rename media:', error)
             await loadMediaFiles()
@@ -1186,6 +1193,11 @@ export function useLibrary() {
                     const artistA = a.artist || (a.artists && a.artists[0]) || ''
                     const artistB = b.artist || (b.artists && b.artists[0]) || ''
                     comparison = artistA.toLocaleLowerCase().localeCompare(artistB.toLocaleLowerCase())
+                    break
+                case 'tags':
+                    const tagsA = (a.tags || []).map(t => t.name).sort().join(', ')
+                    const tagsB = (b.tags || []).map(t => t.name).sort().join(', ')
+                    comparison = tagsA.localeCompare(tagsB, 'ja')
                     break
             }
             return filterOptions.sortDirection === 'asc' ? comparison : -comparison

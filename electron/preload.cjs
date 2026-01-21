@@ -91,6 +91,7 @@ try {
 
         // プレビュー
         generatePreviews: (mediaId) => ipcRenderer.invoke('generate-previews', mediaId),
+        extractSingleFrame: (filePath, timeSeconds, width) => ipcRenderer.invoke('extract-single-frame', filePath, timeSeconds, width),
 
         // ファイル操作
         openPath: (filePath) => ipcRenderer.invoke('open-path', filePath),
@@ -105,7 +106,8 @@ try {
         updateArtist: (mediaId, artist) => ipcRenderer.invoke('update-artist', mediaId, artist),
         updateDescription: (mediaId, description) => ipcRenderer.invoke('update-description', mediaId, description),
         updateUrl: (mediaId, url) => ipcRenderer.invoke('update-url', mediaId, url),
-        exportMedia: (mediaId) => ipcRenderer.invoke('export-media', mediaId),
+        exportMedia: (mediaId, options) => ipcRenderer.invoke('export-media', mediaId, options),
+        copyMediaToLibrary: (mediaIds, libraryPath, settings, options) => ipcRenderer.invoke('copy-media-to-library', mediaIds, libraryPath, settings, options),
 
         // キャプチャ
         onTriggerFrameCapture: (callback) => {
@@ -194,7 +196,7 @@ try {
 
         // 汎用イベントリスナー (ホワイトリスト形式)
         on: (channel, callback) => {
-            const validChannels = ['trigger-import', 'auto-import-complete', 'export-progress', 'download-progress'];
+            const validChannels = ['trigger-import', 'auto-import-complete', 'export-progress', 'download-progress', 'notification-progress'];
             if (validChannels.includes(channel)) {
                 // 自動的に購読解除できるようにラッパーを返すか、あるいは単純にonするか
                 // App.tsxの実装を見ると removeListener は使っていないようなので、

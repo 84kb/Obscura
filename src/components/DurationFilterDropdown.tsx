@@ -6,6 +6,7 @@ interface DurationFilterDropdownProps {
     filterOptions: FilterOptions
     onFilterChange: (options: FilterOptions) => void
     onClose: () => void
+    className?: string
 }
 
 type Unit = 'seconds' | 'minutes' | 'hours'
@@ -13,7 +14,8 @@ type Unit = 'seconds' | 'minutes' | 'hours'
 export function DurationFilterDropdown({
     filterOptions,
     onFilterChange,
-    onClose
+    onClose,
+    className
 }: DurationFilterDropdownProps) {
     const [min, setMin] = useState<string>('')
     const [max, setMax] = useState<string>('')
@@ -47,15 +49,13 @@ export function DurationFilterDropdown({
 
     }, [filterOptions.durationMin, filterOptions.durationMax, unit]) // unitが変わったら再計算したくないが、表示値を変える必要がある
 
-    // 外側クリックで閉じる
+    // ESCで閉じる
     useEffect(() => {
-        const handleClickOutside = (e: MouseEvent) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-                onClose()
-            }
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') onClose()
         }
-        document.addEventListener('mousedown', handleClickOutside)
-        return () => document.removeEventListener('mousedown', handleClickOutside)
+        document.addEventListener('keydown', handleKeyDown)
+        return () => document.removeEventListener('keydown', handleKeyDown)
     }, [onClose])
 
     const handleApply = (newMinStr: string, newMaxStr: string, newUnit: Unit) => {
@@ -135,7 +135,7 @@ export function DurationFilterDropdown({
     }
 
     return (
-        <div className="duration-filter-dropdown" ref={dropdownRef}>
+        <div className={`duration-filter-dropdown ${className || ''}`} ref={dropdownRef}>
             <div className="duration-filter-row">
                 <div className="duration-input-group">
                     <input

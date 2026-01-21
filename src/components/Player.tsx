@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { MediaFile, RemoteLibrary } from '../types'
 import { usePlayer } from '../hooks/usePlayer'
 import './Player.css'
 import { toMediaUrl } from '../utils/fileUrl'
+import { useContext } from 'react'
+import { ShortcutContext } from '../contexts/ShortcutContext'
 
 interface PlayerProps {
     media: MediaFile
@@ -68,12 +70,52 @@ export const Player: React.FC<PlayerProps> = ({
         myUserToken
     })
 
+    // ショートカットスコープの管理
+    const context = useContext(ShortcutContext)
+    useEffect(() => {
+        if (context) {
+            context.pushScope('player')
+            return () => {
+                context.popScope('player')
+            }
+        }
+    }, [])
+
+    // 戻るボタン押下時にメディアを明示的に停止してから戻る
+    const handleBack = () => {
+        const mediaElement = videoRef.current || audioRef.current
+        if (mediaElement) {
+            mediaElement.pause()
+            // ロード中の動画を完全に停止するためにsrcをクリアしてload()を呼ぶ
+            mediaElement.src = ''
+            mediaElement.load()
+        }
+        onBack()
+    }
+
+    // ESCキーで戻る
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                e.preventDefault()
+                handleBack()
+            }
+        }
+        window.addEventListener('keydown', handleKeyDown)
+        return () => window.removeEventListener('keydown', handleKeyDown)
+    }, [onBack])
+
     const [commentText, setCommentText] = useState('')
     const [showCommentInput, setShowCommentInput] = useState(false)
-    const [previews, setPreviews] = useState<string[]>([])
     const [previewTime, setPreviewTime] = useState<number | null>(null)
     const [previewImage, setPreviewImage] = useState<string | null>(null)
     const [previewX, setPreviewX] = useState(0)
+
+    // GPU加速プレビュー用のスロットリング
+    const lastPreviewTimeRef = useRef<number>(-1)
+    const lastRequestTimestampRef = useRef<number>(0) // 10msスロットル用
+    const previewVideoRef = useRef<HTMLVideoElement | null>(null)
+    const previewCanvasRef = useRef<HTMLCanvasElement | null>(null)
 
     // 表示モード（ウィンドウに合わせる / オリジナルサイズ）をlocalStorageから復元
     const [resizeMode, setResizeModeState] = useState<'contain' | 'scale-down'>(() => {
@@ -91,20 +133,34 @@ export const Player: React.FC<PlayerProps> = ({
     }
 
     // showControls関連のロジックを削除（常時表示のため）
+    // GPU加速プレビューを使用するため、ファイルベースのプレビュー読み込みは不要
 
-    // プレビュー生成と取得
+    // プレビュー用ビデオ要素を事前に初期化（ホバー時の初回遅延を防ぐ）
     useEffect(() => {
-        if (media && media.file_type === 'video') {
-            window.electronAPI.generatePreviews(media.id)
-                .then(files => {
-                    console.log('Previews loaded:', files.length)
-                    setPreviews(files)
-                })
-                .catch(err => console.error('Failed to load previews:', err))
-        } else {
-            setPreviews([])
+        if (!media || media.file_type !== 'video') {
+            // クリーンアップ
+            if (previewVideoRef.current) {
+                previewVideoRef.current.src = ''
+                previewVideoRef.current = null
+            }
+            return
         }
-    }, [media])
+
+        // 隠しビデオ要素を事前に作成・読み込み開始
+        const video = document.createElement('video')
+        video.src = toMediaUrl(media.file_path)
+        video.muted = true
+        video.preload = 'auto'  // メタデータとバッファを事前読み込み
+        video.style.display = 'none'
+        previewVideoRef.current = video
+
+        return () => {
+            if (previewVideoRef.current) {
+                previewVideoRef.current.src = ''
+                previewVideoRef.current = null
+            }
+        }
+    }, [media?.id])
 
     // 動画読み込み後に自動再生を開始（mediaが変更された時のみ）
     useEffect(() => {
@@ -229,9 +285,9 @@ export const Player: React.FC<PlayerProps> = ({
 
 
 
-    // シークバーのマウス移動ハンドラ
+    // シークバーのマウス移動ハンドラ（ブラウザGPU加速プレビュー）
     const handleSeekMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-        if (!media || !duration || previews.length === 0) return
+        if (!media || !duration || media.file_type !== 'video') return
 
         const rect = e.currentTarget.getBoundingClientRect()
         const x = e.clientX - rect.left
@@ -239,24 +295,56 @@ export const Player: React.FC<PlayerProps> = ({
         // 0以上duration以下にクランプ
         const hoverTime = Math.max(0, Math.min(duration, (x / width) * duration))
 
+        // 時間は常に表示
         setPreviewTime(hoverTime)
         setPreviewX(x)
 
-        // 適切なプレビュー画像を選択 (1秒間隔に変更: Eagleスタイル)
-        const interval = 1
-        const index = Math.floor(hoverTime / interval) + 1
-        // ゼロ埋め3桁
-        const filename = `preview_${index.toString().padStart(3, '0')}.jpg`
+        // 10msスロットル: 前回のリクエストから10ms以内ならスキップ
+        const now = Date.now()
+        if (now - lastRequestTimestampRef.current < 10) return
+        lastRequestTimestampRef.current = now
 
-        // パスの一部が含まれるファイルを探す
-        const found = previews.find(p => p.endsWith(filename) || p.endsWith(`\\${filename}`) || p.endsWith(`/${filename}`))
+        // キャンバスを初期化（初回のみ）
+        if (!previewCanvasRef.current) {
+            previewCanvasRef.current = document.createElement('canvas')
+            previewCanvasRef.current.width = 160 // プレビューサイズ
+            previewCanvasRef.current.height = 90
+        }
 
-        setPreviewImage(found ? toMediaUrl(found) : null)
+        // プレビュー用ビデオ要素がまだなければスキップ（useEffectで初期化中）
+        if (!previewVideoRef.current) return
+
+        const video = previewVideoRef.current
+        const canvas = previewCanvasRef.current
+
+        // 同じ時間（秒単位）ならスキップ（パフォーマンス最適化）
+        const roundedTime = Math.floor(hoverTime)
+        if (roundedTime === lastPreviewTimeRef.current) return
+        lastPreviewTimeRef.current = roundedTime
+
+        // シークしてフレームをキャプチャ
+        video.currentTime = hoverTime
+
+        // seeked イベントでフレームキャプチャ
+        const handleSeeked = () => {
+            const ctx = canvas.getContext('2d')
+            if (ctx && video.videoWidth > 0) {
+                // アスペクト比を維持してキャンバスサイズを調整
+                const aspectRatio = video.videoWidth / video.videoHeight
+                canvas.width = 160
+                canvas.height = Math.round(160 / aspectRatio)
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+                setPreviewImage(canvas.toDataURL('image/jpeg', 0.7))
+            }
+            video.removeEventListener('seeked', handleSeeked)
+        }
+        video.addEventListener('seeked', handleSeeked)
     }
 
     const handleSeekMouseLeave = () => {
         setPreviewTime(null)
         setPreviewImage(null)
+        lastPreviewTimeRef.current = -1
     }
 
     // コメント送信
@@ -381,7 +469,7 @@ export const Player: React.FC<PlayerProps> = ({
             {/* ヘッダーバー (上部固定) */}
             <div className="player-header-bar">
                 <div className="header-left">
-                    <button className="header-back-button" onClick={onBack}>
+                    <button className="header-back-button" onClick={handleBack}>
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <line x1="19" y1="12" x2="5" y2="12"></line>
                             <polyline points="12 19 5 12 12 5"></polyline>
@@ -447,6 +535,19 @@ export const Player: React.FC<PlayerProps> = ({
                         ref={videoRef}
                         src={fileUrl}
                         className="player-video"
+                        autoPlay
+                        preload="auto"
+                        onLoadStart={() => {
+                            console.log(`[Player] Video load start: ${fileUrl}`);
+                            console.time('VideoLoad');
+                        }}
+                        onLoadedMetadata={() => {
+                            console.timeEnd('VideoLoad');
+                            console.log('[Player] Metadata loaded', { duration: videoRef.current?.duration });
+                        }}
+                        onWaiting={() => console.log('[Player] Waiting for data...')}
+                        onCanPlay={() => console.log('[Player] Can play')}
+                        onStalled={() => console.warn('[Player] Stalled!')}
                         style={resizeMode === 'contain'
                             ? { width: '100%', height: '100%', objectFit: 'contain' }
                             : { maxWidth: '100%', maxHeight: '100%', objectFit: 'scale-down' }

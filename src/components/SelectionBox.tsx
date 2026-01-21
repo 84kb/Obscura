@@ -6,16 +6,17 @@ interface SelectionBoxProps {
     left: number;
     width: number;
     height: number;
+    position?: 'fixed' | 'absolute';
 }
 
-const SelectionBox: React.FC<SelectionBoxProps> = ({ top, left, width, height }) => {
+const SelectionBox: React.FC<SelectionBoxProps> = ({ top, left, width, height, position = 'absolute' }) => {
     if (width <= 0 || height <= 0) return null;
 
     return (
         <div
             className="selection-box"
             style={{
-                position: 'fixed',
+                position: position,
                 top: `${top}px`,
                 left: `${left}px`,
                 width: `${width}px`,

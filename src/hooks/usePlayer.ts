@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { MediaFile } from '../types'
 import { toMediaUrl } from '../utils/fileUrl'
+import { useShortcut } from '../contexts/ShortcutContext'
 
 interface UsePlayerProps {
     media?: MediaFile
@@ -12,7 +13,7 @@ interface UsePlayerProps {
 export function usePlayer({ media, onNext, onPrev, pipControlMode = 'navigation' }: UsePlayerProps = {}) {
     const [isPlaying, setIsPlaying] = useState(false)
     const [currentTime, setCurrentTime] = useState(0)
-    const [duration, setDuration] = useState(0)
+    const [duration, setDuration] = useState(media?.duration || 0)
 
     // 設定をlocalStorageから読み込む
     const [volume, setVolume] = useState(() => {
@@ -147,6 +148,14 @@ export function usePlayer({ media, onNext, onPrev, pipControlMode = 'navigation'
         media.currentTime = Math.max(0, media.currentTime - seconds)
     }
 
+    const increaseVolume = () => {
+        changeVolume(Math.min(1, volume + 0.1))
+    }
+
+    const decreaseVolume = () => {
+        changeVolume(Math.max(0, volume - 0.1))
+    }
+
     // 音量変更
     const changeVolume = (newVolume: number) => {
         const media = videoRef.current || audioRef.current
@@ -199,36 +208,27 @@ export function usePlayer({ media, onNext, onPrev, pipControlMode = 'navigation'
     }
 
     // キーボードショートカット
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            // 入力フィールド等では無効化
-            if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-
-            switch (e.code) {
-                case 'Space':
-                    e.preventDefault()
-                    togglePlay()
-                    break
-                case 'ArrowRight':
-                    forward()
-                    break
-                case 'ArrowLeft':
-                    rewind()
-                    break
-                case 'KeyF':
-                    toggleFullscreen()
-                    break
-                case 'KeyM':
-                    toggleMute()
-                    break
-            }
+    useShortcut('PLAYER_TOGGLE_PLAY', togglePlay, { scope: 'player' })
+    useShortcut('PLAYER_FORWARD', () => forward(), { scope: 'player' })
+    useShortcut('PLAYER_REWIND', () => rewind(), { scope: 'player' })
+    useShortcut('PLAYER_STEP_FORWARD', () => {
+        const mediaElement = videoRef.current || audioRef.current
+        if (mediaElement && mediaElement.paused) {
+            const fps = media?.framerate || 30
+            mediaElement.currentTime = Math.min(mediaElement.duration, mediaElement.currentTime + (1 / fps))
         }
-
-        window.addEventListener('keydown', handleKeyDown)
-        return () => {
-            window.removeEventListener('keydown', handleKeyDown)
+    }, { scope: 'player' })
+    useShortcut('PLAYER_STEP_BACKWARD', () => {
+        const mediaElement = videoRef.current || audioRef.current
+        if (mediaElement && mediaElement.paused) {
+            const fps = media?.framerate || 30
+            mediaElement.currentTime = Math.max(0, mediaElement.currentTime - (1 / fps))
         }
-    }, [isPlaying, isMuted])
+    }, { scope: 'player' })
+    useShortcut('PLAYER_TOGGLE_FULLSCREEN', toggleFullscreen, { scope: 'player' })
+    useShortcut('PLAYER_TOGGLE_MUTE', toggleMute, { scope: 'player' })
+    useShortcut('PLAYER_VOLUME_UP', increaseVolume, { scope: 'player' })
+    useShortcut('PLAYER_VOLUME_DOWN', decreaseVolume, { scope: 'player' })
 
     // メディア要素のイベントリスナー設定
     useEffect(() => {
@@ -298,6 +298,21 @@ export function usePlayer({ media, onNext, onPrev, pipControlMode = 'navigation'
             }
         }
     }, [videoRef.current, audioRef.current, isLooping]) // メディア要素が切り替わった時に再実行
+
+    // コンポーネントアンマウント時にメディアを確実に停止
+    useEffect(() => {
+        return () => {
+            const video = videoRef.current
+            const audio = audioRef.current
+            // pause()のみ実行（srcクリアは副作用を起こす可能性があるため削除）
+            if (video) {
+                video.pause()
+            }
+            if (audio) {
+                audio.pause()
+            }
+        }
+    }, []) // 空の依存配列でアンマウント時のみ実行
 
     // PiP (Picture-in-Picture)
     const [isPiP, setIsPiP] = useState(false)
@@ -435,7 +450,9 @@ export function usePlayer({ media, onNext, onPrev, pipControlMode = 'navigation'
         return () => {
             isMounted = false
             if (objectUrl) {
-                URL.revokeObjectURL(objectUrl)
+                // 即座に破棄するとブラウザの読み込みと競合して404になることがあるため、遅延させる
+                const urlToRevoke = objectUrl
+                setTimeout(() => URL.revokeObjectURL(urlToRevoke), 10000)
             }
             if (navigator.mediaSession) {
                 navigator.mediaSession.setActionHandler('play', null)

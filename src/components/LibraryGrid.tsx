@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { MediaFile, ViewSettings } from '../types'
 import { MediaCard } from './MediaCard'
 import SelectionBox from './SelectionBox'
 import { experimental_VGrid as VGrid, VGridHandle } from 'virtua'
+import { ShortcutContext, useShortcut } from '../contexts/ShortcutContext'
 import './LibraryGrid.css'
 
 interface LibraryGridProps {
@@ -45,6 +46,14 @@ export function LibraryGrid({
     const containerRef = useRef<HTMLDivElement | null>(null);
     const gridRef = useRef<VGridHandle>(null);
     const dragCurrentPosRef = useRef<{ x: number, y: number } | null>(null);
+
+    // Shortcut Context
+    const { pushScope, popScope } = React.useContext(ShortcutContext)!;
+
+    useEffect(() => {
+        pushScope('library');
+        return () => popScope('library');
+    }, [pushScope, popScope]);
 
     // Track container size for math-based selection
     const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
@@ -153,6 +162,83 @@ export function LibraryGrid({
 
         return { columnCount, itemWidth, itemHeight, cellWidth: finalCellWidth };
     };
+
+    const handleNavigation = useCallback((direction: 'up' | 'down' | 'left' | 'right') => {
+        if (mediaFiles.length === 0) return;
+
+        let currentIndex = -1;
+        if (selectedMediaIds.length > 0) {
+            // Use the last selected item as the anchor
+            const lastId = selectedMediaIds[selectedMediaIds.length - 1];
+            currentIndex = mediaFiles.findIndex(m => m.id === lastId);
+        }
+
+        // If nothing selected, select first
+        if (currentIndex === -1) {
+            if (mediaFiles.length > 0 && onSelectionChange) {
+                onSelectionChange([mediaFiles[0].id]);
+                gridRef.current?.scrollToIndex(0);
+            }
+            return;
+        }
+
+        let nextIndex = currentIndex;
+
+        // List mode is effectively 1 column
+        let cols = 1;
+
+        // Grid mode
+        const { columnCount } = getLayoutInfo();
+        cols = columnCount;
+
+        switch (direction) {
+            case 'up':
+                nextIndex = currentIndex - cols;
+                break;
+            case 'down':
+                nextIndex = currentIndex + cols;
+                break;
+            case 'left':
+                nextIndex = currentIndex - 1;
+                break;
+            case 'right':
+                nextIndex = currentIndex + 1;
+                break;
+        }
+
+        // Boundary checks
+        if (nextIndex >= 0 && nextIndex < mediaFiles.length) {
+            const nextMedia = mediaFiles[nextIndex];
+            if (onSelectionChange) onSelectionChange([nextMedia.id]);
+
+            // Smart scroll: calculation based
+            const { itemHeight, columnCount } = getLayoutInfo();
+            // GAP and PADDING are available in scope
+            const rowHeight = itemHeight + GAP;
+
+            const rowIndex = Math.floor(nextIndex / columnCount);
+            const rowTop = PADDING + rowIndex * rowHeight;
+            const rowBottom = rowTop + itemHeight; // visual bottom of item
+
+            const container = document.getElementById('library-vgrid-container');
+            if (container) {
+                const scrollTop = container.scrollTop;
+                const clientHeight = container.clientHeight;
+
+                if (rowTop < scrollTop) {
+                    container.scrollTop = rowTop;
+                } else if (rowBottom > scrollTop + clientHeight) {
+                    container.scrollTop = rowBottom - clientHeight;
+                }
+            }
+        }
+    }, [mediaFiles, selectedMediaIds, onSelectionChange, gridSize, containerSize]); // Added dependencies
+
+    // Register shortcuts with 'library' scope
+    useShortcut('NAV_UP', () => handleNavigation('up'), { scope: 'library' });
+    useShortcut('NAV_DOWN', () => handleNavigation('down'), { scope: 'library' });
+    useShortcut('NAV_LEFT', () => handleNavigation('left'), { scope: 'library' });
+    useShortcut('NAV_RIGHT', () => handleNavigation('right'), { scope: 'library' });
 
     const handleMouseDown = (e: React.MouseEvent) => {
         // Only trigger on left click
@@ -318,6 +404,23 @@ export function LibraryGrid({
 
     const { itemWidth, itemHeight, cellWidth, columnCount } = getLayoutInfo();
 
+    const handleDragGetPaths = (draggedIdStr: string) => {
+        const draggedId = Number(draggedIdStr) // ID型変換 (string -> number)
+        const isSelected = selectedMediaIds.includes(draggedId)
+
+        // 選択されているアイテムをドラッグした場合: 選択されている全アイテムのパスを返す
+        if (isSelected) {
+            return mediaFiles
+                .filter(m => selectedMediaIds.includes(m.id))
+                .map(m => m.file_path)
+        }
+
+        // 選択されていないアイテムをドラッグした場合: そのアイテムのみのパスを返す
+        // (本来はここでも選択状態等を更新するロジックが走るべきかもしれないが、現状はドラッグ対象のみとする)
+        const target = mediaFiles.find(m => m.id === draggedId)
+        return target ? [target.file_path] : []
+    }
+
     return (
         <div
             ref={setContainerRef}
@@ -331,6 +434,7 @@ export function LibraryGrid({
             {selectionBox}
             <VGrid
                 ref={gridRef}
+                id="library-vgrid-container"
                 key={`${gridSize}-${columnCount}-${containerSize.width}-${mediaFiles.length}-${mediaFiles[0]?.id || 'empty'}`}
                 row={Math.ceil(mediaFiles.length / columnCount)}
                 col={columnCount}
@@ -370,6 +474,7 @@ export function LibraryGrid({
                                 isRenaming={renamingMediaId === media.id}
                                 onRenameSubmit={(newName) => onRenameSubmit?.(media.id, newName)}
                                 onRenameCancel={onRenameCancel}
+                                onDragGetPaths={handleDragGetPaths}
                             />
                         </div>
                     );

@@ -115,9 +115,29 @@
     background: rgba(255, 59, 48, 0.1);
 }
 
-.folder-filter-item input[type="checkbox"] {
-    accent-color: var(--primary);
-    cursor: pointer;
+.folder-checkbox {
+    width: 16px;
+    height: 16px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.folder-filter-item.selected .folder-checkbox {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: white;
+}
+
+.folder-filter-item.excluded .folder-checkbox {
+    border-color: #ff3b30;
+    background: #ff3b30;
+    color: white;
 }
 
 .folder-filter-item .folder-name {
@@ -157,4 +177,37 @@
 
 .folder-filter-footer u {
     text-decoration: underline;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes fadeOut {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+    to {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+}
+
+.folder-filter-dropdown {
+    animation: fadeIn 0.15s ease-out;
+}
+
+.folder-filter-dropdown.closing {
+    animation: fadeOut 0.15s ease-in forwards;
+    pointer-events: none;
 }

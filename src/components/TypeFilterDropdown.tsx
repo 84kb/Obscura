@@ -7,26 +7,17 @@ interface TypeFilterDropdownProps {
     counts: Record<string, number>
     onFilterChange: (options: FilterOptions) => void
     onClose: () => void
+    className?: string
 }
 
 export function TypeFilterDropdown({
     filterOptions,
     counts,
     onFilterChange,
-    onClose
+    onClose,
+    className
 }: TypeFilterDropdownProps) {
     const dropdownRef = useRef<HTMLDivElement>(null)
-
-    // 外側クリックで閉じる
-    useEffect(() => {
-        const handleClickOutside = (e: MouseEvent) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-                onClose()
-            }
-        }
-        document.addEventListener('mousedown', handleClickOutside)
-        return () => document.removeEventListener('mousedown', handleClickOutside)
-    }, [onClose])
 
     // ESCで閉じる
     useEffect(() => {
@@ -84,7 +75,7 @@ export function TypeFilterDropdown({
     const extensions = Object.keys(counts).sort((a, b) => b.localeCompare(a))
 
     return (
-        <div className="type-filter-dropdown" ref={dropdownRef} onContextMenu={(e) => e.preventDefault()}>
+        <div className={`type-filter-dropdown ${className || ''}`} ref={dropdownRef} onContextMenu={(e) => e.preventDefault()}>
             <div className="type-filter-list">
                 {extensions.map(ext => {
                     const isSelected = (filterOptions.selectedExtensions || []).includes(ext)
@@ -98,12 +89,8 @@ export function TypeFilterDropdown({
                             onContextMenu={(e) => handleItemClick(e, ext)}
                         >
                             <div className="type-checkbox">
-                                <input
-                                    type="checkbox"
-                                    checked={isSelected}
-                                    readOnly
-                                    className={isExcluded ? 'excluded-checkbox' : ''}
-                                />
+                                {isSelected && <span className="check-mark">✓</span>}
+                                {isExcluded && <span className="exclude-mark">×</span>}
                             </div>
                             <span className={`type-name ${isExcluded ? 'excluded-text' : ''}`}>
                                 {ext.toUpperCase() || 'UNKNOWN'}

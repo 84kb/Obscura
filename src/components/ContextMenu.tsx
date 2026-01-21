@@ -18,6 +18,8 @@ interface ContextMenuProps {
     onMoveToTrash: () => void
     onDownload?: () => void
     onExport?: (media: MediaFile) => void
+    availableLibraries?: { name: string; path: string }[]
+    onAddToLibrary?: (libraryId: string) => void
 }
 
 export function ContextMenu({
@@ -35,7 +37,9 @@ export function ContextMenu({
     onCopyPath,
     onMoveToTrash,
     onDownload,
-    onExport
+    onExport,
+    availableLibraries,
+    onAddToLibrary
 }: ContextMenuProps) {
     const menuRef = useRef<HTMLDivElement>(null)
 
@@ -152,6 +156,38 @@ export function ContextMenu({
                 </div>
             </div>
 
+
+            {/* 他のライブラリに追加サブメニュー */}
+            {
+                onAddToLibrary && availableLibraries && availableLibraries.length > 0 && (
+                    <div className="context-menu-item has-submenu">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M20 14.66V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5.34" />
+                            <polygon points="18 2 22 6 12 16 8 16 8 12 18 2" />
+                        </svg>
+                        <span>他のライブラリに追加</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="submenu-arrow">
+                            <polyline points="9 18 15 12 9 6" />
+                        </svg>
+                        <div className="context-submenu">
+                            {availableLibraries.map(lib => (
+                                <div
+                                    key={lib.path}
+                                    className="context-menu-item"
+                                    onClick={() => onAddToLibrary(lib.path)}
+                                >
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                                    </svg>
+                                    <span>{lib.name}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )
+            }
+
             <div className="context-menu-separator" />
 
             <div className="context-menu-item" onClick={onRename}>
@@ -162,27 +198,31 @@ export function ContextMenu({
                 <span>名前の変更</span>
             </div>
 
-            {onExport && (
-                <div className="context-menu-item" onClick={() => onExport(media)}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                        <polyline points="7 10 12 15 17 10" />
-                        <line x1="12" y1="15" x2="12" y2="3" />
-                    </svg>
-                    <span>エクスポート</span>
-                </div>
-            )}
+            {
+                onExport && (
+                    <div className="context-menu-item" onClick={() => onExport(media)}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <polyline points="7 10 12 15 17 10" />
+                            <line x1="12" y1="15" x2="12" y2="3" />
+                        </svg>
+                        <span>エクスポート</span>
+                    </div>
+                )
+            }
 
-            {onDownload && (
-                <div className="context-menu-item" onClick={onDownload}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                        <polyline points="7 10 12 15 17 10" />
-                        <line x1="12" y1="15" x2="12" y2="3" />
-                    </svg>
-                    <span>ダウンロード</span>
-                </div>
-            )}
+            {
+                onDownload && (
+                    <div className="context-menu-item" onClick={onDownload}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <polyline points="7 10 12 15 17 10" />
+                            <line x1="12" y1="15" x2="12" y2="3" />
+                        </svg>
+                        <span>ダウンロード</span>
+                    </div>
+                )
+            }
 
             <div className="context-menu-item" onClick={onCopy}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -209,6 +249,6 @@ export function ContextMenu({
                 </svg>
                 <span>ゴミ箱へ移動</span>
             </div>
-        </div>
+        </div >
     )
 }

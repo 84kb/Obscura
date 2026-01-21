@@ -418,7 +418,7 @@
     gap: 6px;
 }
 
-.sidebar-sub-genres {
+.sidebar-sub-folders {
     display: flex;
     flex-direction: column;
     gap: 0;
@@ -434,7 +434,7 @@
 }
 
 /* 縦線（兄弟間） - サブフォルダー内のみ */
-.sidebar-sub-genres>.folder-tree-container::before {
+.sidebar-sub-folders>.folder-tree-container::before {
     content: '';
     position: absolute;
     left: -11px;
@@ -447,7 +447,7 @@
 }
 
 /* 最後の要素は線を中心で止める（L字） */
-.sidebar-sub-genres>.folder-tree-container:last-child::before {
+.sidebar-sub-folders>.folder-tree-container:last-child::before {
     height: 22px;
     /* folder-tree-nodeの中心（高さ約44pxの半分） */
     bottom: auto;
@@ -462,7 +462,7 @@
 }
 
 /* 横線（分岐） - サブフォルダー内のみ */
-.sidebar-sub-genres>.folder-tree-container>.folder-tree-node::after {
+.sidebar-sub-folders>.folder-tree-container>.folder-tree-node::after {
     content: '';
     position: absolute;
     left: -11px;
@@ -559,8 +559,8 @@
 }
 
 .sidebar-input-tiny:focus {
-    border-color: var(--primary);
-    box-shadow: 0 0 0 3px rgba(255, 140, 66, 0.1);
+    border-color: var(--primary-light);
+    box-shadow: 0 0 0 3px rgba(255, 140, 66, 0.4);
 }
 
 .sidebar-create-form {
@@ -604,7 +604,10 @@
     padding-right: 8px;
 
     /* トグルボタンのクリッピングを防ぐため左側を拡張 */
-    /* CRITICAL: Do not remove this negative margin layout. It allows the toggle button to be visible outside the content area. */
+    /* CRITICAL: Do not remove// (Applying multiple chunks in one go via multi_replace if possible, but replace_file_content is single block)
+// I will use multi_replace for Sidebar.tsx as it needs changes in Props definition and multiple rendering locations.
+// Waiting for next step to use multi_replace.
+ */
     margin-left: calc(var(--spacing-lg) * -1);
     padding-left: var(--spacing-lg);
 }
@@ -671,7 +674,18 @@
     box-shadow: 0 0 0 3px rgba(255, 140, 66, 0.2);
 }
 
-.sidebar-input-tiny:focus {
-    border-color: var(--primary-light);
-    box-shadow: 0 0 0 3px rgba(255, 140, 66, 0.4);
+
+
+/* Sidebar Item Counts */
+.sidebar-count {
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 12px;
+    color: #888;
+    margin-left: auto;
+    padding-left: 8px;
+    font-weight: normal;
+}
+
+.sidebar-nav-item.active .sidebar-count {
+    color: rgba(255, 255, 255, 0.7);
 }

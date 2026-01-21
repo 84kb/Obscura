@@ -14,27 +14,18 @@ interface FolderFilterDropdownProps {
     filterOptions: FilterOptions
     onFilterChange: (options: FilterOptions) => void
     onClose: () => void
+    className?: string
 }
 
 export function FolderFilterDropdown({
     folders,
     filterOptions,
     onFilterChange,
-    onClose
+    onClose,
+    className
 }: FolderFilterDropdownProps) {
     const [searchQuery, setSearchQuery] = useState('')
     const dropdownRef = useRef<HTMLDivElement>(null)
-
-    // 外側クリックで閉じる
-    useEffect(() => {
-        const handleClickOutside = (e: MouseEvent) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-                onClose()
-            }
-        }
-        document.addEventListener('mousedown', handleClickOutside)
-        return () => document.removeEventListener('mousedown', handleClickOutside)
-    }, [onClose])
 
     // ESCで閉じる
     useEffect(() => {
@@ -112,7 +103,7 @@ export function FolderFilterDropdown({
     const isAllVisibleSelected = filteredFolders.length > 0 && filteredFolders.every(f => filterOptions.selectedFolders.includes(f.id))
 
     return (
-        <div className="folder-filter-dropdown" ref={dropdownRef}>
+        <div className={`folder-filter-dropdown ${className || ''}`} ref={dropdownRef}>
             {/* ヘッダー: 検索とルール */}
             <div className="folder-filter-header">
                 <div className="folder-filter-search">
@@ -166,11 +157,9 @@ export function FolderFilterDropdown({
                             onClick={() => toggleFolder(folder.id)}
                             onContextMenu={(e) => handleFolderContextMenu(e, folder.id)}
                         >
-                            <input
-                                type="checkbox"
-                                checked={isSelected}
-                                readOnly
-                            />
+                            <div className="folder-checkbox">
+                                {isSelected && <span className="check-mark">✓</span>}
+                            </div>
                             <span className={`folder-name`}>{folder.name}</span>
                             <span className="folder-count">{folder.count.toLocaleString()}</span>
                         </div>
@@ -178,11 +167,9 @@ export function FolderFilterDropdown({
                 })}
                 {filteredFolders.length > 0 && (
                     <div className="folder-filter-item select-all" onClick={selectAll}>
-                        <input
-                            type="checkbox"
-                            checked={isAllVisibleSelected}
-                            readOnly
-                        />
+                        <div className="folder-checkbox">
+                            {isAllVisibleSelected && <span className="check-mark">✓</span>}
+                        </div>
                         <span className="folder-name">すべてを選択</span>
                     </div>
                 )}

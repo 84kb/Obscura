@@ -12,27 +12,18 @@ interface ArtistFilterDropdownProps {
     filterOptions: FilterOptions
     onFilterChange: (options: FilterOptions) => void
     onClose: () => void
+    className?: string
 }
 
 export function ArtistFilterDropdown({
     artists,
     filterOptions,
     onFilterChange,
-    onClose
+    onClose,
+    className
 }: ArtistFilterDropdownProps) {
     const [searchQuery, setSearchQuery] = useState('')
     const dropdownRef = useRef<HTMLDivElement>(null)
-
-    // 外側クリックで閉じる
-    useEffect(() => {
-        const handleClickOutside = (e: MouseEvent) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-                onClose()
-            }
-        }
-        document.addEventListener('mousedown', handleClickOutside)
-        return () => document.removeEventListener('mousedown', handleClickOutside)
-    }, [onClose])
 
     // ESCで閉じる
     useEffect(() => {
@@ -103,7 +94,7 @@ export function ArtistFilterDropdown({
         filteredArtists.every(a => filterOptions.selectedArtists?.includes(a.name))
 
     return (
-        <div className="artist-filter-dropdown" ref={dropdownRef}>
+        <div className={`artist-filter-dropdown ${className || ''}`} ref={dropdownRef}>
             <div className="artist-filter-header">
                 <div className="artist-filter-search">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

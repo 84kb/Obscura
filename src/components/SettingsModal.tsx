@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useContext } from 'react'
 import { AppSettings, Library, ClientConfig, AutoImportPath } from '../types'
+import { ShortcutContext, ShortcutAction } from '../contexts/ShortcutContext'
 import './SettingsModal.css'
 
 interface SettingsModalProps {
@@ -238,9 +239,71 @@ const PERMISSION_LABELS: Record<string, string> = {
     'FULL': 'フル'
 }
 
+const SHORTCUT_LABELS: Record<string, string> = {
+    'PLAYER_TOGGLE_PLAY': '再生 / 一時停止',
+    'PLAYER_FORWARD': '10秒進む',
+    'PLAYER_REWIND': '10秒戻る',
+    'PLAYER_STEP_FORWARD': '1フレーム進む (停止中のみ)',
+    'PLAYER_STEP_BACKWARD': '1フレーム戻る (停止中のみ)',
+    'PLAYER_VOLUME_UP': '音量を上げる',
+    'PLAYER_VOLUME_DOWN': '音量を下げる',
+    'PLAYER_TOGGLE_MUTE': 'ミュート切り替え',
+    'PLAYER_TOGGLE_FULLSCREEN': 'フルスクリーン切り替え',
+
+    'NAV_ENTER': 'アイテムを開く',
+    'NAV_BACK': '戻る',
+    'NAV_UP': '上へ移動',
+    'NAV_DOWN': '下へ移動',
+    'NAV_LEFT': '左へ移動',
+    'NAV_RIGHT': '右へ移動'
+}
+
+type ShortcutCategory = 'Player' | 'Navigation'
+const SHORTCUT_CATEGORIES: Record<ShortcutCategory, ShortcutAction[]> = {
+    'Player': [
+        'PLAYER_TOGGLE_PLAY', 'PLAYER_FORWARD', 'PLAYER_REWIND',
+        'PLAYER_STEP_FORWARD', 'PLAYER_STEP_BACKWARD',
+        'PLAYER_VOLUME_UP', 'PLAYER_VOLUME_DOWN',
+        'PLAYER_TOGGLE_MUTE', 'PLAYER_TOGGLE_FULLSCREEN'
+    ],
+    'Navigation': [
+        'NAV_UP', 'NAV_DOWN', 'NAV_LEFT', 'NAV_RIGHT',
+        'NAV_ENTER', 'NAV_BACK'
+    ]
+}
+
 export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsModalProps) {
     const [activeCategory, setActiveCategory] = useState<Category>('general')
     const [appVersion, setAppVersion] = useState<string>('Unknown')
+
+    // ショートカット関連
+    const shortcutContext = useContext(ShortcutContext)
+    const [recordingAction, setRecordingAction] = useState<ShortcutAction | null>(null)
+
+    // キー録音処理
+    useEffect(() => {
+        if (!recordingAction || !shortcutContext) return
+
+        const handleRecordKeyDown = (e: KeyboardEvent) => {
+            e.preventDefault()
+            e.stopPropagation()
+
+            // 修飾キーのみの場合は無視（組み合わせ用）
+            // 今回はシンプルに単一キーまたは修飾キー+キーを文字列化
+            if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return
+
+            const code = e.code
+            // 保存
+            shortcutContext.setKeyBinding(recordingAction, code)
+            setRecordingAction(null)
+        }
+
+        // キャプチャフェーズでイベントを横取りする
+        window.addEventListener('keydown', handleRecordKeyDown, { capture: true })
+        return () => {
+            window.removeEventListener('keydown', handleRecordKeyDown, { capture: true })
+        }
+    }, [recordingAction, shortcutContext])
 
     useEffect(() => {
         if (window.electronAPI && (window.electronAPI as any).getAppVersion) {
@@ -248,19 +311,22 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
         }
     }, [])
 
-    const categories: { id: Category; label: string; icon: JSX.Element }[] = [
-        { id: 'general', label: 'よく使う', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg> },
-        { id: 'network', label: 'ネットワーク', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg> },
-        { id: 'sidebar', label: 'サイドバー', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg> },
-        { id: 'controls', label: 'コントロール', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path></svg> },
-        { id: 'viewer', label: 'ビューアー', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg> },
-        { id: 'screenshot', label: 'スクリーンショット', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg> },
-        { id: 'shortcuts', label: 'ショートカット', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect><line x1="6" y1="8" x2="6" y2="8"></line><line x1="10" y1="8" x2="10" y2="8"></line><line x1="14" y1="8" x2="14" y2="8"></line><line x1="18" y1="8" x2="18" y2="8"></line><line x1="6" y1="12" x2="6" y2="12"></line><line x1="10" y1="12" x2="10" y2="12"></line><line x1="14" y1="12" x2="14" y2="12"></line><line x1="18" y1="12" x2="18" y2="12"></line><line x1="7" y1="16" x2="17" y2="16"></line></svg> },
-        { id: 'notification', label: '通知', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg> },
-        { id: 'password', label: 'パスワード', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg> },
-        { id: 'import', label: '自動インポート', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> },
-        { id: 'media-engine', label: 'メディアエンジン', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> },
-        { id: 'developer', label: '開発者', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg> },
+    const categories: { id: Category; label: string; icon: JSX.Element; group: string }[] = [
+        // 基本
+        { id: 'general', label: '基本設定', group: '基本', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg> },
+        { id: 'profile', label: 'プロフィール', group: '基本', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg> },
+
+        // 表示・操作
+        { id: 'viewer', label: 'ビューアー', group: '表示・操作', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg> },
+        { id: 'shortcuts', label: 'ショートカット', group: '表示・操作', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect><line x1="6" y1="8" x2="6" y2="8"></line><line x1="10" y1="8" x2="10" y2="8"></line><line x1="14" y1="8" x2="14" y2="8"></line><line x1="18" y1="8" x2="18" y2="8"></line><line x1="6" y1="12" x2="6" y2="12"></line><line x1="10" y1="12" x2="10" y2="12"></line><line x1="14" y1="12" x2="14" y2="12"></line><line x1="18" y1="12" x2="18" y2="12"></line><line x1="7" y1="16" x2="17" y2="16"></line></svg> },
+
+        // ライブラリ
+        { id: 'import', label: 'インポート・ダウンロード', group: 'ライブラリ', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> },
+        { id: 'media-engine', label: 'メディアエンジン', group: 'ライブラリ', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> },
+        { id: 'network', label: 'ネットワーク同期', group: 'ライブラリ', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg> },
+
+        // システム
+        { id: 'developer', label: '開発者ツール', group: 'システム', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg> },
     ]
 
     const handleToggle = (key: keyof AppSettings) => {
@@ -457,6 +523,82 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         )}
                     </div>
                 </section>
+            </div>
+        )
+    }
+
+    const renderShortcutsSettings = () => {
+        if (!shortcutContext) return null
+        const keyMap = shortcutContext.getKeyMap()
+
+        return (
+            <div className="settings-page">
+                <h3 className="settings-page-title">ショートカット設定</h3>
+                <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => {
+                            if (confirm('すべてのショートカットを初期設定に戻しますか？')) {
+                                shortcutContext.resetKeyMap()
+                            }
+                        }}
+                    >
+                        デフォルトに戻す
+                    </button>
+                </div>
+
+                {Object.entries(SHORTCUT_CATEGORIES).map(([category, actions]) => {
+                    // カテゴリごとの重複チェック
+                    const categoryDuplicateKeys = new Set<string>()
+                    const seenKeys = new Set<string>()
+
+                    actions.forEach(act => {
+                        const key = keyMap[act as ShortcutAction]
+                        if (!key) return
+                        if (seenKeys.has(key)) {
+                            categoryDuplicateKeys.add(key)
+                        } else {
+                            seenKeys.add(key)
+                        }
+                    })
+
+                    const isDuplicate = (action: ShortcutAction) => {
+                        const key = keyMap[action]
+                        return key && categoryDuplicateKeys.has(key)
+                    }
+
+                    return (
+                        <section key={category} className="settings-section">
+                            <h4 className="section-title">{category}</h4>
+                            <div className="settings-card">
+                                {actions.map(action => {
+                                    const isDup = isDuplicate(action as ShortcutAction)
+                                    return (
+                                        <div key={action} className="settings-row">
+                                            <div className="settings-info">
+                                                <span className="settings-label">{SHORTCUT_LABELS[action] || action}</span>
+                                                {isDup && <span style={{ color: '#ef4444', fontSize: '11px', marginLeft: '8px' }}>⚠ 重複</span>}
+                                            </div>
+                                            <button
+                                                className={`btn ${recordingAction === action ? 'btn-danger' : 'btn-outline'} btn-sm`}
+                                                style={{
+                                                    minWidth: '100px',
+                                                    fontFamily: 'monospace',
+                                                    borderColor: isDup ? '#ef4444' : undefined,
+                                                    color: isDup ? '#ef4444' : undefined,
+                                                    backgroundColor: isDup ? 'rgba(239, 68, 68, 0.1)' : undefined
+                                                }}
+                                                onClick={() => setRecordingAction(action as ShortcutAction)}
+                                            >
+                                                {recordingAction === action ? 'キーを入力...' : (keyMap[action] || '未設定')}
+                                            </button>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        </section>
+                    )
+                })}
             </div>
         )
     }
@@ -1724,7 +1866,32 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
         return (
             <div className="settings-page">
-                <h3 className="settings-page-title">自動インポート</h3>
+                <h3 className="settings-page-title">インポート・ダウンロード</h3>
+
+                <section className="settings-section">
+                    <h4 className="section-title">ダウンロード</h4>
+                    <div className="settings-card">
+                        <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
+                            <span className="settings-label">保存先フォルダー</span>
+                            <div style={{ display: 'flex', gap: '8px', width: '100%', alignItems: 'center' }}>
+                                <input
+                                    type="text"
+                                    value={clientConfig.downloadPath || ''}
+                                    readOnly
+                                    className="settings-input"
+                                    style={{ flex: 1, color: '#aaa', cursor: 'not-allowed' }}
+                                />
+                                <button className="btn btn-outline btn-small" onClick={handleSelectDownloadPath}>
+                                    変更
+                                </button>
+                            </div>
+                            <span className="settings-description">
+                                サーバーからダウンロードするファイルのデフォルト保存先です。
+                            </span>
+                        </div>
+                    </div>
+                </section>
+
                 <section className="settings-section">
                     <div className="settings-card">
                         <div className="settings-row">
@@ -1829,6 +1996,70 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         </div>
                     </div>
                 </section>
+
+                <section className="settings-section">
+                    <div className="settings-card">
+                        <div className="settings-info" style={{ marginBottom: '16px' }}>
+                            <span className="settings-label">他のライブラリへの追加設定</span>
+                            <span className="settings-description">
+                                ファイルを他のライブラリに追加する際、引き継ぐ情報を選択します。
+                            </span>
+                        </div>
+
+                        {(() => {
+                            const transferSettings = clientConfig?.libraryTransferSettings || {
+                                keepTags: false,
+                                keepArtists: false,
+                                keepFolders: false,
+                                keepRatings: false,
+                                keepThumbnails: false,
+                                keepUrl: false,
+                                keepComments: false,
+                                keepDescription: false
+                            }
+
+                            const updateTransferSettings = (key: keyof typeof transferSettings, value: boolean) => {
+                                if (!clientConfig) return
+                                const newConfig = {
+                                    ...clientConfig,
+                                    libraryTransferSettings: {
+                                        ...transferSettings,
+                                        [key]: value
+                                    }
+                                }
+                                setClientConfig(newConfig)
+                                if (window.electronAPI) (window.electronAPI as any).updateClientConfig(newConfig)
+                            }
+
+                            return (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                    {[
+                                        { key: 'keepTags', label: 'タグ情報を保持する' },
+                                        { key: 'keepArtists', label: '投稿者情報を保持する' },
+                                        { key: 'keepFolders', label: 'フォルダー構成を保持する' },
+                                        { key: 'keepRatings', label: '評価を保持する' },
+                                        { key: 'keepThumbnails', label: 'サムネイルを保持する' },
+                                        { key: 'keepUrl', label: 'URLを保持する' },
+                                        { key: 'keepComments', label: 'コメントを保持する' },
+                                        { key: 'keepDescription', label: '説明欄を保持する' }
+                                    ].map(item => (
+                                        <div key={item.key} className="settings-row">
+                                            <span className="settings-label" style={{ fontSize: '13px', fontWeight: 'normal' }}>{item.label}</span>
+                                            <label className="toggle-switch">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={(transferSettings as any)[item.key]}
+                                                    onChange={(e) => updateTransferSettings(item.key as any, e.target.checked)}
+                                                />
+                                                <span className="slider"></span>
+                                            </label>
+                                        </div>
+                                    ))}
+                                </div>
+                            )
+                        })()}
+                    </div>
+                </section>
             </div>
         )
     }
@@ -1842,29 +2073,8 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
                 {renderUpdateSection()}
 
-                <section className="settings-section">
-                    <h4 className="section-title">ダウンロード</h4>
-                    <div className="settings-card">
-                        <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
-                            <span className="settings-label">保存先フォルダー</span>
-                            <div style={{ display: 'flex', gap: '8px', width: '100%', alignItems: 'center' }}>
-                                <input
-                                    type="text"
-                                    value={clientConfig.downloadPath || ''}
-                                    readOnly
-                                    className="settings-input"
-                                    style={{ flex: 1, color: '#aaa', cursor: 'not-allowed' }}
-                                />
-                                <button className="btn btn-outline btn-small" onClick={handleSelectDownloadPath}>
-                                    変更
-                                </button>
-                            </div>
-                            <span className="settings-description">
-                                サーバーからダウンロードするファイルのデフォルト保存先です。
-                            </span>
-                        </div>
-                    </div>
-                </section>
+                {renderUpdateSection()}
+
 
                 <section className="settings-section">
                     <h4 className="section-title">Discord リッチプレゼンス</h4>
@@ -2017,37 +2227,40 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                 <div className="settings-modal-sidebar">
                     <div className="sidebar-header">
                         <h2>環境設定</h2>
-                        <div className="sidebar-search">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                            <input type="text" placeholder="検索..." />
-                        </div>
                     </div>
                     <nav className="sidebar-nav">
-                        {categories.map(cat => (
-                            <button
-                                key={cat.id}
-                                className={`nav-item ${activeCategory === cat.id ? 'active' : ''}`}
-                                onClick={() => setActiveCategory(cat.id)}
-                            >
-                                {cat.icon}
-                                <span>{cat.label}</span>
-                            </button>
-                        ))}
-                        {/* Add Profile button */}
-                        <button
-                            key="profile"
-                            className={`nav-item ${activeCategory === 'profile' ? 'active' : ''}`}
-                            onClick={() => setActiveCategory('profile')}
-                        >
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-                            <span>プロフィール</span>
-                        </button>
+                        {categories.map((cat, index) => {
+                            const showGroupAttr = index === 0 || categories[index - 1].group !== cat.group
+                            return (
+                                <div key={cat.id} style={{ display: 'contents' }}>
+                                    {showGroupAttr && (
+                                        <div className="nav-group-title" style={{
+                                            fontSize: '11px',
+                                            fontWeight: 600,
+                                            color: '#666',
+                                            padding: '16px 12px 6px',
+                                            textTransform: 'uppercase',
+                                            letterSpacing: '0.05em'
+                                        }}>
+                                            {cat.group}
+                                        </div>
+                                    )}
+                                    <button
+                                        className={`nav-item ${activeCategory === cat.id ? 'active' : ''}`}
+                                        onClick={() => setActiveCategory(cat.id)}
+                                    >
+                                        {cat.icon}
+                                        <span>{cat.label}</span>
+                                    </button>
+                                </div>
+                            )
+                        })}
                     </nav>
                 </div>
 
                 <div className="settings-modal-main">
                     <header className="settings-header">
-                        <span className="category-title">{categories.find(c => c.id === activeCategory)?.label || (activeCategory === 'profile' ? 'プロフィール' : '')}</span>
+                        <span className="category-title">{categories.find(c => c.id === activeCategory)?.label || ''}</span>
                         <button className="close-btn" onClick={onClose}>
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="6"></line></svg>
                         </button>
@@ -2055,21 +2268,21 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
                     <div className="main-content">
                         {activeCategory === 'general' ? renderGeneralSettings() :
-                            activeCategory === 'profile' ? renderProfileSettings() : // Render Profile Settings
+                            activeCategory === 'profile' ? renderProfileSettings() :
                                 activeCategory === 'import' ? renderImportSettings() :
                                     activeCategory === 'viewer' ? renderViewerSettings() :
                                         activeCategory === 'network' ? renderNetworkSettings() :
-                                            activeCategory === 'media-engine' ? renderMediaEngineSettings() :
-                                                activeCategory === 'developer' ? renderDeveloperSettings() : (
-                                                    <div className="empty-state">
-                                                        <p>このセクションの設定は準備中です。</p>
-                                                    </div>
-                                                )}
+                                            activeCategory === 'shortcuts' ? renderShortcutsSettings() :
+                                                activeCategory === 'media-engine' ? renderMediaEngineSettings() :
+                                                    activeCategory === 'developer' ? renderDeveloperSettings() : (
+                                                        <div className="empty-state">
+                                                            <p>このセクションの設定は準備中です。</p>
+                                                        </div>
+                                                    )}
                     </div>
 
                     <footer className="main-footer">
-                        <button className="btn-save" onClick={onClose}>変更を保存</button>
-                        <button className="btn-apply" onClick={onClose}>適用</button>
+                        <button className="btn-save" onClick={onClose}>閉じる</button>
                     </footer>
                 </div>
             </div>

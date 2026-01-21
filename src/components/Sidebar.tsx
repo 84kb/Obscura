@@ -26,6 +26,7 @@ interface SidebarProps {
     onDropFileOnFolder?: (folderId: number, files: FileList) => void
     onInternalDragStart?: () => void
     onInternalDragEnd?: () => void
+    itemCounts?: { [key: string]: number }
 }
 
 // サブフォルダー対応のためのヘルパー型と関数
@@ -156,7 +157,8 @@ export function Sidebar({
     onRefreshFolders,
     onDropFileOnFolder,
     onInternalDragStart,
-    onInternalDragEnd
+    onInternalDragEnd,
+    itemCounts
 }: SidebarProps) {
     const [renamingFolderId, setRenamingFolderId] = useState<number | null>(null)
     const [renamingName, setRenamingName] = useState("")
@@ -559,7 +561,12 @@ export function Sidebar({
                             }}
                         />
                     ) : (
-                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</span>
+                        <>
+                            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</span>
+                            {itemCounts && itemCounts[`folder-${node.id}`] !== undefined && (
+                                <span className="sidebar-count">{itemCounts[`folder-${node.id}`].toLocaleString()}</span>
+                            )}
+                        </>
                     )}
                 </div>
 
@@ -704,6 +711,9 @@ export function Sidebar({
                         >
                             <Icons.All />
                             <span>すべて</span>
+                            {itemCounts && itemCounts['all'] !== undefined && (
+                                <span className="sidebar-count">{itemCounts['all'].toLocaleString()}</span>
+                            )}
                         </div>
                         <div
                             className={`sidebar-nav-item ${filterOptions.filterType === 'uncategorized' ? 'active' : ''}`}
@@ -711,6 +721,9 @@ export function Sidebar({
                         >
                             <Icons.Uncategorized />
                             <span>未分類</span>
+                            {itemCounts && itemCounts['uncategorized'] !== undefined && (
+                                <span className="sidebar-count">{itemCounts['uncategorized'].toLocaleString()}</span>
+                            )}
                         </div>
                         <div
                             className={`sidebar-nav-item ${filterOptions.filterType === 'untagged' ? 'active' : ''}`}
@@ -718,6 +731,9 @@ export function Sidebar({
                         >
                             <Icons.Untagged />
                             <span>タグなし</span>
+                            {itemCounts && itemCounts['untagged'] !== undefined && (
+                                <span className="sidebar-count">{itemCounts['untagged'].toLocaleString()}</span>
+                            )}
                         </div>
                         <div
                             className={`sidebar-nav-item ${filterOptions.filterType === 'recent' ? 'active' : ''}`}
@@ -739,6 +755,9 @@ export function Sidebar({
                         >
                             <Icons.Tags />
                             <span>すべてのタグ</span>
+                            {itemCounts && itemCounts['tags'] !== undefined && (
+                                <span className="sidebar-count">{itemCounts['tags'].toLocaleString()}</span>
+                            )}
                         </div>
                         <div
                             className={`sidebar-nav-item ${filterOptions.filterType === 'trash' ? 'active' : ''}`}
@@ -746,6 +765,9 @@ export function Sidebar({
                         >
                             <Icons.Trash />
                             <span>ゴミ箱</span>
+                            {itemCounts && itemCounts['trash'] !== undefined && (
+                                <span className="sidebar-count">{itemCounts['trash'].toLocaleString()}</span>
+                            )}
                         </div>
                     </div>
                 </div>

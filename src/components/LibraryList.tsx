@@ -1,14 +1,16 @@
-import React from 'react'
-import { TableVirtuoso } from 'react-virtuoso'
+import React, { useEffect, useRef, useContext, useCallback, useMemo, useState } from 'react'
+import { TableVirtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { MediaFile, ViewSettings, FilterOptions } from '../types'
 import { formatSize, formatDate } from '../utils/format'
 import { toMediaUrl } from '../utils/fileUrl'
-import './ListView.css'
+import { ShortcutContext, useShortcut } from '../contexts/ShortcutContext'
+import './LibraryList.css'
 
-interface ListViewProps {
+interface LibraryListProps {
     mediaFiles: MediaFile[]
     selectedIds: number[]
     onSelect: (media: MediaFile, e: React.MouseEvent) => void
+    onSelectionChange?: (ids: number[]) => void
     onDoubleClick: (media: MediaFile) => void
     onContextMenu: (media: MediaFile, e: React.MouseEvent) => void
     viewSettings: ViewSettings
@@ -17,7 +19,7 @@ interface ListViewProps {
     onFilterChange: (options: FilterOptions) => void
 }
 
-interface ListViewContext {
+interface LibraryListContext {
     mediaFiles: MediaFile[]
     selectedIds: number[]
     onSelect: (media: MediaFile, e: React.MouseEvent) => void
@@ -43,9 +45,9 @@ const HeaderContextMenu: React.FC<{
     onToggle: (key: keyof NonNullable<ViewSettings['listColumns']>) => void,
     onClose: () => void
 }> = ({ x, y, settings, onToggle, onClose }) => {
-    const menuRef = React.useRef<HTMLDivElement>(null)
+    const menuRef = useRef<HTMLDivElement>(null)
 
-    React.useEffect(() => {
+    useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
             if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
                 onClose()
@@ -72,10 +74,10 @@ const HeaderContextMenu: React.FC<{
 
 // 一覧表示用のサムネイルコンポーネント (高速スクロール対策)
 const ListThumbnail: React.FC<{ media: MediaFile, thumbnailMode: 'speed' | 'quality' }> = ({ media, thumbnailMode }) => {
-    const [src, setSrc] = React.useState<string | null>(null);
-    const [isLoaded, setIsLoaded] = React.useState(false);
+    const [src, setSrc] = useState<string | null>(null);
+    const [isLoaded, setIsLoaded] = useState(false);
 
-    React.useEffect(() => {
+    useEffect(() => {
         setSrc(null);
         setIsLoaded(false);
         if (!media.thumbnail_path) return;
@@ -131,10 +133,11 @@ const ListThumbnail: React.FC<{ media: MediaFile, thumbnailMode: 'speed' | 'qual
     );
 };
 
-export const ListView: React.FC<ListViewProps> = ({
+export const LibraryList: React.FC<LibraryListProps> = ({
     mediaFiles,
     selectedIds,
     onSelect,
+    onSelectionChange,
     onDoubleClick,
     onContextMenu,
     viewSettings: _viewSettings,
@@ -142,14 +145,58 @@ export const ListView: React.FC<ListViewProps> = ({
     filterOptions,
     onFilterChange
 }) => {
-    const [headerMenu, setHeaderMenu] = React.useState<{ x: number, y: number } | null>(null)
+    const [headerMenu, setHeaderMenu] = useState<{ x: number, y: number } | null>(null)
     const listColumns = _viewSettings.listColumns || {
         tags: true, resolution: true, rating: true, extension: true,
         size: true, modified: true, created: true, artist: true
     }
 
+    // Shortcut Context
+    const { pushScope, popScope } = useContext(ShortcutContext)!;
+    const virtuosoRef = useRef<VirtuosoHandle>(null);
+    const visibleRangeRef = useRef({ startIndex: 0, endIndex: 0 });
+
+    // Register Scope
+    useEffect(() => {
+        pushScope('library');
+        return () => popScope('library');
+    }, [pushScope, popScope]);
+
+    // Handle Keyboard Navigation
+    const handleNavigation = useCallback((direction: 'up' | 'down') => {
+        if (mediaFiles.length === 0) return;
+
+        const currentIndex = mediaFiles.findIndex(m => selectedIds.includes(m.id));
+        let nextIndex = currentIndex !== -1 ? currentIndex : 0;
+
+        if (direction === 'up') {
+            nextIndex = Math.max(0, nextIndex - 1);
+        } else {
+            nextIndex = Math.min(mediaFiles.length - 1, nextIndex + 1);
+        }
+
+        if (nextIndex !== currentIndex || selectedIds.length === 0) {
+            const nextMedia = mediaFiles[nextIndex];
+            if (onSelectionChange) {
+                onSelectionChange([nextMedia.id]);
+            }
+
+            // Smart scroll: only if out of view
+            const { startIndex, endIndex } = visibleRangeRef.current;
+            if (nextIndex < startIndex) {
+                virtuosoRef.current?.scrollToIndex({ index: nextIndex, align: 'start' });
+            } else if (nextIndex > endIndex) {
+                virtuosoRef.current?.scrollToIndex({ index: nextIndex, align: 'end' });
+            }
+        }
+    }, [mediaFiles, selectedIds, onSelectionChange]);
+
+    useShortcut('NAV_UP', () => handleNavigation('up'), { scope: 'library' });
+    useShortcut('NAV_DOWN', () => handleNavigation('down'), { scope: 'library' });
+
+
     // ファイルタイプに応じたアイコンを表示
-    const renderIcon = React.useCallback((media: MediaFile) => {
+    const renderIcon = useCallback((media: MediaFile) => {
         if (media.thumbnail_path) {
             return <ListThumbnail media={media} thumbnailMode={_viewSettings.thumbnailMode || 'speed'} />
         }
@@ -174,7 +221,7 @@ export const ListView: React.FC<ListViewProps> = ({
         return '★'.repeat(rating) + '☆'.repeat(5 - rating)
     }
 
-    const handleHeaderClick = React.useCallback((field: string) => {
+    const handleHeaderClick = useCallback((field: string) => {
         const isCurrent = filterOptions.sortOrder === field
         const defaultDir = field === 'name' ? 'asc' : 'desc'
 
@@ -188,12 +235,12 @@ export const ListView: React.FC<ListViewProps> = ({
         }
     }, [filterOptions, onFilterChange])
 
-    const handleHeaderContextMenu = React.useCallback((e: React.MouseEvent) => {
+    const handleHeaderContextMenu = useCallback((e: React.MouseEvent) => {
         e.preventDefault()
         setHeaderMenu({ x: e.clientX, y: e.clientY })
     }, [])
 
-    const toggleColumn = React.useCallback((key: keyof NonNullable<ViewSettings['listColumns']>) => {
+    const toggleColumn = useCallback((key: keyof NonNullable<ViewSettings['listColumns']>) => {
         updateViewSettings({
             listColumns: {
                 ...listColumns,
@@ -202,7 +249,7 @@ export const ListView: React.FC<ListViewProps> = ({
         })
     }, [listColumns, updateViewSettings])
 
-    const renderSortIcon = React.useCallback((field: string) => {
+    const renderSortIcon = useCallback((field: string) => {
         if (filterOptions.sortOrder !== field) return null
         return (
             <span className={`sort-icon ${filterOptions.sortDirection}`}>
@@ -211,12 +258,16 @@ export const ListView: React.FC<ListViewProps> = ({
         )
     }, [filterOptions.sortOrder, filterOptions.sortDirection])
 
-    const fixedHeaderContent = React.useCallback(() => (
+    const fixedHeaderContent = useCallback(() => (
         <tr className="list-view-header-row" onContextMenu={handleHeaderContextMenu}>
             <th style={{ width: 'auto' }} onClick={() => handleHeaderClick('name')}>
                 <div className="header-cell-content">名前 {renderSortIcon('name')}</div>
             </th>
-            {listColumns.tags && <th style={{ width: '200px' }}>タグ</th>}
+            {listColumns.tags && (
+                <th style={{ width: '200px' }} onClick={() => handleHeaderClick('tags')}>
+                    <div className="header-cell-content">タグ {renderSortIcon('tags')}</div>
+                </th>
+            )}
             {listColumns.resolution && <th style={{ width: '100px' }}>解像度</th>}
             {listColumns.rating && (
                 <th style={{ width: '100px' }} onClick={() => handleHeaderClick('rating')}>
@@ -247,7 +298,7 @@ export const ListView: React.FC<ListViewProps> = ({
         </tr>
     ), [listColumns, handleHeaderContextMenu, handleHeaderClick, renderSortIcon])
 
-    const rowContent = React.useCallback((_index: number, media: MediaFile) => {
+    const rowContent = useCallback((_index: number, media: MediaFile) => {
         const resolution = media.width && media.height ? `${media.width}x${media.height}` : '-'
         const ext = media.file_name.split('.').pop()?.toUpperCase() || '-'
 
@@ -278,14 +329,14 @@ export const ListView: React.FC<ListViewProps> = ({
         )
     }, [listColumns, renderIcon, renderRating])
 
-    const virtuosoComponents = React.useMemo(() => ({
+    const virtuosoComponents = useMemo(() => ({
         Table: React.forwardRef<HTMLTableElement, React.ComponentProps<'table'>>((props, ref) => (
             <table {...props} ref={ref} className="list-view-table" style={{ ...props.style, borderCollapse: 'collapse' }} />
         )),
         TableHead: React.forwardRef<HTMLTableSectionElement, React.ComponentProps<'thead'>>((props, ref) => (
             <thead {...props} ref={ref} className="list-view-header" />
         )),
-        TableRow: React.forwardRef<HTMLTableRowElement, React.ComponentProps<'tr'> & { context?: ListViewContext }>((props, ref) => {
+        TableRow: React.forwardRef<HTMLTableRowElement, React.ComponentProps<'tr'> & { context?: LibraryListContext }>((props, ref) => {
             const index = (props as any)['data-index']
             const context = props.context!
             const media = context.mediaFiles[index]
@@ -310,9 +361,9 @@ export const ListView: React.FC<ListViewProps> = ({
                 />
             )
         })
-    }), []) // Dependencies removed for complete stability
+    }), [])
 
-    const virtuosoContext = React.useMemo<ListViewContext>(() => ({
+    const virtuosoContext = useMemo<LibraryListContext>(() => ({
         mediaFiles,
         selectedIds,
         onSelect,
@@ -323,12 +374,16 @@ export const ListView: React.FC<ListViewProps> = ({
     return (
         <div className="list-view-container">
             <TableVirtuoso
+                ref={virtuosoRef}
                 style={{ height: '100%' }}
                 data={mediaFiles}
                 fixedHeaderContent={fixedHeaderContent}
                 itemContent={rowContent}
                 components={virtuosoComponents}
                 context={virtuosoContext}
+                rangeChanged={(range) => {
+                    visibleRangeRef.current = range
+                }}
             />
             {headerMenu && (
                 <HeaderContextMenu

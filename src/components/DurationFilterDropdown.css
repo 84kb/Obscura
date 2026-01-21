@@ -1,7 +1,7 @@
 .duration-filter-dropdown {
     position: absolute;
     top: 100%;
-    right: 0;
+    left: 0;
     margin-top: 4px;
     width: 260px;
     background-color: var(--bg-dark);
@@ -119,4 +119,21 @@
         opacity: 1;
         transform: translateY(0);
     }
+}
+
+@keyframes fadeOut {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+    to {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+}
+
+.duration-filter-dropdown.closing {
+    animation: fadeOut 0.15s ease-in forwards;
+    pointer-events: none;
 }

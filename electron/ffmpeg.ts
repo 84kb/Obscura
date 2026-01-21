@@ -73,11 +73,11 @@ export async function generatePreviewImages(videoPath: string, outputDir: string
 /**
  * メディアファイルからメタデータを取得する（動画・音声対応）
  */
-export async function getMediaMetadata(filePath: string): Promise<{ width?: number; height?: number; duration?: number; artist?: string; description?: string; comment?: string; url?: string }> {
+export async function getMediaMetadata(filePath: string): Promise<{ width?: number; height?: number; duration?: number; artist?: string; description?: string; comment?: string; url?: string; framerate?: number }> {
     return new Promise((resolve) => {
         const args = [
             '-v', 'error',
-            '-show_entries', 'stream=width,height,duration,tags:format=duration:format_tags',
+            '-show_entries', 'stream=width,height,duration,r_frame_rate,tags:format=duration:format_tags',
             '-of', 'json',
             filePath
         ]
@@ -105,6 +105,7 @@ export async function getMediaMetadata(filePath: string): Promise<{ width?: numb
                     let width: number | undefined
                     let height: number | undefined
                     let duration: number | undefined
+                    let framerate: number | undefined
                     let artist: string | undefined
                     let description: string | undefined
                     let url: string | undefined
@@ -118,6 +119,14 @@ export async function getMediaMetadata(filePath: string): Promise<{ width?: numb
                         if (videoStream) {
                             width = videoStream.width
                             height = videoStream.height
+
+                            // フレームレート取得 (r_frame_rate: "30000/1001" など)
+                            if (videoStream.r_frame_rate) {
+                                const parts = videoStream.r_frame_rate.split('/')
+                                if (parts.length === 2 && Number(parts[1]) > 0) {
+                                    framerate = Number(parts[0]) / Number(parts[1])
+                                }
+                            }
                         }
 
                         // durationはストリームまたはフォーマットから取得
@@ -218,6 +227,7 @@ export async function getMediaMetadata(filePath: string): Promise<{ width?: numb
                         width,
                         height,
                         duration,
+                        framerate,
                         artist,
                         description,
                         comment: (json.format && json.format.tags) ? (json.format.tags.comment || json.format.tags.COMMENT || json.format.tags.Comment) : undefined,
@@ -565,6 +575,97 @@ export async function embedMetadata(
         ffmpeg.on('error', (err: Error) => {
             console.error(`[ffmpeg] Error: ${err.message}`)
             resolve(false)
+        })
+    })
+}
+
+// 現在のフレーム抽出プロセスを追跡（新しいリクエストで前のプロセスをキャンセル）
+let currentFrameProcess: ReturnType<typeof spawn> | null = null
+let currentFrameTimeout: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * 動画から単一フレームを抽出する（GPU加速対応）
+ * ホバープレビュー用の高速フレーム抽出
+ * @param videoPath 動画ファイルのパス
+ * @param timeSeconds 抽出する時間（秒）
+ * @param width 出力幅（デフォルト: 160px）
+ * @returns Base64エンコードされたJPEG画像データ（data:image/jpeg;base64,...）
+ */
+export async function extractSingleFrame(
+    videoPath: string,
+    timeSeconds: number,
+    width: number = 160
+): Promise<string | null> {
+    // 前のプロセスがあればキャンセル（静かにキャンセル）
+    if (currentFrameProcess) {
+        try {
+            currentFrameProcess.kill()
+        } catch (e) { /* ignore */ }
+    }
+    if (currentFrameTimeout) {
+        clearTimeout(currentFrameTimeout)
+    }
+
+    return new Promise((resolve) => {
+        // FFmpegでフレームを抽出してbase64で返す
+        // GPU加速オプション: NVIDIA NVDEC を試行、失敗時はソフトウェアデコード
+
+        const ffmpegPath = getFFmpegPath()
+
+        // 高速シーク（入力前に-ss）+ GPU加速
+        // Windows では dxva2 が最も広くサポートされている
+        const args = [
+            '-hwaccel', 'dxva2',           // Windows DirectX Video Acceleration
+            '-threads', '1',               // スレッド数を制限（起動高速化）
+            '-ss', timeSeconds.toString(), // 入力前シーク（高速）
+            '-i', videoPath,
+            '-vframes', '1',              // 1フレームのみ
+            '-vf', `scale=${width}:-1:flags=fast_bilinear`,   // 高速リサイズ
+            '-f', 'image2pipe',           // パイプ出力
+            '-c:v', 'mjpeg',              // MJPEG形式
+            '-q:v', '8',                  // 品質（低めで高速化）
+            '-'                           // stdout へ出力
+        ]
+
+        const ffmpeg = spawn(ffmpegPath, args)
+        currentFrameProcess = ffmpeg
+
+        const chunks: Buffer[] = []
+
+        // タイムアウト設定（2秒 - 初回起動が遅い場合を考慮）
+        const timeout = setTimeout(() => {
+            if (currentFrameProcess === ffmpeg) {
+                currentFrameProcess = null
+            }
+            ffmpeg.kill()
+            resolve(null)
+        }, 2000)
+        currentFrameTimeout = timeout
+
+        ffmpeg.stdout.on('data', (data: Buffer) => {
+            chunks.push(data)
+        })
+
+        ffmpeg.on('close', (code) => {
+            clearTimeout(timeout)
+            if (currentFrameProcess === ffmpeg) {
+                currentFrameProcess = null
+            }
+            if (code === 0 && chunks.length > 0) {
+                const buffer = Buffer.concat(chunks)
+                const base64 = buffer.toString('base64')
+                resolve(`data:image/jpeg;base64,${base64}`)
+            } else {
+                resolve(null)
+            }
+        })
+
+        ffmpeg.on('error', () => {
+            clearTimeout(timeout)
+            if (currentFrameProcess === ffmpeg) {
+                currentFrameProcess = null
+            }
+            resolve(null)
         })
     })
 }

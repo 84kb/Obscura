@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { FilterOptions, ViewSettings, Tag, TagGroup, MediaFile, Folder, ItemInfoType, ElectronAPI } from '../types'
+import { useDelayUnmount } from '../hooks/useDelayUnmount'
 import { TagFilterDropdown } from './TagFilterDropdown'
 import { FolderFilterDropdown } from './FolderFilterDropdown'
 import { RatingFilterDropdown } from './RatingFilterDropdown'
@@ -66,6 +67,14 @@ export function MainHeader({
     const durationFilterBtnRef = useRef<HTMLDivElement>(null)
     const [isDateFilterOpen, setIsDateFilterOpen] = useState(false)
     const dateFilterBtnRef = useRef<HTMLDivElement>(null)
+
+    const shouldRenderFolderFilter = useDelayUnmount(isFolderFilterOpen, 150)
+    const shouldRenderTagFilter = useDelayUnmount(isTagFilterOpen, 150)
+    const shouldRenderRatingFilter = useDelayUnmount(isRatingFilterOpen, 150)
+    const shouldRenderTypeFilter = useDelayUnmount(isTypeFilterOpen, 150)
+    const shouldRenderArtistFilter = useDelayUnmount(isArtistFilterOpen, 150)
+    const shouldRenderDurationFilter = useDelayUnmount(isDurationFilterOpen, 150)
+    const shouldRenderDateFilter = useDelayUnmount(isDateFilterOpen, 150)
 
     const [isRefreshModalOpen, setIsRefreshModalOpen] = useState(false)
     const [duplicateResults, setDuplicateResults] = useState<{ [key: string]: MediaFile[] }[] | null>(null)
@@ -649,12 +658,13 @@ export function MainHeader({
                             </svg>
                             <span>{folderLabel || 'フォルダー'}</span>
                         </button>
-                        {isFolderFilterOpen && (
+                        {shouldRenderFolderFilter && (
                             <FolderFilterDropdown
                                 folders={foldersWithCounts}
                                 filterOptions={filterOptions}
                                 onFilterChange={onFilterChange}
                                 onClose={() => setIsFolderFilterOpen(false)}
+                                className={!isFolderFilterOpen ? 'closing' : ''}
                             />
                         )}
                     </div>
@@ -671,13 +681,15 @@ export function MainHeader({
                             </svg>
                             <span>{tagLabel || 'タグ'}</span>
                         </button>
-                        {isTagFilterOpen && (
+                        {shouldRenderTagFilter && (
                             <TagFilterDropdown
                                 tags={tags}
                                 tagGroups={tagGroups}
                                 filterOptions={filterOptions}
                                 onFilterChange={onFilterChange}
                                 onClose={() => setIsTagFilterOpen(false)}
+                                allMediaFiles={allMediaFiles}
+                                className={!isTagFilterOpen ? 'closing' : ''}
                             />
                         )}
                     </div>
@@ -693,12 +705,13 @@ export function MainHeader({
                             </svg>
                             <span>{ratingLabel || '評価'}</span>
                         </button>
-                        {isRatingFilterOpen && (
+                        {shouldRenderRatingFilter && (
                             <RatingFilterDropdown
                                 filterOptions={filterOptions}
                                 counts={ratingCounts}
                                 onFilterChange={onFilterChange}
                                 onClose={() => setIsRatingFilterOpen(false)}
+                                className={!isRatingFilterOpen ? 'closing' : ''}
                             />
                         )}
                     </div>
@@ -715,12 +728,13 @@ export function MainHeader({
                             </svg>
                             <span>{typeLabel || 'タイプ'}</span>
                         </button>
-                        {isTypeFilterOpen && (
+                        {shouldRenderTypeFilter && (
                             <TypeFilterDropdown
                                 filterOptions={filterOptions}
                                 counts={extensionCounts}
                                 onFilterChange={onFilterChange}
                                 onClose={() => setIsTypeFilterOpen(false)}
+                                className={!isTypeFilterOpen ? 'closing' : ''}
                             />
                         )}
                     </div>
@@ -737,12 +751,13 @@ export function MainHeader({
                             </svg>
                             <span>{artistLabel || '投稿者'}</span>
                         </button>
-                        {isArtistFilterOpen && (
+                        {shouldRenderArtistFilter && (
                             <ArtistFilterDropdown
                                 artists={artistCounts}
                                 filterOptions={filterOptions}
                                 onFilterChange={onFilterChange}
                                 onClose={() => setIsArtistFilterOpen(false)}
+                                className={!isArtistFilterOpen ? 'closing' : ''}
                             />
                         )}
                     </div>
@@ -759,11 +774,12 @@ export function MainHeader({
                             </svg>
                             <span>再生時間</span>
                         </button>
-                        {isDurationFilterOpen && (
+                        {shouldRenderDurationFilter && (
                             <DurationFilterDropdown
                                 filterOptions={filterOptions}
                                 onFilterChange={onFilterChange}
                                 onClose={() => setIsDurationFilterOpen(false)}
+                                className={!isDurationFilterOpen ? 'closing' : ''}
                             />
                         )}
                     </div>
@@ -782,11 +798,12 @@ export function MainHeader({
                             </svg>
                             <span>変更日</span>
                         </button>
-                        {isDateFilterOpen && (
+                        {shouldRenderDateFilter && (
                             <DateFilterDropdown
                                 filterOptions={filterOptions}
                                 onFilterChange={onFilterChange}
                                 onClose={() => setIsDateFilterOpen(false)}
+                                className={!isDateFilterOpen ? 'closing' : ''}
                             />
                         )}
                     </div>

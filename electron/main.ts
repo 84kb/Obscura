@@ -5,10 +5,10 @@ import { fileURLToPath, URL } from 'node:url'
 import crypto from 'crypto'
 import http from 'node:http'
 import https from 'node:https'
-import { initDatabase, mediaDB, tagDB, tagGroupDB, folderDB, libraryDB, commentDB, getActiveMediaLibrary } from './database'
+import { initDatabase, mediaDB, tagDB, tagGroupDB, folderDB, libraryDB, commentDB, getActiveMediaLibrary, libraryRegistry } from './database'
 import { ServerConfig, RemoteLibrary } from '../src/types'
 import { getThumbnailPath } from './utils'
-import { generatePreviewImages, getMediaMetadata, createThumbnail, embedMetadata } from './ffmpeg'
+import { generatePreviewImages, getMediaMetadata, createThumbnail, embedMetadata, extractSingleFrame } from './ffmpeg'
 import { getFFmpegPath } from './ffmpeg-path'
 import { initErrorLogger } from './error-logger'
 import { initSharedLibrary, serverConfigDB, sharedUserDB, SharedUser } from './shared-library'
@@ -250,7 +250,9 @@ app.whenReady().then(() => {
                 return new Response('Aborted', { status: 499 })
             }
 
-            console.log(`[Media Protocol] Request URL: ${request.url}`)
+            const requestId = Math.random().toString(36).substring(7);
+            const startTime = Date.now();
+            console.log(`[Media Protocol][${requestId}] Request URL: ${request.url}`)
 
             // URLオブジェクトを使用してパスを解析
             const url = new URL(request.url)
@@ -366,7 +368,8 @@ app.whenReady().then(() => {
 
             // レスポンス用ストリームを作成するヘルパー関数
             const createResponseStream = (start?: number, end?: number) => {
-                const nodeStream = fs.createReadStream(finalPath, { start, end })
+                // highWaterMarkを1MBに設定してIO効率を向上
+                const nodeStream = fs.createReadStream(finalPath, { start, end, highWaterMark: 1024 * 1024 })
                 let isDestroyed = false
 
                 return new ReadableStream({
@@ -413,6 +416,7 @@ app.whenReady().then(() => {
                 const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1
                 const chunksize = (end - start) + 1
 
+                console.log(`[Media Protocol][${requestId}] Serving Range: ${start}-${end}/${fileSize} (${chunksize} bytes). Time: ${Date.now() - startTime}ms`);
                 const webStream = createResponseStream(start, end)
 
                 return new Response(webStream, {
@@ -426,6 +430,7 @@ app.whenReady().then(() => {
                     }
                 })
             } else {
+                console.log(`[Media Protocol][${requestId}] Serving Full: ${fileSize} bytes. Time: ${Date.now() - startTime}ms`);
                 const webStream = createResponseStream()
 
                 return new Response(webStream, {
@@ -490,6 +495,49 @@ app.on('window-all-closed', () => {
 console.log('[Main] Registering IPC handlers...')
 
 // ライブラリ管理
+// メディアの他のライブラリへのコピー
+console.log('[DEBUG] Registering IPC handler: copy-media-to-library')
+ipcMain.handle('copy-media-to-library', async (event, mediaIds: number[], targetLibraryPath: string, settings: any, options?: { notificationId?: string }) => {
+    try {
+        console.log(`[MediaLibrary] Copying ${mediaIds.length} items to ${targetLibraryPath}`)
+
+        // ソースアイテム取得
+        const itemsToTransfer: { sourcePath: string, meta: any }[] = []
+        for (const id of mediaIds) {
+            const media = mediaDB.getMediaFileWithDetails(id)
+            if (media && !media.is_deleted && fs.existsSync(media.file_path)) {
+                itemsToTransfer.push({
+                    sourcePath: media.file_path,
+                    meta: media
+                })
+            }
+        }
+
+        if (itemsToTransfer.length === 0) {
+            return { success: false, message: 'No valid media files found to transfer.' }
+        }
+
+        const libInstance = libraryRegistry.getLibrary(targetLibraryPath)
+
+        const onProgress = (current: number, total: number, fileName: string) => {
+            if (options?.notificationId && mainWindow) {
+                const progress = Math.round((current / total) * 100)
+                mainWindow.webContents.send('notification-progress', {
+                    id: options.notificationId,
+                    progress,
+                    message: `転送中: ${fileName} (${current}/${total})`
+                })
+            }
+        }
+
+        await libInstance.importMediaBatch(itemsToTransfer, settings, onProgress)
+
+        return { success: true }
+    } catch (e: any) {
+        console.error('Copy to library failed:', e)
+        return { success: false, error: e.message }
+    }
+})
 ipcMain.handle('create-library', async (_, name: string, parentPath: string) => {
     return libraryDB.createLibrary(name, parentPath)
 })
@@ -889,6 +937,16 @@ ipcMain.handle('generate-previews', async (_event, mediaId: number) => {
     }
 })
 
+// GPU加速単一フレーム抽出（ホバープレビュー用）
+ipcMain.handle('extract-single-frame', async (_event, filePath: string, timeSeconds: number, width?: number) => {
+    try {
+        return await extractSingleFrame(filePath, timeSeconds, width || 160)
+    } catch (error: any) {
+        console.error('Failed to extract frame:', error)
+        return null
+    }
+})
+
 // ファイル操作
 
 // 規定のアプリで開く
@@ -954,9 +1012,10 @@ ipcMain.handle('copy-to-clipboard', async (_event, text: string) => {
 // メディア名変更
 ipcMain.handle('rename-media', async (_event, mediaId: number, newName: string) => {
     try {
-        mediaDB.updateFileName(mediaId, newName)
+        return mediaDB.updateFileName(mediaId, newName)
     } catch (error) {
         console.error('Failed to rename media:', error)
+        throw error
     }
 })
 
@@ -1431,6 +1490,8 @@ ipcMain.handle('export-media', async (event, mediaId: number, options?: { notifi
         return { success: false, message: e.message }
     }
 })
+
+
 
 ipcMain.handle('download-remote-media', async (event, url: string, filename: string, options?: { notificationId?: string }) => {
     try {

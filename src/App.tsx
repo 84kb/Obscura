@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { useNotification } from './contexts/NotificationContext'
 import { LibraryGrid } from './components/LibraryGrid'
-import { ListView } from './components/ListView'
+import { LibraryList } from './components/LibraryList'
 import { Player } from './components/Player'
 import { Inspector } from './components/Inspector'
 import { TagManager } from './components/TagManager'
@@ -13,10 +13,11 @@ import { ConfirmModal } from './components/ConfirmModal'
 import { SubfolderGrid } from './components/SubfolderGrid'
 import { ProfileSetupModal } from './components/ProfileSetupModal'
 import { useLibrary } from './hooks/useLibrary'
-import { MediaFile, AppSettings, RemoteLibrary, ViewSettings, defaultViewSettings, ElectronAPI } from './types'
+import { MediaFile, AppSettings, RemoteLibrary, ViewSettings, defaultViewSettings, ElectronAPI, ClientConfig } from './types'
 import { MainHeader } from './components/MainHeader'
 import { useSocket } from './hooks/useSocket'
 import { DuplicateModal } from './components/DuplicateModal'
+import { ShortcutProvider } from './contexts/ShortcutContext'
 import './styles/index.css'
 import './styles/drag-overlay.css'
 
@@ -31,6 +32,14 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 
 export default function App() {
+    return (
+        <ShortcutProvider>
+            <AppContent />
+        </ShortcutProvider>
+    )
+}
+
+function AppContent() {
     const {
         mediaFiles,
         allMediaFiles,
@@ -76,6 +85,30 @@ export default function App() {
         reloadLibrary,
         checkEntryDuplicates
     } = useLibrary()
+
+    // サイドバーのアイテム数計算
+    const sidebarCounts = useMemo(() => {
+        const counts: { [key: string]: number } = {}
+        // allMediaFilesがまだロードされていない場合は空を返す
+        if (!allMediaFiles) return counts
+
+        const activeFiles = allMediaFiles.filter(m => !m.is_deleted)
+        const trashFiles = allMediaFiles.filter(m => m.is_deleted)
+
+        counts['all'] = activeFiles.length
+        counts['trash'] = trashFiles.length
+        counts['uncategorized'] = activeFiles.filter(m => !m.folders || m.folders.length === 0).length
+        counts['untagged'] = activeFiles.filter(m => !m.tags || m.tags.length === 0).length
+        counts['tags'] = tags.length // タグの総数
+
+
+        // Folders (activeFiles の中からカウント)
+        folders.forEach(f => {
+            counts[`folder-${f.id}`] = activeFiles.filter(m => m.folders?.some(mf => mf.id === f.id)).length
+        })
+
+        return counts
+    }, [allMediaFiles, folders])
 
     const { addNotification, removeNotification, updateProgress } = useNotification()
 
@@ -174,10 +207,22 @@ export default function App() {
                 })
             }
         })
+
+        // 汎用通知プログレスリスナー
+        let removeProgressListener: (() => void) | undefined
+        if ((window.electronAPI as any).on) {
+            removeProgressListener = (window.electronAPI as any).on('notification-progress', (data: any) => {
+                if (data.id && typeof data.progress === 'number') {
+                    updateProgress(data.id, data.progress)
+                }
+            })
+        }
+
         return () => {
             if (removeListener && typeof removeListener === 'function') removeListener()
+            if (removeProgressListener && typeof removeProgressListener === 'function') removeProgressListener()
         }
-    }, [addNotification])
+    }, [addNotification, updateProgress])
 
 
 
@@ -227,6 +272,17 @@ export default function App() {
     const [isRefreshing, setIsRefreshing] = useState(false)
     const [refreshProgress, setRefreshProgress] = useState({ current: 0, total: 0 })
 
+    // ライブラリ一覧
+    const [availableLibraries, setAvailableLibraries] = useState<{ name: string, path: string }[]>([])
+
+    useEffect(() => {
+        if (window.electronAPI) {
+            window.electronAPI.getLibraries()
+                .then((libs: any) => setAvailableLibraries(libs))
+                .catch(console.error)
+        }
+    }, [])
+
     useEffect(() => {
         const api = window.electronAPI as unknown as ElectronAPI
         if (!api?.onRefreshProgress) return
@@ -259,6 +315,7 @@ export default function App() {
     const isDraggingRef = useRef(isDragging)
     const hasActiveLibraryRef = useRef(hasActiveLibrary)
     const activeRemoteLibraryRef = useRef(activeRemoteLibrary)
+    const allMediaFilesRef = useRef(allMediaFiles)
 
     // StateとRefの同期
     useEffect(() => {
@@ -272,6 +329,10 @@ export default function App() {
     useEffect(() => {
         activeRemoteLibraryRef.current = activeRemoteLibrary
     }, [activeRemoteLibrary])
+
+    useEffect(() => {
+        allMediaFilesRef.current = allMediaFiles
+    }, [allMediaFiles])
 
     // ドラッグ＆ドロップ状態のグローバル管理
     useEffect(() => {
@@ -306,12 +367,8 @@ export default function App() {
             if (isInternalDrag.current) return
 
             if (!isDraggingRef.current) {
-                const hasFiles = Array.from(e.dataTransfer?.types || []).some(t => t.toLowerCase() === 'files')
-                if ((hasActiveLibraryRef.current || activeRemoteLibraryRef.current) && hasFiles) {
-                    console.log('[Global D&D] Delayed overlay trigger')
-                    setIsDragging(true)
-                    document.body.classList.add('dragging-file')
-                }
+                setIsDragging(true)
+                document.body.classList.add('dragging-file')
             }
         }
 
@@ -358,8 +415,25 @@ export default function App() {
             const filePaths = files.map(file => (file as any).path)
             console.log('[Global D&D] Global Dropped paths:', filePaths)
 
-            if (filePaths.length > 0) {
-                await handleSmartImport(filePaths)
+            // ライブラリに既に存在するファイルを除外（内部ドラッグの誤検出対策）
+            // パスセパレーターの正規化（バックスラッシュをスラッシュに変換して統一）
+            const normalizePath = (p: string) => p.replace(/\\/g, '/').toLowerCase()
+            const existingPaths = new Set(allMediaFilesRef.current.map(m => normalizePath(m.file_path)))
+
+            console.log('[Global D&D] Existing paths sample:', Array.from(existingPaths).slice(0, 3))
+
+            const newFilePaths = filePaths.filter(p => {
+                const normalized = normalizePath(p)
+                const exists = existingPaths.has(normalized)
+                if (exists) {
+                    console.log('[Global D&D] Filtered out existing file:', p)
+                }
+                return !exists
+            })
+            console.log('[Global D&D] New files to import:', newFilePaths.length, 'of', filePaths.length)
+
+            if (newFilePaths.length > 0) {
+                await handleSmartImport(newFilePaths)
             }
         }
 
@@ -368,7 +442,7 @@ export default function App() {
             console.log('[Global D&D] Global DragEnd')
             dragCounter.current = 0
             setIsDragging(false)
-            isInternalDrag.current = false
+            // isInternalDrag.current = false // DELETE: ネイティブドラッグ開始時に誤って呼ばれる可能性大
             document.body.classList.remove('dragging-file')
         }
 
@@ -383,12 +457,19 @@ export default function App() {
         }
 
         const handleFocusReset = () => {
-            if (dragCounter.current !== 0 || isDraggingRef.current) {
-                console.log('[Global] Focus recovered, resetting states')
-                dragCounter.current = 0
-                setIsDragging(false)
-                isInternalDrag.current = false
-                document.body.classList.remove('dragging-file')
+            if (dragCounter.current !== 0 || isDraggingRef.current || isInternalDrag.current) {
+                console.log('[Global] Focus recovered, resetting states (with delay)')
+                // Drop処理が走る可能性を考慮して少し待つ
+                setTimeout(() => {
+                    // もしまだ内部ドラッグフラグが立っていたら、ドロップされずに復帰したとみなしてリセット
+                    if (isInternalDrag.current) {
+                        console.log('[Global] Resetting isInternalDrag after delay')
+                        isInternalDrag.current = false
+                    }
+                    dragCounter.current = 0
+                    setIsDragging(false)
+                    document.body.classList.remove('dragging-file')
+                }, 500)
             }
         }
 
@@ -418,9 +499,30 @@ export default function App() {
     useEffect(() => {
         const handleTriggerImport = (_: any, filePaths: string[]) => {
             console.log('[App] Received trigger-import:', filePaths)
+
+            // 内部ドラッグ中はインポートしない
+            if (isInternalDrag.current) {
+                console.log('[App] Internal drag detected in trigger-import, ignoring.')
+                // フラグをリセット (ドロップは完了したとみなせるため)
+                isInternalDrag.current = false
+                return
+            }
+
             // Refを使用して最新の状態を確認
             if ((hasActiveLibraryRef.current || activeRemoteLibraryRef.current) && filePaths.length > 0) {
-                handleSmartImport(filePaths).catch(e => console.error('Import failed via trigger:', e))
+                // ライブラリに既に存在するファイルを除外（重複防止の安全策）
+                const normalizePath = (p: string) => p.replace(/\\/g, '/').toLowerCase()
+                const existingPaths = new Set(allMediaFilesRef.current.map(m => normalizePath(m.file_path)))
+                const newFilePaths = filePaths.filter(p => {
+                    const normalized = normalizePath(p)
+                    return !existingPaths.has(normalized)
+                })
+
+                if (newFilePaths.length > 0) {
+                    handleSmartImport(newFilePaths).catch(e => console.error('Import failed via trigger:', e))
+                } else {
+                    console.log('[App] All files filtered out as existing in library')
+                }
             }
         }
 
@@ -668,6 +770,12 @@ export default function App() {
                     setLastSelectedId(null)
                 }
             }
+
+            // 設定画面ショートカット (Ctrl + ,)
+            if ((e.ctrlKey || e.metaKey) && e.key === ',') {
+                e.preventDefault()
+                setShowSettingsModal(true)
+            }
         }
 
         document.addEventListener('keydown', handleKeyDown)
@@ -675,6 +783,12 @@ export default function App() {
     }, [selectedMediaIds, moveToTrash, filterOptions.filterType])
 
     const handleMediaClick = useCallback((media: MediaFile, e: React.MouseEvent) => {
+        // ドラッグ操作中はクリック処理（選択変更）を行わない
+        if (isInternalDrag.current) {
+            console.log('[App] Click blocked due to internal drag')
+            return
+        }
+
         const isCtrl = e.ctrlKey || e.metaKey
         const isShift = e.shiftKey
 
@@ -802,6 +916,75 @@ export default function App() {
             addNotification({
                 type: 'error',
                 title: 'エクスポート失敗',
+                message: e.message,
+                duration: 5000
+            })
+        }
+    }
+
+    const handleAddToLibrary = async (libraryId: string) => {
+        const media = contextMenu?.media
+        closeContextMenu()
+        if (!media) return
+
+        let targetMediaIds = [media.id]
+        if (selectedMediaIds.length > 0 && selectedMediaIds.includes(media.id)) {
+            targetMediaIds = selectedMediaIds
+        }
+
+        // クライアント設定から転送設定を取得
+        let config: ClientConfig | null = null
+        if (window.electronAPI) {
+            config = await (window.electronAPI as any).getClientConfig()
+        }
+
+        const settings = config?.libraryTransferSettings || {
+            keepTags: false,
+            keepArtists: false,
+            keepFolders: false,
+            keepRatings: false,
+            keepThumbnails: false,
+            keepUrl: false,
+            keepComments: false,
+            keepDescription: false
+        }
+
+        const targetLib = availableLibraries.find(l => l.path === libraryId)
+        const libName = targetLib ? targetLib.name : libraryId
+
+        const notificationId = addNotification({
+            type: 'progress',
+            title: `転送中: ${libName}`,
+            message: `${targetMediaIds.length} 個のファイルを転送しています...`,
+            progress: 0,
+            duration: 0
+        })
+
+        try {
+            const result = await window.electronAPI.copyMediaToLibrary(targetMediaIds, libraryId, settings, { notificationId })
+
+            removeNotification(notificationId)
+
+            if (result.success) {
+                addNotification({
+                    type: 'success',
+                    title: '転送完了',
+                    message: `${targetMediaIds.length} 個のファイルを ${libName} に追加しました`,
+                    duration: 5000
+                })
+            } else {
+                addNotification({
+                    type: 'error',
+                    title: '転送失敗',
+                    message: result.message || '不明なエラーが発生しました',
+                    duration: 5000
+                })
+            }
+        } catch (e: any) {
+            removeNotification(notificationId)
+            addNotification({
+                type: 'error',
+                title: '転送失敗',
                 message: e.message,
                 duration: 5000
             })
@@ -1064,10 +1247,14 @@ export default function App() {
                             onRenameCancel={() => setRenamingMediaId(null)}
                         />
                     ) : (
-                        <ListView
+                        <LibraryList
                             mediaFiles={mediaFiles}
                             selectedIds={selectedMediaIds}
                             onSelect={handleMediaClick}
+                            onSelectionChange={(ids) => {
+                                setSelectedMediaIds(ids)
+                                if (ids.length > 0) setLastSelectedId(ids[ids.length - 1])
+                            }}
                             onDoubleClick={handleMediaDoubleClick}
                             onContextMenu={handleContextMenu}
                             viewSettings={viewSettings}
@@ -1135,12 +1322,12 @@ export default function App() {
                 onRefreshFolders={loadFolders}
                 onDropFileOnFolder={handleDropOnFolder}
                 // 内部ドラッグの通知を追加
-                onInternalDragStart={() => {
-                    isInternalDrag.current = true
-                }}
+                onInternalDragStart={() => isInternalDrag.current = true}
                 onInternalDragEnd={() => {
-                    isInternalDrag.current = false
+                    // 少し遅延させてクリア（ドロップ処理との競合を防ぐ）
+                    setTimeout(() => isInternalDrag.current = false, 100)
                 }}
+                itemCounts={sidebarCounts}
             />
 
             <main className={`main-content ${playingMedia ? 'is-playing' : ''}`} onClick={(e) => {
@@ -1239,6 +1426,8 @@ export default function App() {
                     onOpenWith={handleOpenWith}
                     onShowInExplorer={handleShowInExplorer}
                     onAddToFolder={handleAddToFolder}
+                    availableLibraries={availableLibraries}
+                    onAddToLibrary={handleAddToLibrary}
                     onRename={() => {
                         setRenamingMediaId(contextMenu.media.id)
                         closeContextMenu()

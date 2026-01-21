@@ -4,28 +4,20 @@ import './RatingFilterDropdown.css'
 
 interface RatingFilterDropdownProps {
     filterOptions: FilterOptions
-    counts: Record<number, number>
+    counts: Record<string, number>
     onFilterChange: (options: FilterOptions) => void
     onClose: () => void
+    className?: string
 }
 
 export function RatingFilterDropdown({
     filterOptions,
     counts,
     onFilterChange,
-    onClose
+    onClose,
+    className
 }: RatingFilterDropdownProps) {
     const dropdownRef = useRef<HTMLDivElement>(null)
-
-    useEffect(() => {
-        const handleClickOutside = (e: MouseEvent) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-                onClose()
-            }
-        }
-        document.addEventListener('mousedown', handleClickOutside)
-        return () => document.removeEventListener('mousedown', handleClickOutside)
-    }, [onClose])
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -71,7 +63,7 @@ export function RatingFilterDropdown({
     const ratings = [5, 4, 3, 2, 1, 0]
 
     return (
-        <div className="rating-filter-dropdown" ref={dropdownRef}>
+        <div className={`rating-filter-dropdown ${className || ''}`} ref={dropdownRef}>
             <div className="rating-filter-list">
                 {ratings.map(rating => {
                     const isSelected = (filterOptions.selectedRatings || []).includes(rating)
@@ -82,11 +74,7 @@ export function RatingFilterDropdown({
                             onClick={() => toggleRating(rating)}
                         >
                             <div className="rating-checkbox">
-                                <input
-                                    type="checkbox"
-                                    checked={isSelected}
-                                    onChange={() => { }} // Controlled by parent click
-                                />
+                                {isSelected && <span className="check-mark">✓</span>}
                             </div>
                             <div className="rating-stars">
                                 {rating > 0 ? renderStars(rating) : <span className="no-rating-text">評価なし</span>}

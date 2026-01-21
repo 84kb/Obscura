@@ -720,9 +720,15 @@ export class MediaLibrary {
 
       if (invalidChars.test(newName)) {
         console.log(`[MediaLibrary] Invalid characters detected in "${newName}". Updating title instead of renaming file.`)
-        media.title = newName // Set the virtual name
+        // 拡張子を除去してタイトルにする
+        const ext = path.extname(media.file_name)
+        let titleName = newName
+        if (titleName.toLowerCase().endsWith(ext.toLowerCase())) {
+          titleName = titleName.substring(0, titleName.length - ext.length)
+        }
+        media.title = titleName // Set the virtual name
         this.saveMediaMetadata(media)
-        return // Skip physical rename
+        return media // Return updated media
       }
 
       try {
@@ -744,8 +750,10 @@ export class MediaLibrary {
           media.title = null
           this.saveMediaMetadata(media)
         }
+        return media // Return updated media
       } catch (error) { console.error('Failed to rename physical file:', error); throw error }
     }
+    return null
   }
 
   public updateArtist(id: number, artist: string | null) {
@@ -1101,6 +1109,154 @@ export class MediaLibrary {
   }
   public getComments(mediaId: number) {
     return this.db.comments.filter((c) => c.mediaId === mediaId).sort((a, b) => a.time - b.time)
+  }
+  /**
+   * 別のライブラリなどからメタデータ付きでインポートする
+   */
+  public async importMediaBatch(
+    items: { sourcePath: string, meta: any }[],
+    settings: any,
+    onProgress?: (current: number, total: number, fileName: string) => void
+  ) {
+    const total = items.length
+    let current = 0
+
+    // タグ・フォルダーのキャッシュ（名前 -> ID）
+    // 毎回検索すると遅いので、インメモリのDB配列から検索するだけなら高速だが、
+    // createした場合は反映が必要。
+
+    for (const item of items) {
+      current++
+      const { sourcePath, meta } = item
+      const fileName = path.basename(sourcePath)
+
+      if (onProgress) onProgress(current, total, fileName)
+
+      try {
+        if (!fs.existsSync(sourcePath)) {
+          console.warn(`[MediaLibrary] Source file not found: ${sourcePath}`)
+          continue
+        }
+
+        // 1. ファイルコピー
+        // ID発行
+        const id = this.db.nextMediaId++
+        const uniqueId = crypto.randomBytes(6).toString('hex')
+        const destDir = path.join(this.path, 'images', uniqueId)
+        await fs.ensureDir(destDir)
+
+        // ファイル名処理（衝突回避等はimportMediaFiles同様だが、既存メタデータがあればそれを使うか？）
+        // ここではソースのファイル名を維持する
+        const cleanFileName = fileName.replace(/[\\/:*?"<>|]/g, '_')
+        const destPath = path.join(destDir, cleanFileName)
+
+        await fs.copy(sourcePath, destPath)
+
+        // 2. メタデータの構築
+        const stats = fs.statSync(destPath)
+        const fileType = ['.mp3', '.wav', '.flac', '.m4a', '.ogg', '.aac', '.wma'].includes(path.extname(destPath).toLowerCase()) ? 'audio' : 'video'
+
+        const newMeta: any = {
+          id,
+          uniqueId,
+          file_path: destPath,
+          file_name: cleanFileName,
+          file_type: fileType,
+          file_size: stats.size,
+          duration: meta.duration || 0,
+          width: meta.width || 0,
+          height: meta.height || 0,
+          created_date: stats.birthtime.toISOString(),
+          modified_date: stats.mtime.toISOString(),
+          created_at: new Date().toISOString(),
+          is_deleted: false,
+          last_played_at: null,
+          // Settings based metadata
+          rating: settings.keepRatings ? (meta.rating || 0) : 0,
+          artist: settings.keepArtists ? meta.artist : null,
+          artists: settings.keepArtists ? (meta.artists || []) : [],
+          description: settings.keepDescription ? meta.description : null,
+          url: settings.keepUrl ? meta.url : null,
+          comments: [], // 後で追加
+          tags: [], // 後で追加
+          folders: [], // 後で追加
+          dominant_color: null
+        }
+
+        // 3. サムネイル
+        if (settings.keepThumbnails && meta.thumbnail_path && fs.existsSync(meta.thumbnail_path)) {
+          const thumbExt = path.extname(meta.thumbnail_path)
+          const destThumbPath = path.join(destDir, `thumb_${id}${thumbExt}`)
+          await fs.copy(meta.thumbnail_path, destThumbPath)
+          newMeta.thumbnail_path = destThumbPath
+          // Colorもコピー
+          if (meta.dominant_color) newMeta.dominant_color = meta.dominant_color
+        } else {
+          // 再生成
+          // generate
+          // (非同期でやるべきだが、ここでは直列実行)
+          try {
+            const thumbPath = await getThumbnailPath(this.path, id, destPath)
+            const mode = getClientConfig().thumbnailMode || 'speed'
+            if (await createThumbnail(destPath, thumbPath, mode)) {
+              newMeta.thumbnail_path = thumbPath
+              try {
+                const color = await extractDominantColor(thumbPath)
+                if (color) newMeta.dominant_color = color
+              } catch (e) { console.error('Color extraction failed', e) }
+            }
+          } catch (e) { console.error('Thumb generation failed', e) }
+        }
+
+        // 4. コメント
+        if (settings.keepComments && meta.comments && Array.isArray(meta.comments)) {
+          newMeta.comments = meta.comments.map((c: any) => ({
+            ...c,
+            id: this.db.nextCommentId++, // IDリナンバリング
+            mediaId: id
+          }))
+          // DBのcomments配列にも追加
+          this.db.comments.push(...newMeta.comments)
+        }
+
+        // 5. タグ
+        if (settings.keepTags && meta.tags && Array.isArray(meta.tags)) {
+          const newTags: any[] = []
+          for (const tag of meta.tags) {
+            // 名前で検索
+            let targetTag = this.db.tags.find(t => t.name === tag.name)
+            if (!targetTag) {
+              // なければ作成
+              targetTag = this.createTag(tag.name)
+            }
+            newTags.push(targetTag)
+            this.db.mediaTags.push({ mediaId: id, tagId: targetTag.id })
+          }
+          newMeta.tags = newTags
+        }
+
+        // 6. フォルダー
+        if (settings.keepFolders && meta.folders && Array.isArray(meta.folders)) {
+          const newFolders: any[] = []
+          for (const folder of meta.folders) {
+            // 名前で検索 (階層は無視してフラットに検索・作成)
+            let targetFolder = this.db.folders.find(f => f.name === folder.name)
+            if (!targetFolder) {
+              targetFolder = this.createFolder(folder.name, null)
+            }
+            newFolders.push(targetFolder)
+            this.db.mediaFolders.push({ mediaId: id, folderId: targetFolder.id })
+          }
+          newMeta.folders = newFolders
+        }
+
+        this.db.mediaFiles.push(newMeta)
+        this.saveMediaMetadata(newMeta)
+
+      } catch (e) {
+        console.error(`[MediaLibrary] Failed to copy item: ${fileName}`, e)
+      }
+    }
   }
 }
 

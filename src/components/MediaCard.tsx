@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { MediaFile, ItemInfoType } from '../types'
 import './MediaCard.css'
 import { toMediaUrl } from '../utils/fileUrl'
@@ -21,6 +21,7 @@ interface MediaCardProps extends React.HTMLAttributes<HTMLDivElement> {
     onRenameCancel?: () => void
     thumbnailMode?: 'speed' | 'quality'
     width?: number
+    onDragGetPaths?: (id: string) => string[]
 }
 
 export function MediaCard({
@@ -41,10 +42,12 @@ export function MediaCard({
     onRenameCancel,
     thumbnailMode = 'speed',
     width = 250,
+    onDragGetPaths,
     ...props
 }: MediaCardProps) {
     const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null)
     const [isLoaded, setIsLoaded] = useState(false)
+    const mouseDownHandled = useRef(false) // MouseDownで選択処理を行ったかを追跡
 
     // サムネイルがない場合は自動生成をトリガー（品質優先モードの場合のみ）
     useEffect(() => {
@@ -58,7 +61,8 @@ export function MediaCard({
             // propが変わったときにURLを更新
             if (media.thumbnail_path) {
                 const url = toMediaUrl(media.thumbnail_path)
-                setThumbnailUrl(thumbnailMode === 'speed' ? `${url}?width=${width}` : url)
+                const separator = url.includes('?') ? '&' : '?'
+                setThumbnailUrl(thumbnailMode === 'speed' ? `${url}${separator}width=${width}` : url)
             } else if (thumbnailMode === 'quality' && media.file_type === 'video' && window.electronAPI) {
                 window.electronAPI.generateThumbnail(media.id, media.file_path)
                     .then((path: string | null) => {
@@ -174,7 +178,8 @@ export function MediaCard({
 
     // ネイティブファイルドラッグ開始
     const handleDragStart = (e: React.DragEvent) => {
-        console.log('[MediaCard] Drag start triggered for:', media.file_path)
+        const dragPaths = onDragGetPaths ? onDragGetPaths(String(media.id)) : [media.file_path]
+        console.log('[MediaCard] Drag start triggered for:', dragPaths)
 
         // 内部ドラッグ開始を通知
         onInternalDragStart?.()
@@ -182,8 +187,8 @@ export function MediaCard({
         e.preventDefault()
 
         if (window.electronAPI?.startDrag) {
-            console.log('[MediaCard] Calling startDrag IPC')
-            window.electronAPI.startDrag([media.file_path])
+            console.log('[MediaCard] Calling startDrag IPC with', dragPaths.length, 'files')
+            window.electronAPI.startDrag(dragPaths)
         } else {
             console.error('[MediaCard] electronAPI.startDrag not available')
         }
@@ -195,15 +200,45 @@ export function MediaCard({
         onInternalDragEnd?.()
     }
 
+    // マウスダウン時の伝播を止めて、LibraryGridの範囲選択ロジックが走らないようにする to fix selection clear issue on drag
+    // かつ、未選択アイテムの場合は即座に選択状態にする（ドラッグ開始に間に合わせるため）
+    const handleMouseDown = (e: React.MouseEvent) => {
+        if (e.button === 0) { // 左クリックのみ
+            e.stopPropagation()
+
+            if (!isSelected) {
+                // 未選択時はここで選択処理を実行
+                // これによりドラッグ開始時には「選択済み」扱いになる
+                onClick(e)
+                mouseDownHandled.current = true
+            } else {
+                // 既に選択済みの場合は何もしない（ドラッグ待機）
+                // マウスアップ（クリック）時に選択解除等の処理が走る
+                mouseDownHandled.current = false
+            }
+        }
+    }
+
+    const handleClick = (e: React.MouseEvent) => {
+        // MouseDownですでに処理済みの場合はスキップ
+        if (mouseDownHandled.current) {
+            mouseDownHandled.current = false
+            return
+        }
+        onClick(e)
+    }
+
     return (
         <div
-            className={`media-card ${isSelected ? 'selected' : ''}`}
-            onMouseDown={(e) => onClick(e)}
+            className={`media-card ${isSelected ? 'selected' : ''} ${isRenaming ? 'renaming' : ''}`}
+            onClick={handleClick}
             onDoubleClick={onDoubleClick}
             onContextMenu={handleContextMenu}
             draggable
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
+            onMouseDown={handleMouseDown}
+            style={{ width }}
             {...props}
         >
             <div

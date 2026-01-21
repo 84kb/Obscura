@@ -6,12 +6,14 @@ interface DateFilterDropdownProps {
     filterOptions: FilterOptions
     onFilterChange: (options: FilterOptions) => void
     onClose: () => void
+    className?: string
 }
 
 export function DateFilterDropdown({
     filterOptions,
     onFilterChange,
-    onClose
+    onClose,
+    className
 }: DateFilterDropdownProps) {
     const [minDate, setMinDate] = useState<string>('')
     const [maxDate, setMaxDate] = useState<string>('')
@@ -28,15 +30,13 @@ export function DateFilterDropdown({
         }
     }, [filterOptions.dateModifiedMin, filterOptions.dateModifiedMax])
 
-    // 外側クリックで閉じる
+    // ESCで閉じる
     useEffect(() => {
-        const handleClickOutside = (e: MouseEvent) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-                onClose()
-            }
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') onClose()
         }
-        document.addEventListener('mousedown', handleClickOutside)
-        return () => document.removeEventListener('mousedown', handleClickOutside)
+        document.addEventListener('keydown', handleKeyDown)
+        return () => document.removeEventListener('keydown', handleKeyDown)
     }, [onClose])
 
     const applyDateRange = (min: string | null, max: string | null, presetName: string | null = null) => {
@@ -96,7 +96,7 @@ export function DateFilterDropdown({
     }
 
     return (
-        <div className="date-filter-dropdown" ref={dropdownRef}>
+        <div className={`date-filter-dropdown ${className || ''}`} ref={dropdownRef}>
             <div className="date-preset-grid">
                 <button
                     className={`preset-btn ${activePreset === 'today' ? 'active' : ''}`}

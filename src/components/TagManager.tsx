@@ -603,6 +603,7 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
                             left={Math.min(selectionBoxStart.x, selectionBoxEnd.x)}
                             width={Math.abs(selectionBoxEnd.x - selectionBoxStart.x)}
                             height={Math.abs(selectionBoxEnd.y - selectionBoxStart.y)}
+                            position="fixed"
                         />
                     )}
                 </div>

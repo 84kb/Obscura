@@ -58,10 +58,15 @@ export async function waitForRemoteConnection(
                 : currentUrl.replace('http://', 'https://')
 
             console.log(`[Remote Health] Trying alternate protocol: ${altUrl}`)
-            if (await checkHealth(altUrl)) {
+            const altSuccess = await checkHealth(altUrl)
+
+            if (altSuccess) {
                 console.log(`[Remote Health] Connection established using alternate protocol: ${altUrl}`)
                 return altUrl
+            } else {
+                console.warn(`[Remote Health] Alternate protocol also failed: ${altUrl}`)
             }
+
             // 一度試したらフラグをfalseにして、次回以降は試さない
             tryAlternateProtocol = false
         }

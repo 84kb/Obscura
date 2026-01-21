@@ -23,6 +23,7 @@ export interface MediaFile {
     url?: string | null
     dominant_color?: string | null
     title?: string | null
+    framerate?: number
 }
 
 export interface MediaComment {
@@ -80,7 +81,7 @@ export interface FilterOptions {
     folderFilterMode: 'and' | 'or'
     filterType: 'all' | 'uncategorized' | 'untagged' | 'recent' | 'random' | 'trash' | 'tag_manager'
     fileType: 'all' | 'video' | 'audio' // 内部フィルタリング用として残す
-    sortOrder: 'name' | 'date' | 'size' | 'duration' | 'last_played' | 'rating' | 'modified' | 'artist'
+    sortOrder: 'name' | 'date' | 'size' | 'duration' | 'last_played' | 'rating' | 'modified' | 'artist' | 'tags'
     sortDirection: 'asc' | 'desc'
     selectedRatings: number[] // 0-5, 0 は「評価なし」
     selectedExtensions: string[]
@@ -187,13 +188,14 @@ export interface ElectronAPI {
     openWith: (filePath: string) => Promise<void>
     copyFile: (filePath: string) => Promise<void>
     copyToClipboard: (text: string) => Promise<void>
-    renameMedia: (mediaId: number, newName: string) => Promise<void>
+    renameMedia: (mediaId: number, newName: string) => Promise<MediaFile | null>
     updateRating: (mediaId: number, rating: number) => Promise<void>
     backfillMetadata: () => Promise<number>
     updateArtist: (mediaId: number, artist: string | null) => Promise<void>
     updateDescription: (mediaId: number, description: string | null) => Promise<void>
     updateUrl: (mediaId: number, url: string | null) => Promise<void>
     exportMedia: (mediaId: number, options?: { notificationId?: string }) => Promise<{ success: boolean; message?: string }>
+    copyMediaToLibrary: (mediaIds: number[], libraryPath: string, settings: LibraryTransferSettings, options?: { notificationId?: string }) => Promise<{ success: boolean; message?: string }>
 
     // タググループ操作
     getTagGroups: () => Promise<TagGroup[]>
@@ -305,6 +307,17 @@ export interface LibraryViewSettings {
     sortDirection: 'asc' | 'desc'
 }
 
+export interface LibraryTransferSettings {
+    keepTags: boolean
+    keepArtists: boolean
+    keepFolders: boolean
+    keepRatings: boolean
+    keepThumbnails: boolean
+    keepUrl: boolean
+    keepComments: boolean
+    keepDescription: boolean
+}
+
 export interface ClientConfig {
     downloadPath: string
     theme: 'dark' | 'light' | 'system'
@@ -317,6 +330,7 @@ export interface ClientConfig {
     discordRichPresenceEnabled: boolean
     nickname?: string
     iconUrl?: string
+    libraryTransferSettings?: LibraryTransferSettings
 }
 
 export interface AppSettings {

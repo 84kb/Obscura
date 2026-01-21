@@ -97,6 +97,7 @@ export function Inspector({
     const [folderPickerPos, setFolderPickerPos] = useState<{ top: number; right: number } | null>(null)
     const tagButtonRef = useRef<HTMLButtonElement>(null)
     const folderButtonRef = useRef<HTMLButtonElement>(null)
+    const inspectorRef = useRef<HTMLDivElement>(null)
     const tagPickerRef = useRef<HTMLDivElement>(null)
     const folderPickerRef = useRef<HTMLDivElement>(null)
 
@@ -125,7 +126,7 @@ export function Inspector({
     // mediaが変わったらファイル名と投稿者をリセット
     useEffect(() => {
         if (media.length === 1) {
-            setFileName(getFileNameWithoutExt(media[0].file_name))
+            setFileName(media[0].title || getFileNameWithoutExt(media[0].file_name))
             setCurrentRating(media[0].rating || 0)
             setArtistName(media[0].artist || '')
             setUrl(media[0].url || '')
@@ -199,6 +200,9 @@ export function Inspector({
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
             const target = e.target as Node
+            // 要素がDOMから削除されている場合（例：作成ボタンクリックで非表示になった場合）は無視
+            if (!document.contains(target)) return
+
             // タグピッカーが開いている時
             if (showTagInput && tagPickerRef.current && !tagPickerRef.current.contains(target) &&
                 tagButtonRef.current && !tagButtonRef.current.contains(target)) {
@@ -212,9 +216,9 @@ export function Inspector({
                 setFolderInput('')
             }
         }
-        // Use click instead of mousedown to allow item clicks to process first
-        document.addEventListener('click', handleClickOutside)
-        return () => document.removeEventListener('click', handleClickOutside)
+        // Use mousedown instead of click to fix issue where dragging from inside to outside closes the menu
+        document.addEventListener('mousedown', handleClickOutside)
+        return () => document.removeEventListener('mousedown', handleClickOutside)
     }, [showTagInput, showFolderInput])
 
     // ボタンクリック時にポップオーバー位置を計算
@@ -224,7 +228,16 @@ export function Inspector({
 
         if (!showTagInput && tagButtonRef.current) {
             const rect = tagButtonRef.current.getBoundingClientRect()
-            setTagPickerPos({ top: rect.top, right: window.innerWidth - rect.left + 8 })
+            let right = window.innerWidth - rect.left + 8
+
+            // インスペクタの外側（左側）に配置し、少しだけ重ねる
+            if (inspectorRef.current) {
+                const inspectorRect = inspectorRef.current.getBoundingClientRect()
+                // 画面右端からの距離 = (画面幅 - インスペクタ左端) - 重なり(8px)
+                // 余白の中間あたりに配置
+                right = (window.innerWidth - inspectorRect.left) - 8
+            }
+            setTagPickerPos({ top: rect.top, right })
         }
         setShowTagInput(!showTagInput)
     }
@@ -235,7 +248,14 @@ export function Inspector({
 
         if (!showFolderInput && folderButtonRef.current) {
             const rect = folderButtonRef.current.getBoundingClientRect()
-            setFolderPickerPos({ top: rect.top, right: window.innerWidth - rect.left + 8 })
+            let right = window.innerWidth - rect.left + 8
+
+            // インスペクタの外側（左側）に配置し、少しだけ重ねる
+            if (inspectorRef.current) {
+                const inspectorRect = inspectorRef.current.getBoundingClientRect()
+                right = (window.innerWidth - inspectorRect.left) - 8
+            }
+            setFolderPickerPos({ top: rect.top, right })
         }
         setShowFolderInput(!showFolderInput)
     }
@@ -501,7 +521,7 @@ export function Inspector({
     }
 
     return (
-        <div className="inspector slide-in-right">
+        <div className="inspector slide-in-right" ref={inspectorRef}>
             <div className="inspector-header">
                 <h2 className="inspector-title">インスペクタ</h2>
                 <div className="window-controls">

@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
-import { Tag, TagGroup, FilterOptions } from '../types'
+import { useState, useEffect, useRef, useMemo } from 'react'
+import { Tag, TagGroup, FilterOptions, MediaFile } from '../types'
 import './TagFilterDropdown.css'
 
 interface TagFilterDropdownProps {
@@ -8,6 +8,8 @@ interface TagFilterDropdownProps {
     filterOptions: FilterOptions
     onFilterChange: (options: FilterOptions) => void
     onClose: () => void
+    allMediaFiles: MediaFile[]
+    className?: string
 }
 
 export function TagFilterDropdown({
@@ -15,30 +17,31 @@ export function TagFilterDropdown({
     tagGroups,
     filterOptions,
     onFilterChange,
-    onClose
+    onClose,
+    allMediaFiles,
+    className
 }: TagFilterDropdownProps) {
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedGroupId, setSelectedGroupId] = useState<number | null | 'all'>('all')
     const dropdownRef = useRef<HTMLDivElement>(null)
 
-    // 外側クリックで閉じる
-    useEffect(() => {
-        const handleClickOutside = (e: MouseEvent) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-                onClose()
+    // タグの使用回数を事前計算
+    const tagUsageCount = useMemo(() => {
+        const counts = new Map<number, number>()
+        allMediaFiles.forEach(file => {
+            if (file.tags) {
+                file.tags.forEach(t => {
+                    counts.set(t.id, (counts.get(t.id) || 0) + 1)
+                })
             }
-        }
-        document.addEventListener('mousedown', handleClickOutside)
-        return () => document.removeEventListener('mousedown', handleClickOutside)
-    }, [onClose])
+        })
+        return counts
+    }, [allMediaFiles])
+
+    // 外側クリックで閉じる
 
     // ESCで閉じる
     useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') onClose()
-        }
-        document.addEventListener('keydown', handleKeyDown)
-        return () => document.removeEventListener('keydown', handleKeyDown)
     }, [onClose])
 
     // フィルタされたタグ
@@ -143,16 +146,16 @@ export function TagFilterDropdown({
         onFilterChange({ ...filterOptions, tagFilterMode: mode })
     }
 
-    // タグの使用数を取得（メディアに紐付いている数を表示するには別途実装が必要、ここでは1を表示）
-    const getTagCount = (_tagId: number) => {
-        // TODO: 実際のメディア紐付け数を取得
-        return 1
+    // タグの使用数を取得
+    const getTagCount = (tagId: number) => {
+        return tagUsageCount.get(tagId) || 0
     }
+
 
     const isAllVisibleSelected = filteredTags.length > 0 && filteredTags.every(t => filterOptions.selectedTags.includes(t.id))
 
     return (
-        <div className="tag-filter-dropdown" ref={dropdownRef}>
+        <div className={`tag-filter-dropdown ${className || ''}`} ref={dropdownRef}>
             {/* ヘッダー: 検索とルール */}
             <div className="tag-filter-header">
                 <div className="tag-filter-search">
@@ -229,11 +232,10 @@ export function TagFilterDropdown({
                                 onClick={() => toggleTag(tag.id)}
                                 onContextMenu={(e) => handleTagContextMenu(e, tag.id)}
                             >
-                                <input
-                                    type="checkbox"
-                                    checked={isSelected}
-                                    readOnly // click handler handles change
-                                />
+                                <div className="tag-checkbox">
+                                    {isSelected && <span className="check-mark">✓</span>}
+                                    {isExcluded && <span className="exclude-mark">×</span>}
+                                </div>
                                 <span className={`tag-name ${isExcluded ? 'excluded-text' : ''}`}>{tag.name}</span>
                                 <span className="tag-count">{getTagCount(tag.id)}</span>
                             </div>
@@ -241,11 +243,9 @@ export function TagFilterDropdown({
                     })}
                     {filteredTags.length > 0 && (
                         <div className="tag-item select-all" onClick={selectAll}>
-                            <input
-                                type="checkbox"
-                                checked={isAllVisibleSelected}
-                                readOnly
-                            />
+                            <div className="tag-checkbox">
+                                {isAllVisibleSelected && <span className="check-mark">✓</span>}
+                            </div>
                             <span className="tag-name">すべてを選択</span>
                         </div>
                     )}
