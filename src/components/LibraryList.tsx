@@ -85,7 +85,8 @@ const ListThumbnail: React.FC<{ media: MediaFile, thumbnailMode: 'speed' | 'qual
         let timeoutId: NodeJS.Timeout | null = null;
         const update = () => {
             const url = toMediaUrl(media.thumbnail_path!)
-            setSrc(thumbnailMode === 'speed' ? `${url}&width=48` : url);
+            const separator = url.includes('?') ? '&' : '?'
+            setSrc(thumbnailMode === 'speed' ? `${url}${separator}width=48` : url);
         };
 
         if (thumbnailMode === 'speed') {

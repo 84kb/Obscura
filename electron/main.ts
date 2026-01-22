@@ -76,7 +76,9 @@ protocol.registerSchemesAsPrivileged([
             secure: true,
             supportFetchAPI: true,
             bypassCSP: true,
-            stream: true
+            stream: true,
+            standard: true,
+            corsEnabled: true
         }
     }
 ])
@@ -272,12 +274,26 @@ app.whenReady().then(() => {
             const startTime = Date.now();
             console.log(`[Media Protocol][${requestId}] Request URL: ${request.url}`)
 
-            // URLオブジェクトを使用してパスを解析
-            const url = new URL(request.url)
-            const cacheKey = `${url.pathname}${url.search}`
+            // URLオブジェクト解析ではなく、文字列操作でパスを抽出してデコードする
+            // これにより、ホスト名として誤認される問題や、デコードの非対称性を回避
+            let rawPath = request.url.replace(/^media:\/\//, '')
+
+            // クエリパラメータの分離 (?width=xxx など)
+            // Windowsファイルパスには ? は含まれないため、最後の ? 以降をクエリとみなして安全
+            const queryIndex = rawPath.lastIndexOf('?')
+            let widthParam: string | null = null
+
+            if (queryIndex !== -1) {
+                const queryString = rawPath.substring(queryIndex)
+                const searchParams = new URLSearchParams(queryString)
+                widthParam = searchParams.get('width')
+                rawPath = rawPath.substring(0, queryIndex)
+            }
+
+            // キャッシュキーはデコード前のパスを使用
+            const cacheKey = `${rawPath}${widthParam ? `?width=${widthParam}` : ''}`
 
             // キャッシュヒットの確認 (Speedモードリクエストのみ)
-            const widthParam = url.searchParams.get('width')
             if (widthParam && thumbnailCache.has(cacheKey)) {
                 const cachedBuffer = thumbnailCache.get(cacheKey)!
                 return new Response(cachedBuffer as any, {
@@ -290,13 +306,37 @@ app.whenReady().then(() => {
                 })
             }
 
-            let decodedPath: string
-            if (url.hostname) {
-                const driveLetter = url.hostname.toUpperCase()
-                const pathPart = decodeURIComponent(url.pathname)
-                decodedPath = `${driveLetter}:${pathPart}`
-            } else {
-                decodedPath = decodeURIComponent(url.pathname)
+            // 完全なデコードを実行
+            // 複数回エンコードされている可能性も考慮して一旦デコードするが、
+            // 基本的には1回のdecodeURIComponentで十分なはず
+            let decodedPath = decodeURIComponent(rawPath)
+
+            // Windowsパスの調整
+            if (process.platform === 'win32') {
+                // スラッシュをバックスラッシュに統一 (Windows標準)
+                decodedPath = decodedPath.replace(/\//g, '\\')
+
+                // 先頭のバックスラッシュを削除 (ドライブレターの前にある場合)
+                // \C:\Users... -> C:\Users...
+                if (decodedPath.startsWith('\\') && /^[a-zA-Z]:/.test(decodedPath.substring(1))) {
+                    decodedPath = decodedPath.substring(1)
+                }
+
+                // ドライブレターのコロンが欠落している場合の復元 (standard: trueの影響対策)
+                // e\Library\... -> e:\Library\...
+                // 先頭が1文字のアルファベットで、次がバックスラッシュの場合
+                if (/^[a-zA-Z]\\[^?]/.test(decodedPath)) {
+                    decodedPath = decodedPath.substring(0, 1) + ':' + decodedPath.substring(1);
+                } else if (/^[a-zA-Z]$/.test(decodedPath)) {
+                    // "e" だけの場合 -> e:
+                    decodedPath = decodedPath + ':';
+                }
+
+                // UNCパス対応 (長いパス対策)
+                // 絶対パス(ドライブレターで始まる)で、かつまだ \\?\ で始まっていない場合
+                if (/^[a-zA-Z]:/.test(decodedPath) && !decodedPath.startsWith('\\\\?\\')) {
+                    decodedPath = `\\\\?\\${decodedPath}`
+                }
             }
 
             // Windowsパスの正規化
