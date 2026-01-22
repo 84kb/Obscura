@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import './ConfirmModal.css'
 
 interface ConfirmModalProps {
@@ -19,7 +20,7 @@ export function ConfirmModal({
     onCancel,
     isDestructive = false
 }: ConfirmModalProps) {
-    return (
+    return createPortal(
         <div className="confirm-modal-overlay" onClick={onCancel}>
             <div className="confirm-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="confirm-modal-header">
@@ -45,6 +46,7 @@ export function ConfirmModal({
                     </button>
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body
     )
 }

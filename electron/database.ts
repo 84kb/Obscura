@@ -723,10 +723,12 @@ export class MediaLibrary {
         // 拡張子を除去してタイトルにする
         const ext = path.extname(media.file_name)
         let titleName = newName
-        if (titleName.toLowerCase().endsWith(ext.toLowerCase())) {
+        // 拡張子を確実に除去(大文字小文字を区別しない)
+        if (ext && titleName.toLowerCase().endsWith(ext.toLowerCase())) {
           titleName = titleName.substring(0, titleName.length - ext.length)
         }
-        media.title = titleName // Set the virtual name
+        // 念のため、空白をトリム
+        media.title = titleName.trim() || null // Set the virtual name
         this.saveMediaMetadata(media)
         return media // Return updated media
       }

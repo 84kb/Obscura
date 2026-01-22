@@ -117,6 +117,7 @@ try {
             return () => ipcRenderer.off('trigger-frame-capture', subscription);
         },
         copyFrameToClipboard: (dataUrl) => ipcRenderer.invoke('copy-frame-to-clipboard', dataUrl),
+        copyFileToClipboard: (filePath) => ipcRenderer.invoke('copy-file-to-clipboard', filePath),
         saveCapturedFrame: (dataUrl) => ipcRenderer.invoke('save-captured-frame', dataUrl),
         setCapturedThumbnail: (mediaId, dataUrl) => ipcRenderer.invoke('set-captured-thumbnail', mediaId, dataUrl),
 

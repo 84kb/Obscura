@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, protocol, Menu, MenuItem, nativeImage, clipboard } from 'electron'
 import path from 'node:path'
+import { spawn } from 'node:child_process'
 import fs from 'fs-extra'
 import { fileURLToPath, URL } from 'node:url'
 import crypto from 'crypto'
@@ -42,8 +43,20 @@ try {
 
     // Discord RPC 初期化
     const config = getClientConfig()
+
+    // GPUアクセラレーション設定の適用
+    if (config.enableGPUAcceleration === false) {
+        console.log('[Main] GPU Acceleration is DISABLED by user setting.')
+        app.disableHardwareAcceleration()
+    } else {
+        console.log('[Main] GPU Acceleration is ENABLED.')
+    }
+
     if (config.discordRichPresenceEnabled) {
-        initDiscordRpc()
+        // 非同期で初期化し、エラーが発生してもアプリケーション起動をブロックしない
+        initDiscordRpc().catch(err => {
+            console.log('[Discord RPC] Initialization failed:', err.message || err)
+        })
     }
 
     console.log('[Main] Initialization complete.')
@@ -79,6 +92,10 @@ const AUDIO_EXTENSIONS = ['.mp3', '.wav', '.flac', '.m4a', '.ogg', '.aac', '.wma
 app.setPath('userData', path.join(app.getPath('home'), '.obscura'))
 app.setPath('cache', path.join(app.getPath('home'), '.obscura', 'cache'))
 
+// バックグラウンドでのパフォーマンス低下を防ぐ
+app.commandLine.appendSwitch('disable-renderer-backgrounding')
+app.commandLine.appendSwitch('disable-background-timer-throttling')
+
 function createWindow() {
     // builtファイルからの相対パスで解決
     const preloadPath = path.join(__dirname, 'preload.cjs')
@@ -101,6 +118,7 @@ function createWindow() {
             contextIsolation: true,
             nodeIntegration: false,
             sandbox: false, // 開発環境でのpreload読み込みを安定させるため無効化
+            backgroundThrottling: false, // バックグラウンド時のスロットリングを無効化
         },
         backgroundColor: '#1a1a1a',
         show: false,
@@ -497,7 +515,7 @@ console.log('[Main] Registering IPC handlers...')
 // ライブラリ管理
 // メディアの他のライブラリへのコピー
 console.log('[DEBUG] Registering IPC handler: copy-media-to-library')
-ipcMain.handle('copy-media-to-library', async (event, mediaIds: number[], targetLibraryPath: string, settings: any, options?: { notificationId?: string }) => {
+ipcMain.handle('copy-media-to-library', async (_event, mediaIds: number[], targetLibraryPath: string, settings: any, options?: { notificationId?: string }) => {
     try {
         console.log(`[MediaLibrary] Copying ${mediaIds.length} items to ${targetLibraryPath}`)
 
@@ -724,6 +742,36 @@ ipcMain.handle('backfill-metadata', async () => {
 // メディアファイル取得(詳細付き)
 ipcMain.handle('get-media-file', async (_, id: number) => {
     return mediaDB.getMediaFileWithDetails(id)
+})
+
+// ファイルをクリップボードにコピー
+ipcMain.handle('copy-file-to-clipboard', async (_, filePath: string) => {
+    try {
+        if (process.platform === 'win32') {
+            return new Promise((resolve) => {
+                // PowerShellを使ってファイルオブジェクトとしてクリップボードにコピー
+                // LiteralPathを使用して特殊文字に対応
+                const escapedPath = filePath.replace(/'/g, "''");
+                const ps = spawn('powershell', ['-NoProfile', '-Command', `Set-Clipboard -LiteralPath '${escapedPath}'`]);
+
+                ps.on('close', (code) => {
+                    if (code !== 0) {
+                        console.error('[Clipboard] PowerShell exited with code:', code);
+                    }
+                    resolve(code === 0);
+                });
+
+                ps.on('error', (err) => {
+                    console.error('[Clipboard] Spawn error:', err);
+                    resolve(false);
+                });
+            });
+        }
+        return false;
+    } catch (error) {
+        console.error('[Clipboard] Handler error:', error);
+        return false;
+    }
 })
 
 // タグ操作
@@ -1362,7 +1410,10 @@ ipcMain.handle('update-client-config', async (_, updates: Partial<ClientConfig>)
     // Discord RPC Toggle
     if (updates.discordRichPresenceEnabled !== undefined) {
         if (newConfig.discordRichPresenceEnabled) {
-            initDiscordRpc()
+            // 非同期で初期化し、エラーが発生してもブロックしない
+            initDiscordRpc().catch(err => {
+                console.log('[Discord RPC] Initialization failed:', err.message || err)
+            })
         } else {
             destroyDiscordRpc()
         }

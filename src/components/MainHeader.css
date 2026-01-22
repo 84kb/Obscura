@@ -51,7 +51,7 @@ body.dragging-file .app-drag-overlay {
 
 .icon-btn.active {
     color: var(--primary);
-    background: rgba(255, 140, 66, 0.1);
+    background: color-mix(in srgb, var(--primary), transparent 85%);
 }
 
 .current-title {
@@ -220,7 +220,7 @@ body.dragging-file .app-drag-overlay {
 }
 
 .filter-bar-btn.active {
-    background: rgba(255, 140, 66, 0.15);
+    background: color-mix(in srgb, var(--primary), transparent 85%);
     color: var(--primary);
 }
 
@@ -320,8 +320,9 @@ body.dragging-file .app-drag-overlay {
 }
 
 .toggle-btn.active {
-    background: var(--accent);
-    color: white;
+    background: color-mix(in srgb, var(--primary), transparent 85%);
+    color: var(--primary);
+    font-weight: 600;
 }
 
 /* ソート方向ボタン */
@@ -343,7 +344,8 @@ body.dragging-file .app-drag-overlay {
 }
 
 .sort-dir-btn.active {
-    color: var(--accent);
+    color: var(--primary);
+    background: color-mix(in srgb, var(--primary), transparent 85%);
 }
 
 /* トグルスイッチ */

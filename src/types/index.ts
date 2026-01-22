@@ -197,6 +197,9 @@ export interface ElectronAPI {
     exportMedia: (mediaId: number, options?: { notificationId?: string }) => Promise<{ success: boolean; message?: string }>
     copyMediaToLibrary: (mediaIds: number[], libraryPath: string, settings: LibraryTransferSettings, options?: { notificationId?: string }) => Promise<{ success: boolean; message?: string }>
 
+    // クリップボード
+    copyFileToClipboard: (filePath: string) => Promise<boolean>
+
     // タググループ操作
     getTagGroups: () => Promise<TagGroup[]>
     createTagGroup: (name: string) => Promise<TagGroup>
@@ -318,9 +321,32 @@ export interface LibraryTransferSettings {
     keepDescription: boolean
 }
 
+export interface ThemeColors {
+    bgDark: string
+    bgCard: string
+    bgSidebar: string
+    bgHover: string
+    primary: string
+    primaryHover: string
+    primaryLight: string
+    accent: string
+    textMain: string
+    textMuted: string
+    border: string
+}
+
+export interface Theme {
+    id: string
+    name: string
+    colors: ThemeColors
+    isSystem?: boolean // for default themes
+}
+
 export interface ClientConfig {
     downloadPath: string
     theme: 'dark' | 'light' | 'system'
+    customThemes?: Theme[]
+    activeThemeId?: string // 適用中のカスタムテーマID (themeが'custom'の場合などに使用)
     language: 'ja' | 'en'
     remoteLibraries: RemoteLibrary[]
     myUserToken?: string
@@ -331,6 +357,7 @@ export interface ClientConfig {
     nickname?: string
     iconUrl?: string
     libraryTransferSettings?: LibraryTransferSettings
+    enableGPUAcceleration?: boolean
 }
 
 export interface AppSettings {

@@ -1,4 +1,4 @@
-/* 繝励Ξ繧､繝､繝ｼ繝倥ャ繝繝ｼ繝舌� */
+/* プレイヤーヘッダーバ�E */
 .player-header-bar {
     position: relative;
     width: 100%;
@@ -25,11 +25,11 @@
     font-size: 16px;
     font-weight: 500;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
-    /* 2陦御ｻ･荳翫↓縺ｪ縺｣縺溘ｉ...縺ｫ縺吶ｋ */
+    /* 2行以上になったら...にする */
     display: -webkit-box;
     -webkit-line-clamp: 1;
     line-clamp: 1;
-    /* 讓呎ｺ悶�繝ｭ繝代ユ繧｣ */
+    /* 標準�Eロパティ */
     -webkit-box-orient: vertical;
     overflow: hidden;
     max-width: 600px;
@@ -54,7 +54,7 @@
     transform: scale(1.1);
 }
 
-/* 繝翫ン繧ｲ繝ｼ繧ｷ繝ｧ繝ｳ繝懊ち繝ｳ */
+/* ナビゲーションボタン */
 .nav-buttons {
     display: flex;
     gap: 8px;
@@ -85,12 +85,12 @@
 }
 
 /* ... existing styles ... */
-/* 莉･荳九�繧ｹ繧ｿ繧､繝ｫ縺ｯ譌｢蟄倥�CSS縺ｫ霑ｽ蜉�縺ｾ縺溘�螟画峩 */
+/* 以下�Eスタイルは既存�ECSSに追加また�E変更 */
 
 .player-container {
     width: 100%;
     height: 100%;
-    /* 閭梧勹騾城℃�医い繝励Μ縺ｮ閭梧勹繧定｡ｨ遉ｺ�� */
+    /* 背景透過�E�アプリの背景を表示�E�E*/
     background: transparent;
     position: relative;
     overflow: hidden;
@@ -98,7 +98,7 @@
     flex-direction: column;
 }
 
-/* 繝励Ξ繧､繝､繝ｼ繧ｳ繝ｳ繝�Φ繝� */
+/* プレイヤーコンチE��チE*/
 .player-content {
     flex: 1;
     display: flex;
@@ -107,7 +107,7 @@
     position: relative;
     overflow: hidden;
     min-height: 0;
-    /* flexbox縺ｧ縺ｮ邵ｮ蟆上ｒ險ｱ蜿ｯ */
+    /* flexboxでの縮小を許可 */
 }
 
 .player-video {
@@ -116,7 +116,7 @@
     object-fit: contain;
 }
 
-/* ... 繧ｪ繝ｼ繝�ぅ繧ｪ髢｢騾｣ ... */
+/* ... オーチE��オ関連 ... */
 .player-audio-visual {
     display: flex;
     flex-direction: column;
@@ -143,12 +143,11 @@
     font-weight: 600;
 }
 
-/* 繧ｳ繝ｳ繝医Ο繝ｼ繝ｫ繝舌� */
+/* コントロールバ�E */
 .player-controls-bar {
     height: 48px;
     /* 80px -> 48px */
-    background: var(--bg-card);
-    border-top: 1px solid var(--border);
+    background: rgba(0, 0, 0, 0.6);
     padding: 0 12px;
     display: flex;
     align-items: center;
@@ -174,11 +173,11 @@
     justify-content: center;
 }
 
-/* 繧ｳ繝ｳ繝医Ο繝ｼ繝ｫ繝懊ち繝ｳ */
+/* コントロールボタン */
 .control-btn {
     background: transparent;
     border: none;
-    color: var(--text-muted);
+    color: rgba(255, 255, 255, 0.8);
     width: 40px;
     height: 40px;
     border-radius: 8px;
@@ -190,8 +189,8 @@
 }
 
 .control-btn:hover {
-    background: var(--bg-hover);
-    color: var(--text-main);
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
 }
 
 .control-btn.active {
@@ -205,12 +204,12 @@
     font-size: 14px;
 }
 
-/* 繝懊Μ繝･繝ｼ繝�繧ｳ繝ｳ繝医Ο繝ｼ繝ｫ */
+/* ボリュームコントロール */
 .volume-control-group {
     display: flex;
     align-items: center;
     gap: 0px;
-    /* 髫咎俣繧定ｩｰ繧√ｋ */
+    /* 隙間を詰める */
     transition: all 0.3s ease;
 }
 
@@ -218,13 +217,13 @@
     width: 0;
     opacity: 0;
     height: 6px;
-    /* 蟆代＠螟ｪ縺上＠縺ｦ繝励Ο繧ｰ繝ｬ繧ｹ繝舌�繧峨＠縺� */
+    /* 少し太くしてプログレスバ�EらしぁE*/
     -webkit-appearance: none;
     appearance: none;
     background-color: rgba(255, 255, 255, 0.15);
-    /* 閭梧勹繧貞ｰ代＠阮�￥ */
+    /* 背景を少し薁E�� */
     background-image: linear-gradient(var(--primary), var(--primary));
-    /* 騾ｲ謐苓牡 */
+    /* 進捗色 */
     background-repeat: no-repeat;
     border-radius: 3px;
     outline: none;
@@ -257,24 +256,24 @@
     opacity: 0;
 }
 
-/* 譎る俣陦ｨ遉ｺ */
+/* 時間表示 */
 .time-display {
-    color: var(--text-main);
+    color: rgba(255, 255, 255, 0.9);
     font-size: 13px;
     font-family: 'Inter', sans-serif;
     margin-left: 6px;
     /* 12px -> 6px */
     font-variant-numeric: tabular-nums;
-    /* 謨ｰ蟄励�蟷�ｒ荳螳壹↓ */
+    /* 数字�E幁E��一定に */
 }
 
-/* 繧ｷ繝ｼ繧ｯ繝舌� */
+/* シークバ�E */
 .player-seek-container {
     flex: 1;
     height: 48px;
-    /* 繝帙ヰ繝ｼ鬆伜沺繧堤｢ｺ菫� */
+    /* ホバー領域を確俁E*/
     position: relative;
-    /* display: flex; 繧貞炎髯､縺励※逶ｸ蟇ｾ驟咲ｽｮ縺ｮ縺ｿ縺ｫ縺吶ｋ縺九…enter驟咲ｽｮ繧堤ｶｭ謖√＠縺､縺､邨ｶ蟇ｾ驟咲ｽｮ縺ｧ驥阪�繧� */
+    /* display: flex; を削除して相対配置のみにするか、center配置を維持しつつ絶対配置で重�EめE*/
     display: flex;
     align-items: center;
     margin: 0 16px;
@@ -288,7 +287,7 @@
     left: 0;
     right: 0;
     height: 4px;
-    background: color-mix(in srgb, var(--text-main), transparent 85%);
+    background: rgba(255, 255, 255, 0.1);
     transform: translateY(-50%);
     border-radius: 2px;
     z-index: 0;
@@ -301,7 +300,7 @@
     left: 0;
     transform: translateY(-50%);
     height: 4px;
-    background-color: color-mix(in srgb, var(--text-main), transparent 60%);
+    background-color: rgba(255, 255, 255, 0.4);
     border-radius: 2px;
     z-index: 1;
     pointer-events: none;
@@ -340,7 +339,7 @@
     padding: 0;
 }
 
-/* 蜑企勁: .player-seek-container::before 縺ｯ荳崎ｦ√↓縺ｪ縺｣縺溘�縺ｧ繧ｹ繧ｿ繧､繝ｫ螳夂ｾｩ縺九ｉ蜑企勁 */
+/* 削除: .player-seek-container::before は不要になった�Eでスタイル定義から削除 */
 
 /* Hover effects for visual bars */
 .player-seek-container:hover .player-seek-track-bg,
@@ -367,7 +366,7 @@
     opacity: 0;
 }
 
-/* 繝励Ξ繝薙Η繝ｼ繝��繝ｫ繝√ャ繝� */
+/* プレビューチE�EルチッチE*/
 .seek-preview-tooltip {
     position: absolute;
     bottom: 30px;
@@ -404,7 +403,7 @@
     font-weight: 500;
 }
 
-/* 繧ｹ繝斐�繝峨Γ繝九Η繝ｼ */
+/* スピ�Eドメニュー */
 .speed-control-group {
     position: relative;
 }
@@ -416,9 +415,9 @@
     transform: translateX(-50%);
     background: transparent;
     padding: 4px;
-    /* 蜈ｨ菴薙↓繝代ョ繧｣繝ｳ繧ｰ */
+    /* 全体にパディング */
     padding-bottom: 12px;
-    /* 荳矩Κ縺�縺大ｺ�￡縺ｦ髫咎俣繧貞沂繧√ｋ */
+    /* 下部だけ庁E��て隙間を埋める */
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -433,7 +432,7 @@
     pointer-events: auto;
 }
 
-/* 繝｡繝九Η繝ｼ縺ｮ蜀�ｮｹ譛ｬ菴� */
+/* メニューの冁E��本佁E*/
 .speed-menu::before {
     content: '';
     position: absolute;
@@ -441,7 +440,7 @@
     left: 0;
     right: 0;
     bottom: 8px;
-    /* padding-bottom 縺ｮ荳驛ｨ繧貞ｼ輔＞縺ｦ髫咎俣繧剃ｽ懊ｋ */
+    /* padding-bottom の一部を引いて隙間を作る */
     background: rgba(20, 20, 20, 0.95);
     border-radius: 8px;
     backdrop-filter: blur(8px);
@@ -469,7 +468,7 @@
     font-weight: 600;
 }
 
-/* 繧ｳ繝｡繝ｳ繝亥�蜉� */
+/* コメント�E劁E*/
 .comment-control-group {
     position: relative;
 }
@@ -535,7 +534,7 @@
     }
 }
 
-/* 繧ｳ繝｡繝ｳ繝医が繝ｼ繝舌�繝ｬ繧､ */
+/* コメントオーバ�Eレイ */
 .player-comment-overlay {
     position: absolute;
     top: 80px;
@@ -582,7 +581,6 @@
         transform: scale(1) translateY(0);
     }
 }
-
 /* Picture-in-Picture Mode */
 .player-container.pip-mode .player-header-bar {
     display: none;
@@ -601,7 +599,7 @@
 }
 
 .player-container.pip-mode .volume-control-group,
-.player-container.pip-mode .control-btn[title='ピクチャーインピクチャー'],
+.player-container.pip-mode .control-btn[title='�s�N�`���[�C���s�N�`���['],
 .player-container.pip-mode .controls-right .control-btn:last-child {
     display: none;
 }
@@ -629,3 +627,4 @@
     height: 100% !important;
     object-fit: contain;
 }
+

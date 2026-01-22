@@ -745,3 +745,54 @@
     border-color: var(--border);
     color: var(--text-muted);
 }
+
+/* Empty State Simplification */
+.inspector-content.empty-state {
+    display: block;
+    padding-top: 0;
+    /* Remove top padding */
+}
+
+.inspector-content.empty-state h3,
+.inspector-content.empty-state p,
+.inspector-content.empty-state .empty-icon {
+    display: none;
+}
+
+.library-stats.simple-stats {
+    padding: 0 var(--spacing-md);
+    margin-top: 0;
+    /* Remove top margin */
+    border-top: none;
+    /* Remove border to avoid double borders with header */
+    padding-top: 16px;
+}
+
+.stats-header {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+}
+
+.simple-stats .stat-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    /* Slightly increased padding for better readability */
+    font-size: 13px;
+}
+
+.simple-stats .stat-label {
+    color: var(--text-main);
+    font-weight: 500;
+    font-family: 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
+}
+
+.simple-stats .stat-value {
+    color: var(--text-muted);
+    /* Gray color as requested */
+    font-weight: 500;
+    font-family: 'Consolas', 'Monaco', monospace;
+    /* Keep numbers monospaced */
+}

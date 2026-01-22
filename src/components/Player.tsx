@@ -94,16 +94,48 @@ export const Player: React.FC<PlayerProps> = ({
     }
 
     // ESCキーで戻る
+    // キーボードショートカット (ESC, Ctrl+C, Ctrl+Shift+C)
     useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
+        const handleKeyDown = async (e: KeyboardEvent) => {
+            // ESC: 戻る
             if (e.key === 'Escape') {
                 e.preventDefault()
                 handleBack()
+                return
+            }
+
+            // Ctrl+C / Ctrl+Shift+C
+            if (e.ctrlKey && (e.code === 'KeyC')) {
+                e.preventDefault()
+
+                // Shiftあり: ファイルコピー
+                if (e.shiftKey) {
+                    if (media.file_path) {
+                        try {
+                            const success = await window.electronAPI.copyFileToClipboard(media.file_path)
+                            console.log(success ? '[Player] File copied to clipboard' : '[Player] Failed to copy file')
+                        } catch (err) {
+                            console.error('[Player] Failed to copy file:', err)
+                        }
+                    }
+                }
+                // Shiftなし: フレームコピー
+                else {
+                    const dataUrl = captureCurrentFrame()
+                    if (dataUrl) {
+                        try {
+                            await window.electronAPI.copyFrameToClipboard(dataUrl)
+                            console.log('[Player] Frame copied to clipboard')
+                        } catch (err) {
+                            console.error('[Player] Failed to copy frame:', err)
+                        }
+                    }
+                }
             }
         }
         window.addEventListener('keydown', handleKeyDown)
         return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [onBack])
+    }, [onBack, media])
 
     const [commentText, setCommentText] = useState('')
     const [showCommentInput, setShowCommentInput] = useState(false)
@@ -732,7 +764,7 @@ export const Player: React.FC<PlayerProps> = ({
                     {/* PiP */}
                     {isVideo && (
                         <button className={`control-btn ${isPiP ? 'active' : ''}`} onClick={togglePiP} title="ピクチャーインピクチャー">
-                            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <rect x="2" y="6" width="20" height="14" rx="2" ry="2" />
                                 <rect x="13" y="11" width="8" height="5" rx="1" ry="1" fill="currentColor" />
                             </svg>

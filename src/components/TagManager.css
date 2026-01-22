@@ -42,7 +42,7 @@
 }
 
 .tag-group-item.active {
-    background: rgba(255, 140, 66, 0.15);
+    background: color-mix(in srgb, var(--primary), transparent 85%);
     color: var(--primary);
 }
 
@@ -52,7 +52,7 @@
 }
 
 .tag-group-item.drag-over {
-    background: rgba(255, 140, 66, 0.2);
+    background: color-mix(in srgb, var(--primary), transparent 80%);
     border: 1px dashed var(--primary);
     color: var(--primary);
 }
@@ -258,13 +258,13 @@
 }
 
 .tag-manager-item.selected {
-    background: rgba(255, 140, 66, 0.25);
+    background: color-mix(in srgb, var(--primary), transparent 75%);
     border-color: var(--primary);
     box-shadow: 0 0 0 1px var(--primary);
 }
 
 .tag-manager-item:active {
-    background: rgba(255, 140, 66, 0.35);
+    background: color-mix(in srgb, var(--primary), transparent 65%);
 }
 
 .tag-manager-name {

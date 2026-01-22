@@ -16,6 +16,8 @@ import { useLibrary } from './hooks/useLibrary'
 import { MediaFile, AppSettings, RemoteLibrary, ViewSettings, defaultViewSettings, ElectronAPI, ClientConfig } from './types'
 import { MainHeader } from './components/MainHeader'
 import { useSocket } from './hooks/useSocket'
+import { useTheme } from './hooks/useTheme'
+import { useSettings } from './hooks/useSettings'
 import { DuplicateModal } from './components/DuplicateModal'
 import { ShortcutProvider } from './contexts/ShortcutContext'
 import './styles/index.css'
@@ -86,6 +88,12 @@ function AppContent() {
         checkEntryDuplicates
     } = useLibrary()
 
+    // テーマシステムの初期化
+    const { updateClientConfig, clientConfig } = useSettings()
+    // useThemeは内部でサイドエフェクトとしてCSS変数を適用する
+    // clientConfigがロードされるまではデフォルトテーマ（初期状態）が維持される
+    useTheme(clientConfig || {} as any, updateClientConfig)
+
     // サイドバーのアイテム数計算
     const sidebarCounts = useMemo(() => {
         const counts: { [key: string]: number } = {}
@@ -108,7 +116,7 @@ function AppContent() {
         })
 
         return counts
-    }, [allMediaFiles, folders])
+    }, [allMediaFiles, folders, tags])
 
     const { addNotification, removeNotification, updateProgress } = useNotification()
 
@@ -1390,8 +1398,12 @@ function AppContent() {
                     onUpdateUrl={(id, url) => window.electronAPI.updateUrl(id, url).then(() => {
                         setMediaFiles(prev => prev.map(m => m.id === id ? { ...m, url } : m))
                     })}
-                    totalStats={libraryStats}
+                    totalStats={{
+                        totalCount: mediaFiles.length,
+                        totalSize: mediaFiles.reduce((acc, m) => acc + m.file_size, 0)
+                    }}
                     currentContextMedia={mediaFiles}
+                    contextTitle={getHeaderTitle()}
                 />
             )}
 

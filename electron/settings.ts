@@ -40,6 +40,7 @@ export interface ClientConfig {
     thumbnailMode: 'speed' | 'quality'
     discordRichPresenceEnabled: boolean
     libraryViewSettings: { [libraryId: string]: LibraryViewSettings }
+    enableGPUAcceleration?: boolean
 }
 
 const defaultConfig: ClientConfig = {
@@ -56,7 +57,8 @@ const defaultConfig: ClientConfig = {
     },
     thumbnailMode: 'speed',
     discordRichPresenceEnabled: false,
-    libraryViewSettings: {}
+    libraryViewSettings: {},
+    enableGPUAcceleration: true
 }
 
 const homeDir = app ? app.getPath('home') : '.'

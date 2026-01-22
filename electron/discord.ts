@@ -11,6 +11,14 @@ export async function initDiscordRpc() {
     if (rpc) return // 既に初期化済み
 
     try {
+        // 設定を確認
+        const { getConfig } = await import('./settings')
+        const config = getConfig()
+        if (!config.discordRichPresenceEnabled) {
+            console.log('[Discord RPC] Disabled by user settings')
+            return
+        }
+
         rpc = new DiscordRPC.Client({ transport: 'ipc' })
 
         rpc.on('ready', () => {
@@ -24,10 +32,34 @@ export async function initDiscordRpc() {
             rpc = null
         })
 
-        // ログイン試行
-        await rpc.login({ clientId: CLIENT_ID }).catch(console.error)
-    } catch (error) {
-        console.error('[Discord RPC] Failed to initialize:', error)
+        // タイムアウト付きでログイン試行
+        const loginPromise = rpc.login({ clientId: CLIENT_ID })
+        const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Connection timeout')), 5000)
+        )
+
+        await Promise.race([loginPromise, timeoutPromise])
+        console.log('[Discord RPC] Successfully connected')
+    } catch (error: any) {
+        // エラーを適切に処理(アプリケーションの起動は継続)
+        if (error.message === 'Connection timeout') {
+            console.log('[Discord RPC] Connection timeout - Discord may not be running')
+        } else if (error.message?.includes('ENOENT')) {
+            console.log('[Discord RPC] Discord client not found')
+        } else if (error.message?.includes('RPC_CONNECTION_TIMEOUT')) {
+            console.log('[Discord RPC] RPC connection timeout - Discord may not be running')
+        } else {
+            console.log('[Discord RPC] Failed to connect:', error.message || error)
+        }
+
+        // クリーンアップ
+        if (rpc) {
+            try {
+                rpc.destroy()
+            } catch (e) {
+                // Ignore cleanup errors
+            }
+        }
         rpc = null
         isReady = false
     }

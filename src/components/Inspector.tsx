@@ -36,6 +36,7 @@ interface InspectorProps {
     totalStats: { totalCount: number; totalSize: number }
     currentContextMedia?: MediaFile[]
     enableRichText?: boolean
+    contextTitle?: string
 }
 
 export function Inspector({
@@ -65,7 +66,8 @@ export function Inspector({
     onUpdateUrl,
     totalStats,
     currentContextMedia,
-    enableRichText
+    enableRichText,
+    contextTitle
 }: InspectorProps) {
     const { addNotification } = useNotification()
 
@@ -477,9 +479,9 @@ export function Inspector({
 
     if (media.length === 0) {
         return (
-            <div className="inspector slide-in-right">
+            <div className={`inspector ${enableRichText ? 'rich-text-enabled' : ''}`} ref={inspectorRef}>
                 <div className="inspector-header">
-                    <h2 className="inspector-title">ライブラリ統計</h2>
+                    <h2 className="inspector-title">情報</h2>
                     <div className="window-controls">
                         <button className="control-btn" title="常に手前に表示">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -504,15 +506,16 @@ export function Inspector({
                         </button>
                     </div>
                 </div>
-                <div className="inspector-content">
-                    <div className="stats-container">
-                        <div className="info-group">
-                            <label>総アイテム数</label>
-                            <div className="info-value">{totalStats.totalCount} 件</div>
+                <div className="inspector-content empty-state">
+                    <div className="library-stats simple-stats">
+                        <div className="stats-header">{contextTitle || 'インフォメーション'}</div>
+                        <div className="stat-row">
+                            <span className="stat-label">項目</span>
+                            <span className="stat-value">{totalStats.totalCount.toLocaleString()}</span>
                         </div>
-                        <div className="info-group">
-                            <label>総ファイルサイズ</label>
-                            <div className="info-value">{formatFileSize(totalStats.totalSize)}</div>
+                        <div className="stat-row">
+                            <span className="stat-label">サイズ</span>
+                            <span className="stat-value">{formatFileSize(totalStats.totalSize)}</span>
                         </div>
                     </div>
                 </div>

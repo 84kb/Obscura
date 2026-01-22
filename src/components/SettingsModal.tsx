@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useContext } from 'react'
-import { AppSettings, Library, ClientConfig, AutoImportPath } from '../types'
+import { AppSettings, Library, ClientConfig, AutoImportPath, Theme, ThemeColors } from '../types'
 import { ShortcutContext, ShortcutAction } from '../contexts/ShortcutContext'
+import { useTheme } from '../hooks/useTheme'
+import { defaultDarkTheme, parseThemeCss, THEME_TEMPLATES } from '../utils/themeManager'
 import './SettingsModal.css'
 
 interface SettingsModalProps {
@@ -10,7 +12,7 @@ interface SettingsModalProps {
 }
 
 // 削除された定義
-type Category = 'general' | 'sidebar' | 'controls' | 'viewer' | 'screenshot' | 'shortcuts' | 'notification' | 'password' | 'import' | 'network' | 'developer' | 'media-engine' | 'profile'
+type Category = 'general' | 'sidebar' | 'controls' | 'viewer' | 'screenshot' | 'shortcuts' | 'notification' | 'password' | 'import' | 'network' | 'developer' | 'media-engine' | 'profile' | 'theme'
 
 interface ApiEndpoint {
     method: 'GET' | 'POST' | 'PUT' | 'DELETE'
@@ -317,6 +319,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
         { id: 'profile', label: 'プロフィール', group: '基本', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg> },
 
         // 表示・操作
+        { id: 'theme', label: 'テーマ', group: '表示・操作', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="5"></circle><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path></svg> },
         { id: 'viewer', label: 'ビューアー', group: '表示・操作', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg> },
         { id: 'shortcuts', label: 'ショートカット', group: '表示・操作', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect><line x1="6" y1="8" x2="6" y2="8"></line><line x1="10" y1="8" x2="10" y2="8"></line><line x1="14" y1="8" x2="14" y2="8"></line><line x1="18" y1="8" x2="18" y2="8"></line><line x1="6" y1="12" x2="6" y2="12"></line><line x1="10" y1="12" x2="10" y2="12"></line><line x1="14" y1="12" x2="14" y2="12"></line><line x1="18" y1="12" x2="18" y2="12"></line><line x1="7" y1="16" x2="17" y2="16"></line></svg> },
 
@@ -355,10 +358,67 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     // === クライアント設定 State ===
     const [clientConfig, setClientConfig] = useState<any>(null)
 
+    // === テーマ設定 ===
+    const updateClientConfig = useCallback(async (updates: Partial<ClientConfig>) => {
+        if (!window.electronAPI) return
+        try {
+            const newConfig = await window.electronAPI.updateClientConfig(updates)
+            setClientConfig(newConfig)
+        } catch (error) {
+            console.error('Failed to update client config:', error)
+        }
+    }, [])
+
+    // テーマフックの初期化 (clientConfigがロードされるまで空オブジェクトで初期化)
+    const themeHook = useTheme(clientConfig || {} as any, updateClientConfig, { applyOnMount: false })
+    const { themes, activeThemeId, selectTheme, createTheme, updateTheme, deleteTheme } = themeHook
+
+    // 新規テーマ作成用State
+    const [isCreatingTheme, setIsCreatingTheme] = useState(false)
+    const [editingThemeId, setEditingThemeId] = useState<string | null>(null)
+    const [newThemeName, setNewThemeName] = useState('')
+    const [editingColors, setEditingColors] = useState<ThemeColors>(defaultDarkTheme.colors)
+
+    const handleCreateTheme = () => {
+        if (!newThemeName.trim()) return
+        createTheme(newThemeName, editingColors)
+        setIsCreatingTheme(false)
+        setNewThemeName('')
+        setEditingColors(defaultDarkTheme.colors) // Reset colors
+    }
+
+    const handleUpdateTheme = () => {
+        if (!editingThemeId) return
+        updateTheme(editingThemeId, editingColors)
+        setEditingThemeId(null)
+    }
+
+    const handleDeleteTheme = (id: string) => {
+        if (confirm('このテーマを削除してもよろしいですか？')) {
+            deleteTheme(id)
+        }
+    }
+
+    const startEditTheme = (theme: Theme) => {
+        setEditingThemeId(theme.id)
+        setEditingColors(theme.colors)
+    }
+
+
     // === アップデート State ===
     const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'not-available' | 'error' | 'downloading' | 'downloaded'>('idle')
     const [updateInfo, setUpdateInfo] = useState<any>(null)
     const [downloadProgress, setDownloadProgress] = useState<number>(0)
+
+    // === Template Modal State ===
+    const [showTemplateModal, setShowTemplateModal] = useState(false)
+
+    const handleCopyTemplate = (css: string) => {
+        if (window.electronAPI) {
+            window.electronAPI.copyToClipboard(css)
+            alert('テンプレートをクリップボードにコピーしました')
+        }
+    }
 
     useEffect(() => {
         if (!window.electronAPI) return
@@ -453,6 +513,266 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
             setFfmpegUpdateStatus('error')
             alert('Update failed: ' + e.message)
         }
+    }
+
+    const renderThemeSettings = () => {
+        // カラーラベル定義
+        const colorLabels: Record<keyof ThemeColors, string> = {
+            bgDark: '背景 (Dark)',
+            bgCard: 'カード背景',
+            bgSidebar: 'サイドバー背景',
+            bgHover: 'ホバー背景',
+            primary: 'メインカラー',
+            primaryHover: 'メインカラー (Hover)',
+            primaryLight: 'メインカラー (Light)',
+            accent: 'アクセントカラー',
+            textMain: 'テキスト (Main)',
+            textMuted: 'テキスト (Muted)',
+            border: 'ボーダー'
+        }
+
+        const renderColorPicker = (key: keyof ThemeColors, value: string, onChange: (val: string) => void) => (
+            <div className="settings-row" key={key}>
+                <div className="settings-info">
+                    <span className="settings-label">{colorLabels[key]}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input
+                        type="color"
+                        value={value}
+                        onChange={(e) => onChange(e.target.value)}
+                        style={{ width: '40px', height: '30px', padding: 0, border: 'none', cursor: 'pointer' }}
+                    />
+                    <input
+                        type="text"
+                        value={value}
+                        onChange={(e) => onChange(e.target.value)}
+                        className="form-control"
+                        style={{ width: '100px' }}
+                    />
+                </div>
+            </div>
+        )
+
+        if (isCreatingTheme || editingThemeId) {
+            const isEdit = !!editingThemeId
+            const handleSave = isEdit ? handleUpdateTheme : handleCreateTheme
+            const handleCancel = () => {
+                setIsCreatingTheme(false)
+                setEditingThemeId(null)
+            }
+
+            return (
+                <div className="settings-page">
+                    <h3 className="settings-page-title">
+                        {isEdit ? 'テーマを編集' : '新しいテーマを作成'}
+                    </h3>
+                    <div className="settings-section">
+                        {!isEdit && (
+                            <div className="settings-row">
+                                <div className="settings-info">
+                                    <span className="settings-label">テーマ名</span>
+                                </div>
+                                <input
+                                    type="text"
+                                    value={newThemeName}
+                                    onChange={(e) => setNewThemeName(e.target.value)}
+                                    className="form-control"
+                                    placeholder="テーマ名を入力"
+                                />
+                            </div>
+                        )}
+
+                        <h4 className="section-title">カラー設定</h4>
+                        {Object.keys(editingColors).map((key) =>
+                            renderColorPicker(key as keyof ThemeColors, editingColors[key as keyof ThemeColors], (val) => {
+                                setEditingColors(prev => ({ ...prev, [key]: val }))
+                            })
+                        )}
+
+                        <div className="settings-actions" style={{ marginTop: '20px', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                            <button className="btn btn-secondary" onClick={handleCancel}>キャンセル</button>
+                            <button className="btn btn-primary" onClick={handleSave} disabled={!isEdit && !newThemeName.trim()}>
+                                {isEdit ? '更新' : '作成'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )
+        }
+
+        return (
+            <div className="settings-page">
+                <h3 className="settings-page-title">テーマ設定</h3>
+                <div className="settings-section">
+                    <div className="settings-header-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                        <span className="settings-description">
+                            アプリの外観をカスタマイズできます。プリセットから選ぶか、独自のテーマを作成してください。
+                        </span>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                            <button className="btn btn-primary btn-sm" onClick={() => {
+                                setEditingColors(defaultDarkTheme.colors)
+                                setIsCreatingTheme(true)
+                            }}>
+                                新規作成
+                            </button>
+                            <button className="btn btn-secondary btn-sm" onClick={() => setShowTemplateModal(true)}>
+                                テンプレート
+                            </button>
+                            <div style={{ position: 'relative' }}>
+                                <button className="btn btn-secondary btn-sm" onClick={() => document.getElementById('theme-import-input')?.click()}>
+                                    CSSからインポート
+                                </button>
+                                <input
+                                    id="theme-import-input"
+                                    type="file"
+                                    accept=".css"
+                                    style={{ display: 'none' }}
+                                    onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (!file) return;
+
+                                        const reader = new FileReader();
+                                        reader.onload = (event) => {
+                                            const cssContent = event.target?.result as string;
+                                            if (cssContent) {
+                                                const parsedColors = parseThemeCss(cssContent);
+                                                // 既存のデフォルト色にマージする形で初期化
+                                                setEditingColors({ ...defaultDarkTheme.colors, ...parsedColors });
+                                                // ファイル名をテーマ名の初期値にする（拡張子なし）
+                                                const name = file.name.replace(/\.css$/i, '');
+                                                setNewThemeName(name);
+                                                setIsCreatingTheme(true);
+                                            }
+                                        };
+                                        reader.readAsText(file);
+                                        // Reset input value to allow selecting same file again
+                                        e.target.value = '';
+                                    }}
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    {showTemplateModal && (
+                        <div className="modal-overlay" style={{ zIndex: 1100 }} onClick={() => setShowTemplateModal(false)}>
+                            <div className="modal-content" style={{ width: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
+                                <div className="modal-header">
+                                    <h3>テーマテンプレート</h3>
+                                    <button className="close-btn" onClick={() => setShowTemplateModal(false)}>×</button>
+                                </div>
+                                <div className="modal-body" style={{ overflowY: 'auto', padding: '20px' }}>
+                                    <p style={{ marginBottom: '20px', color: 'var(--text-muted)' }}>
+                                        これらのテンプレートをコピーして、新しいCSSファイルとして保存し、「CSSからインポート」機能で読み込むことができます。
+                                    </p>
+                                    {THEME_TEMPLATES.map((template, index) => (
+                                        <div key={index} style={{ marginBottom: '24px', border: '1px solid var(--border)', borderRadius: '8px', padding: '16px', background: 'var(--bg-card)' }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                                <div>
+                                                    <h4 style={{ margin: 0, fontSize: '16px' }}>{template.name}</h4>
+                                                    <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)' }}>{template.description}</p>
+                                                </div>
+                                                <button className="btn btn-secondary btn-sm" onClick={() => handleCopyTemplate(template.css)}>
+                                                    コピー
+                                                </button>
+                                            </div>
+                                            <pre style={{
+                                                background: 'var(--bg-dark)',
+                                                padding: '12px',
+                                                borderRadius: '4px',
+                                                fontSize: '11px',
+                                                overflowX: 'auto',
+                                                color: 'var(--text-muted)',
+                                                border: '1px solid var(--border)'
+                                            }}>
+                                                <code>{template.css}</code>
+                                            </pre>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="modal-footer">
+                                    <button className="btn btn-secondary" onClick={() => setShowTemplateModal(false)}>閉じる</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="theme-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '15px' }}>
+                        {themes.map(theme => (
+                            <div
+                                key={theme.id}
+                                className={`theme-card ${activeThemeId === theme.id ? 'active' : ''}`}
+                                style={{
+                                    border: `2px solid ${activeThemeId === theme.id ? 'var(--primary)' : 'var(--border)'}`,
+                                    borderRadius: '8px',
+                                    padding: '15px',
+                                    cursor: 'pointer',
+                                    background: 'var(--bg-card)',
+                                    position: 'relative',
+                                    overflow: 'hidden'
+                                }}
+                                onClick={() => selectTheme(theme.id)}
+                            >
+                                <div className="theme-preview" style={{
+                                    height: '60px',
+                                    background: theme.colors.bgDark,
+                                    marginBottom: '10px',
+                                    borderRadius: '4px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    border: `1px solid ${theme.colors.border}`
+                                }}>
+                                    <div style={{ width: '20px', height: '20px', background: theme.colors.primary, borderRadius: '50%' }}></div>
+                                </div>
+                                <div className="theme-info" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span style={{ fontWeight: 'bold' }}>{theme.name}</span>
+                                    {theme.isSystem ? (
+                                        <span className="badge" style={{ fontSize: '10px', padding: '2px 6px', background: 'var(--bg-hover)', borderRadius: '4px' }}>System</span>
+                                    ) : (
+                                        <div className="theme-actions" onClick={(e) => e.stopPropagation()}>
+                                            <button
+                                                className="btn-icon-sm"
+                                                title="編集"
+                                                onClick={() => startEditTheme(theme)}
+                                                style={{ marginRight: '5px' }}
+                                            >
+                                                ✎
+                                            </button>
+                                            <button
+                                                className="btn-icon-sm text-danger"
+                                                title="削除"
+                                                onClick={() => handleDeleteTheme(theme.id)}
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                                {activeThemeId === theme.id && (
+                                    <div style={{
+                                        position: 'absolute',
+                                        top: '5px',
+                                        right: '5px',
+                                        color: 'var(--primary)',
+                                        background: 'var(--bg-dark)',
+                                        borderRadius: '50%',
+                                        width: '20px',
+                                        height: '20px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        fontSize: '12px'
+                                    }}>
+                                        ✓
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div >
+        )
     }
 
     const renderMediaEngineSettings = () => {
@@ -852,9 +1172,10 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                             現在の接続数: {activeUsers.length}
                         </span>
                         {activeUsers.length > 0 && (
-                            <div className="active-users-list" style={{ width: '100%', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            <div className="active-users-list">
                                 {activeUsers.map(u => (
-                                    <span key={u.id} className="user-badge active" style={{ backgroundColor: '#064e3b', color: '#6ee7b7', padding: '2px 8px', borderRadius: '12px', fontSize: '12px', maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    <span key={u.id} className="active-user-badge">
+                                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981', display: 'inline-block', marginRight: '6px' }}></div>
                                         {u.nickname || '未指定'}
                                     </span>
                                 ))}
@@ -884,9 +1205,9 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                             </button>
                         </div>
                         {newAccessToken && (
-                            <div className="token-display" style={{ width: '100%', backgroundColor: '#18181b', padding: '12px', borderRadius: '6px', border: '1px solid #0ea5e9', position: 'relative' }}>
-                                <p style={{ fontSize: '12px', color: '#aaa', marginBottom: '4px' }}>アクセストークンを共有してください（一度しか表示されません）:</p>
-                                <code style={{ display: 'block', wordBreak: 'break-all', color: '#fff', fontSize: '14px', marginBottom: '8px' }}>{newAccessToken}</code>
+                            <div className="token-display">
+                                <p>アクセストークンを共有してください（一度しか表示されません）:</p>
+                                <code>{newAccessToken}</code>
                                 <button
                                     onClick={() => {
                                         if (window.electronAPI) window.electronAPI.copyToClipboard(newAccessToken)
@@ -905,11 +1226,11 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                 {/* 全ユーザーリスト */}
                 <div className="settings-card">
                     <span className="settings-label" style={{ marginBottom: '12px', display: 'block' }}>登録ユーザー一覧</span>
-                    <div className="users-list" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div className="users-list">
                         {sharedUsers.map(u => (
-                            <div key={u.id} className="user-card" style={{ backgroundColor: '#18181b', borderRadius: '8px', padding: '12px', border: '1px solid #2a2a2c', overflow: 'hidden' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px', gap: '8px' }}>
-                                    <span style={{ fontWeight: 'bold', color: '#fff', wordBreak: 'break-all', flex: 1, minWidth: 0 }}>{u.nickname || '未指定'}</span>
+                            <div key={u.id} className="user-card-item">
+                                <div className="user-card-header">
+                                    <span className="user-card-name">{u.nickname || '未指定'}</span>
                                     <button
                                         onClick={() => handleDeleteUser(u.id)}
                                         className="icon-button delete"
@@ -919,14 +1240,14 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                                     </button>
                                 </div>
-                                <div style={{ fontSize: '12px', color: '#888', marginBottom: '8px' }}>
+                                <div className="user-card-last-access">
                                     最終アクセス: {u.lastAccessAt ? new Date(u.lastAccessAt).toLocaleString() : '未アクセス'}
                                 </div>
                                 {/* トークン表示 (スポイラー形式) */}
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                            <span style={{ fontSize: '11px', color: '#666' }}>ユーザートークン:</span>
+                                    <div className="token-row">
+                                        <div className="token-label-row">
+                                            <span className="token-label">ユーザートークン:</span>
                                             {visibleTokens[u.id] === 'user' && (
                                                 <button
                                                     onClick={() => window.electronAPI?.copyToClipboard(u.userToken)}
@@ -938,14 +1259,14 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                         </div>
                                         <div
                                             onClick={() => toggleTokenVisibility(u.id, 'user')}
-                                            style={{ backgroundColor: '#27272a', border: '1px solid #3f3f46', borderRadius: '4px', padding: '8px', cursor: 'pointer', color: visibleTokens[u.id] === 'user' ? '#fff' : '#666', fontSize: '12px', fontFamily: 'monospace', wordBreak: 'break-all', lineHeight: '1.4' }}
+                                            className={`token-value-box ${visibleTokens[u.id] === 'user' ? 'revealed' : ''}`}
                                         >
                                             {visibleTokens[u.id] === 'user' ? u.userToken : 'クリックして表示'}
                                         </div>
                                     </div>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                            <span style={{ fontSize: '11px', color: '#666' }}>アクセストークン:</span>
+                                    <div className="token-row">
+                                        <div className="token-label-row">
+                                            <span className="token-label">アクセストークン:</span>
                                             {visibleTokens[u.id] === 'access' && (
                                                 <button
                                                     onClick={() => window.electronAPI?.copyToClipboard(u.accessToken)}
@@ -957,7 +1278,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                         </div>
                                         <div
                                             onClick={() => toggleTokenVisibility(u.id, 'access')}
-                                            style={{ backgroundColor: '#27272a', border: '1px solid #3f3f46', borderRadius: '4px', padding: '8px', cursor: 'pointer', color: visibleTokens[u.id] === 'access' ? '#fff' : '#666', fontSize: '12px', fontFamily: 'monospace', wordBreak: 'break-all', lineHeight: '1.4' }}
+                                            className={`token-value-box ${visibleTokens[u.id] === 'access' ? 'revealed' : ''}`}
                                         >
                                             {visibleTokens[u.id] === 'access' ? u.accessToken : 'クリックして表示'}
                                         </div>
@@ -967,24 +1288,14 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     </div>
 
                                     {/* 権限管理 */}
-                                    <div style={{ marginTop: '12px', borderTop: '1px solid #2a2a2c', paddingTop: '10px' }}>
-                                        <span style={{ fontSize: '11px', color: '#666', marginBottom: '6px', display: 'block' }}>権限設定:</span>
-                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                    <div className="permission-container">
+                                        <span className="permission-title">権限設定:</span>
+                                        <div className="permission-badges">
                                             {(['READ_ONLY', 'DOWNLOAD', 'UPLOAD', 'EDIT', 'FULL'] as any[]).map((p: any) => (
                                                 <button
                                                     key={p}
                                                     onClick={() => handleTogglePermission(u.id, p)}
-                                                    style={{
-                                                        fontSize: '10px',
-                                                        padding: '3px 8px',
-                                                        borderRadius: '4px',
-                                                        border: '1px solid #333',
-                                                        backgroundColor: (u.permissions || []).includes(p) ? '#0ea5e9' : 'transparent',
-                                                        color: (u.permissions || []).includes(p) ? '#fff' : '#888',
-                                                        cursor: 'pointer',
-                                                        transition: 'all 0.2s',
-                                                        fontWeight: (u.permissions || []).includes(p) ? 'bold' : 'normal'
-                                                    }}
+                                                    className={`permission-btn ${(u.permissions || []).includes(p) ? 'active' : ''}`}
                                                     title={p}
                                                 >
                                                     {PERMISSION_LABELS[p] || p}
@@ -995,14 +1306,14 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                 </div>
                             </div>
                         ))}
-                        {sharedUsers.length === 0 && (
-                            <div style={{ padding: '16px', textAlign: 'center', color: '#666' }}>
-                                ユーザーがいません
-                            </div>
-                        )}
-                    </div>
+                    </div>    {sharedUsers.length === 0 && (
+                        <div style={{ padding: '16px', textAlign: 'center', color: '#666' }}>
+                            ユーザーがいません
+                        </div>
+                    )}
                 </div>
             </div>
+
         )
     }
 
@@ -1618,6 +1929,29 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                     </div>
                 </div>
             </section>
+
+            <section className="settings-section">
+                <h4 className="section-title">システム</h4>
+                <div className="settings-card">
+                    <div className="settings-row">
+                        <div className="settings-info">
+                            <span className="settings-label">GPUハードウェアアクセラレーション</span>
+                            <span className="settings-description">
+                                多くの環境でパフォーマンスが向上しますが、無効にすることで不具合が解消される場合があります。
+                                <span style={{ color: 'var(--accent)', display: 'block', marginTop: '4px' }}>※変更を適用するには再起動が必要です。</span>
+                            </span>
+                        </div>
+                        <label className="toggle-switch">
+                            <input
+                                type="checkbox"
+                                checked={clientConfig?.enableGPUAcceleration ?? true}
+                                onChange={(e) => updateClientConfig({ enableGPUAcceleration: e.target.checked })}
+                            />
+                            <span className="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </section>
         </div>
     )
 
@@ -1642,34 +1976,24 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                             {API_ENDPOINTS.map((api) => {
                                 const apiId = `${api.method}:${api.path}`
                                 return (
-                                    <div key={apiId} className={`api-item ${openApiIds.includes(apiId) ? 'open' : ''}`} style={{ borderBottom: '1px solid #3a3a3c' }}>
+                                    <div key={apiId} className={`api-item ${openApiIds.includes(apiId) ? 'open' : ''}`}>
                                         <div
                                             className="api-header"
                                             onClick={() => toggleApi(apiId)}
-                                            style={{ display: 'flex', alignItems: 'center', padding: '12px 8px', cursor: 'pointer', gap: '10px' }}
                                         >
-                                            <span className={`method-badge ${api.method.toLowerCase()}`} style={{
-                                                padding: '4px 8px',
-                                                borderRadius: '4px',
-                                                fontSize: '12px',
-                                                fontWeight: 'bold',
-                                                backgroundColor: api.method === 'GET' ? '#0ea5e9' : api.method === 'POST' ? '#22c55e' : api.method === 'PUT' ? '#eab308' : '#ef4444',
-                                                color: '#fff',
-                                                minWidth: '50px',
-                                                textAlign: 'center'
-                                            }}>{api.method}</span>
-                                            <span className="api-path" style={{ flex: 1, fontFamily: 'monospace', fontSize: '14px' }}>{api.path}</span>
-                                            <span className="api-label" style={{ fontSize: '13px', color: '#aaa' }}>{api.label}</span>
+                                            <span className={`method-badge ${api.method.toLowerCase()}`}>{api.method}</span>
+                                            <span className="api-path">{api.path}</span>
+                                            <span className="api-label">{api.label}</span>
                                             <svg
                                                 width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                                                style={{ transform: openApiIds.includes(apiId) ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}
+                                                className={`api-arrow ${openApiIds.includes(apiId) ? 'open' : ''}`}
                                             >
                                                 <polyline points="6 9 12 15 18 9"></polyline>
                                             </svg>
                                         </div>
 
                                         {openApiIds.includes(apiId) && (
-                                            <div className="api-details" style={{ padding: '0 16px 16px 16px', fontSize: '13px', color: '#ddd' }}>
+                                            <div className="api-details">
                                                 {api.description && <p style={{ marginBottom: '8px' }}>{api.description}</p>}
                                                 {api.permission && <div style={{ marginBottom: '8px' }}>
                                                     <span style={{ color: '#aaa' }}>必要な権限: </span>
@@ -1681,13 +2005,13 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                                                             <tbody>
                                                                 {api.params.map(p => (
-                                                                    <tr key={p.name} style={{ borderBottom: '1px solid #333' }}>
-                                                                        <td style={{ padding: '4px', fontFamily: 'monospace', color: '#88ccff' }}>
+                                                                    <tr key={p.name}>
+                                                                        <td className="param-name">
                                                                             {p.name}
-                                                                            {p.required && <span style={{ color: '#ef4444' }}>*</span>}
+                                                                            {p.required && <span className="required">*</span>}
                                                                         </td>
-                                                                        <td style={{ padding: '4px', color: '#aaa' }}>{p.type}</td>
-                                                                        <td style={{ padding: '4px' }}>{p.desc}</td>
+                                                                        <td className="param-type">{p.type}</td>
+                                                                        <td className="param-desc">{p.desc}</td>
                                                                     </tr>
                                                                 ))}
                                                             </tbody>
@@ -1931,21 +2255,13 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         </div>
 
                         {(!clientConfig.autoImport.watchPaths || clientConfig.autoImport.watchPaths.length === 0) ? (
-                            <div style={{ padding: '20px', textAlign: 'center', color: '#888', background: '#252528', borderRadius: '8px', fontSize: '13px' }}>
+                            <div className="watcher-empty">
                                 監視フォルダが設定されていません
                             </div>
                         ) : (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                 {clientConfig.autoImport.watchPaths.map((p: AutoImportPath) => (
-                                    <div key={p.id} style={{
-                                        background: '#252528',
-                                        padding: '12px',
-                                        borderRadius: '8px',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '12px',
-                                        border: '1px solid #3a3a3c'
-                                    }}>
+                                    <div key={p.id} className="watcher-item">
                                         <div style={{ width: '32px', display: 'flex', justifyContent: 'center' }}>
                                             <input
                                                 type="checkbox"
@@ -1961,8 +2277,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                                 <select
                                                     value={p.targetLibraryId}
                                                     onChange={(e) => handleUpdateWatchPath(p.id, { targetLibraryId: e.target.value })}
-                                                    className="settings-input"
-                                                    style={{ padding: '2px 8px', fontSize: '12px', width: 'auto', minWidth: '150px' }}
+                                                    className="settings-input watcher-select"
                                                 >
                                                     {availableLibraries.map(lib => (
                                                         <option key={lib.path} value={lib.path}>{lib.name}</option>
@@ -2070,8 +2385,6 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
         return (
             <div className="settings-page">
                 <h3 className="settings-page-title">一般設定</h3>
-
-                {renderUpdateSection()}
 
                 {renderUpdateSection()}
 
@@ -2269,16 +2582,17 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                     <div className="main-content">
                         {activeCategory === 'general' ? renderGeneralSettings() :
                             activeCategory === 'profile' ? renderProfileSettings() :
-                                activeCategory === 'import' ? renderImportSettings() :
-                                    activeCategory === 'viewer' ? renderViewerSettings() :
-                                        activeCategory === 'network' ? renderNetworkSettings() :
-                                            activeCategory === 'shortcuts' ? renderShortcutsSettings() :
-                                                activeCategory === 'media-engine' ? renderMediaEngineSettings() :
-                                                    activeCategory === 'developer' ? renderDeveloperSettings() : (
-                                                        <div className="empty-state">
-                                                            <p>このセクションの設定は準備中です。</p>
-                                                        </div>
-                                                    )}
+                                activeCategory === 'theme' ? renderThemeSettings() :
+                                    activeCategory === 'import' ? renderImportSettings() :
+                                        activeCategory === 'viewer' ? renderViewerSettings() :
+                                            activeCategory === 'network' ? renderNetworkSettings() :
+                                                activeCategory === 'shortcuts' ? renderShortcutsSettings() :
+                                                    activeCategory === 'media-engine' ? renderMediaEngineSettings() :
+                                                        activeCategory === 'developer' ? renderDeveloperSettings() : (
+                                                            <div className="empty-state">
+                                                                <p>このセクションの設定は準備中です。</p>
+                                                            </div>
+                                                        )}
                     </div>
 
                     <footer className="main-footer">
