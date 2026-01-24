@@ -1450,16 +1450,7 @@ ipcMain.handle('select-download-directory', async () => {
 })
 
 // ファイル選択ダイアログ（SSL証明書など）
-ipcMain.handle('select-file', async (_event, options: { title?: string; filters?: { name: string; extensions: string[] }[] }) => {
-    if (!mainWindow) return null
-    const result = await dialog.showOpenDialog(mainWindow, {
-        title: options.title || 'ファイルを選択',
-        properties: ['openFile'],
-        filters: options.filters || [{ name: 'All Files', extensions: ['*'] }]
-    })
-    if (result.canceled || result.filePaths.length === 0) return null
-    return result.filePaths[0]
-})
+
 
 // メディアのエクスポート（メタデータ埋め込み付き）
 ipcMain.handle('export-media', async (event, mediaId: number, options?: { notificationId?: string }) => {
@@ -1608,6 +1599,8 @@ ipcMain.handle('download-remote-media', async (event, url: string, filename: str
 })
 
 
+
+console.log('[DEBUG] Registering IPC handler: upload-remote-media')
 ipcMain.handle('upload-remote-media', async (event, { url, token, filePaths, options }: { url: string; token: string; filePaths: string[], options?: { notificationId?: string } }) => {
     try {
         const notificationId = options?.notificationId
