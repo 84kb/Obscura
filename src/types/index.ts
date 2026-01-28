@@ -24,6 +24,9 @@ export interface MediaFile {
     dominant_color?: string | null
     title?: string | null
     framerate?: number
+    parentId?: number | null
+    parent?: MediaFile | null
+    children?: MediaFile[]
 }
 
 export interface MediaComment {
@@ -75,13 +78,14 @@ export interface FilterOptions {
     selectedTags: number[]
     excludedTags: number[]
     selectedFolders: number[] // Renamed from selectedGenres (for Virtual Folders)
+    excludedFolders: number[] // Exclude specific folders
     tagFilterMode: 'and' | 'or'
     selectedSysDirs: string[] // Renamed from selectedFolders (for File System Dirs)
     excludedSysDirs: string[] // Renamed from excludedFolders
     folderFilterMode: 'and' | 'or'
     filterType: 'all' | 'uncategorized' | 'untagged' | 'recent' | 'random' | 'trash' | 'tag_manager'
     fileType: 'all' | 'video' | 'audio' // 内部フィルタリング用として残す
-    sortOrder: 'name' | 'date' | 'size' | 'duration' | 'last_played' | 'rating' | 'modified' | 'artist' | 'tags'
+    sortOrder: 'name' | 'date' | 'size' | 'duration' | 'last_played' | 'rating' | 'modified' | 'artist' | 'tags' | 'random'
     sortDirection: 'asc' | 'desc'
     selectedRatings: number[] // 0-5, 0 は「評価なし」
     selectedExtensions: string[]
@@ -95,6 +99,93 @@ export interface FilterOptions {
 }
 
 export type Permission = 'READ_ONLY' | 'DOWNLOAD' | 'UPLOAD' | 'EDIT' | 'FULL'
+
+export interface EqualizerBand {
+    frequency: number
+    gain: number
+}
+
+export interface AudioEngineSettings {
+    enabled: boolean
+    masterGain: number // 0 to 200 (100 is unity)
+
+    // Playback Gain Control
+    playbackGainEnabled: boolean
+    playbackGainRatio: number // 0 to 100
+    playbackMaxGain: number // 0 to 100
+
+    // FIREqualizer
+    eqEnabled: boolean
+    eqBands: EqualizerBand[]
+
+    // Convolver / Kernel
+    convolverEnabled: boolean
+    convolverIR: string | null // Path to IR file (.irs / .wav)
+    convolverCrossfeed: number // 0 to 100 (VHS+ like)
+
+    // DDC (Viper Digital Headphone Correction)
+    ddcEnabled: boolean
+    ddcFile: string | null // Path to .vdc file
+
+    // Reverberation (Algorithmic)
+    reverbEnabled: boolean
+    reverbSize: number // 0 to 100
+    reverbWet: number // 0 to 100
+    reverbDry: number // 0 to 100
+    reverbDamping: number // 0 to 100
+    reverbWidth: number // 0 to 100 (Sound Field)
+
+    // Tube Simulator (6N1J)
+    tubeEnabled: boolean
+    tubeOrder: number // Distortion order/amount (2 or 4 typical even harmonics)
+
+    // Auditory System Protection
+    auditoryProtectionEnabled: boolean
+    protectionThreshold: number // dB (e.g. -3dB)
+
+    // Surround
+    surroundEnabled: boolean
+    surroundMode: 'Field' | 'Differential' | 'Haas'
+    surroundStrength: number // 0 to 100
+    surroundDelay: number // 0 to 500 (ms)
+
+    // Master Limiter
+    masterLimiterEnabled: boolean
+    masterLimiterThreshold: number // 0 to -10
+
+    // ViPER Bass
+    bassEnabled: boolean
+    bassMode: 'Natural' | 'Pure' | 'Subwoofer'
+    bassFrequency: number // 40 to 100Hz
+    bassGain: number // 0 to 100
+
+    // ViPER Clarity
+    clarityEnabled: boolean
+    clarityMode: 'Natural' | 'Ozone' | 'XHiFi'
+    clarityGain: number // 0 to 100
+
+    // Dynamic System (Real implementation)
+    dynamicEnabled: boolean
+    dynamicSideGain: number // 0 to 100
+    dynamicBassThreshold: number // -60 to 0
+
+    // Spectrum Extension
+    spectrumEnabled: boolean
+    spectrumGain: number // 0 to 100
+
+    // AnalogX
+    analogXEnabled: boolean
+    analogXMode: 'Class A' | 'Class AB' | 'Class B'
+    analogXDrive: number // 0 to 100
+
+    // FET Compressor
+    compressorEnabled: boolean
+    compressorThreshold: number // -60 to 0
+    compressorRatio: number // 1 to 20
+    compressorKnee: number // 0 to 40
+    compressorAttack: number // 0.001 to 1.0
+    compressorRelease: number // 0.01 to 3.0
+}
 
 export interface ServerConfig {
     isEnabled: boolean
@@ -124,6 +215,18 @@ export interface SharedUser {
     ipAddress?: string
 }
 
+export interface AuditLogEntry {
+    id: string
+    userId?: string
+    userNickname: string
+    action: string
+    targetId?: number | string
+    targetName: string
+    description: string
+    details?: any
+    timestamp: string
+}
+
 export interface ElectronAPI {
     // ファイル操作汎用
     selectFile: (options?: any) => Promise<string | null>
@@ -137,7 +240,7 @@ export interface ElectronAPI {
 
     selectFolder: () => Promise<string | null>
     scanFolder: (folderPath: string) => Promise<any[]>
-    getMediaFiles: () => Promise<MediaFile[]>
+    getMediaFiles: (page?: number, limit?: number, filters?: any) => Promise<any> // TODO: Proper return type with pagination metadata
     getMediaFile: (id: number) => Promise<MediaFile | null>
 
     getTags: () => Promise<Tag[]>
@@ -168,7 +271,7 @@ export interface ElectronAPI {
     importMedia: (filePaths: string[]) => Promise<MediaFile[]>
     checkImportDuplicates: (filePaths: string[]) => Promise<{ newFile: any; existing: any }[]>
     checkEntryDuplicates: (mediaId: number) => Promise<{ newMedia: MediaFile; existingMedia: MediaFile }[]>
-    findLibraryDuplicates: () => Promise<{ [key: string]: MediaFile[] }[]>
+    findLibraryDuplicates: (criteria?: { name: boolean; size: boolean; duration: boolean; modified: boolean }) => Promise<{ [key: string]: MediaFile[] }[]>
 
     // キャプチャ
     onTriggerFrameCapture: (callback: (action: string) => void) => () => void
@@ -194,6 +297,8 @@ export interface ElectronAPI {
     updateArtist: (mediaId: number, artist: string | null) => Promise<void>
     updateDescription: (mediaId: number, description: string | null) => Promise<void>
     updateUrl: (mediaId: number, url: string | null) => Promise<void>
+    updateMediaRelation: (childId: number, parentId: number | null) => Promise<void>
+    searchMediaFiles: (query: string) => Promise<{ id: number; file_name: string; title?: string; thumbnail_path?: string | null }[]>
     exportMedia: (mediaId: number, options?: { notificationId?: string }) => Promise<{ success: boolean; message?: string }>
     copyMediaToLibrary: (mediaIds: number[], libraryPath: string, settings: LibraryTransferSettings, options?: { notificationId?: string }) => Promise<{ success: boolean; message?: string }>
 
@@ -209,6 +314,7 @@ export interface ElectronAPI {
     refreshLibrary: () => Promise<boolean>
     onRefreshProgress: (callback: (current: number, total: number) => void) => void
     updateTagGroup: (tagId: number, groupId: number | null) => Promise<void>
+    getAuditLogs: (libraryPath?: string) => Promise<AuditLogEntry[]>
 
     // ネイティブファイルドラッグ（同期的）
     startDrag: (filePaths: string[]) => void
@@ -241,7 +347,7 @@ export interface ElectronAPI {
     testConnection: (url: string, token: string) => Promise<{ success: boolean; message?: string }>
     addRemoteLibrary: (name: string, url: string, token: string) => Promise<any>
     downloadRemoteMedia: (url: string, filename: string, options?: { notificationId?: string }) => Promise<{ success: boolean; path?: string; message?: string }>
-    uploadRemoteMedia: (url: string, token: string, filePaths: string[], options?: { notificationId?: string }) => Promise<{ success: boolean; results?: any[]; message?: string }>
+    uploadRemoteMedia: (url: string, token: string, filePaths: string[], metadata?: any, options?: { notificationId?: string }) => Promise<{ success: boolean; results?: any[]; message?: string }>
     renameRemoteMedia: (url: string, token: string, id: number, newName: string) => Promise<any>
     deleteRemoteMedia: (url: string, token: string, id: number, options?: { permanent?: boolean }) => Promise<any>
     updateRemoteMedia: (url: string, token: string, id: number, updates: any) => Promise<any>
@@ -279,6 +385,18 @@ export interface ElectronAPI {
     // Discord RPC
     updateDiscordActivity: (activity: any) => Promise<void>
     clearDiscordActivity: () => Promise<void>
+
+
+    // Audio
+    getAudioDevices: () => Promise<{ name: string, description: string }[]>
+    setAudioDevice: (deviceName: string) => Promise<void>
+    setExclusiveMode: (enabled: boolean) => Promise<void>
+    playAudio: (filePath?: string) => Promise<void>
+    pauseAudio: () => Promise<void>
+    resumeAudio: () => Promise<void>
+    stopAudio: () => Promise<void>
+    seekAudio: (time: number) => Promise<void>
+    setAudioVolume: (volume: number) => Promise<void>
 }
 
 export interface RemoteLibrary {
@@ -342,6 +460,13 @@ export interface Theme {
     isSystem?: boolean // for default themes
 }
 
+export interface DuplicateCriteria {
+    name: boolean
+    size: boolean
+    duration: boolean
+    modified: boolean
+}
+
 export interface ClientConfig {
     downloadPath: string
     theme: 'dark' | 'light' | 'system'
@@ -358,6 +483,10 @@ export interface ClientConfig {
     iconUrl?: string
     libraryTransferSettings?: LibraryTransferSettings
     enableGPUAcceleration?: boolean
+    audioDevice?: string
+    exclusiveMode?: boolean
+    useMpvAudio?: boolean
+    enableMpvForVideo?: boolean
 }
 
 export interface AppSettings {

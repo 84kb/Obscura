@@ -5,6 +5,7 @@ import './Player.css'
 import { toMediaUrl } from '../utils/fileUrl'
 import { useContext } from 'react'
 import { ShortcutContext } from '../contexts/ShortcutContext'
+import { AudioSettingsModal } from './AudioSettingsModal'
 
 interface PlayerProps {
     media: MediaFile
@@ -59,15 +60,18 @@ export const Player: React.FC<PlayerProps> = ({
         toggleFullscreen,
         isPiP,
         togglePiP,
+
+        audioEngine,
+        isMpv,
+        configLoaded
     } = usePlayer({
         media,
         onNext,
         onPrev,
-        pipControlMode,
-        // @ts-ignore - 他のプロップスは無視される
         onPlayFirst,
-        activeRemoteLibrary,
-        myUserToken
+        hasNext,
+        autoPlayEnabled,
+        pipControlMode
     })
 
     // ショートカットスコープの管理
@@ -106,6 +110,17 @@ export const Player: React.FC<PlayerProps> = ({
 
             // Ctrl+C / Ctrl+Shift+C
             if (e.ctrlKey && (e.code === 'KeyC')) {
+                // テキスト選択中、または入力フォーカス中なら無視してブラウザのデフォルトコピーを優先
+                const selection = window.getSelection()?.toString()
+                const activeElement = document.activeElement
+                const isInputField = activeElement instanceof HTMLInputElement ||
+                    activeElement instanceof HTMLTextAreaElement ||
+                    (activeElement as HTMLElement)?.isContentEditable
+
+                if ((selection && selection.length > 0) || isInputField) {
+                    return
+                }
+
                 e.preventDefault()
 
                 // Shiftあり: ファイルコピー
@@ -142,6 +157,7 @@ export const Player: React.FC<PlayerProps> = ({
     const [previewTime, setPreviewTime] = useState<number | null>(null)
     const [previewImage, setPreviewImage] = useState<string | null>(null)
     const [previewX, setPreviewX] = useState(0)
+    const [showAudioSettings, setShowAudioSettings] = useState(false)
 
     // GPU加速プレビュー用のスロットリング
     const lastPreviewTimeRef = useRef<number>(-1)
@@ -163,6 +179,18 @@ export const Player: React.FC<PlayerProps> = ({
         setResizeModeState(mode)
         localStorage.setItem('player_resize_mode', mode)
     }
+
+    // バックグラウンド判定（音声ラグ対策）
+    const [isBackground, setIsBackground] = useState(document.visibilityState === 'hidden')
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            const hidden = document.visibilityState === 'hidden'
+            setIsBackground(hidden)
+            console.log('[Player] Visibility changed. Hidden:', hidden)
+        }
+        document.addEventListener('visibilitychange', handleVisibilityChange)
+        return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }, [])
 
     // showControls関連のロジックを削除（常時表示のため）
     // GPU加速プレビューを使用するため、ファイルベースのプレビュー読み込みは不要
@@ -557,15 +585,33 @@ export const Player: React.FC<PlayerProps> = ({
                                 <polyline points="9 18 15 12 9 6"></polyline>
                             </svg>
                         </button>
+                        <button
+                            className={`nav-btn ${audioEngine.settings.enabled ? 'active' : ''}`}
+                            onClick={() => setShowAudioSettings(true)}
+                            title="オーディオエンジン設定"
+                            style={audioEngine.settings.enabled ? { color: 'var(--primary)', borderColor: 'var(--primary)' } : {}}
+                        >
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" />
+                                <line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" />
+                                <line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" />
+                                <line x1="2" y1="14" x2="6" y2="14" /><line x1="10" y1="12" x2="14" y2="12" /><line x1="18" y1="16" x2="22" y2="16" />
+                            </svg>
+                        </button>
                     </div>
                 </div >
             </div >
 
             <div className="player-content">
-                {isVideo ? (
+                {!configLoaded ? (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#666' }}>
+                        Loading configuration...
+                    </div>
+                ) : isVideo && !isMpv ? (
                     <video
                         ref={videoRef}
                         src={fileUrl}
+                        crossOrigin="anonymous"
                         className="player-video"
                         autoPlay
                         preload="auto"
@@ -580,10 +626,14 @@ export const Player: React.FC<PlayerProps> = ({
                         onWaiting={() => console.log('[Player] Waiting for data...')}
                         onCanPlay={() => console.log('[Player] Can play')}
                         onStalled={() => console.warn('[Player] Stalled!')}
-                        style={resizeMode === 'contain'
-                            ? { width: '100%', height: '100%', objectFit: 'contain' }
-                            : { maxWidth: '100%', maxHeight: '100%', objectFit: 'scale-down' }
-                        }
+                        style={{
+                            ...(resizeMode === 'contain'
+                                ? { width: '100%', height: '100%', objectFit: 'contain' }
+                                : { maxWidth: '100%', maxHeight: '100%', objectFit: 'scale-down' }
+                            ),
+                            // バックグラウンド時は描画を停止してリソースを節約（音声ラグ対策）
+                            visibility: isBackground ? 'hidden' : 'visible'
+                        }}
                         onClick={togglePlay}
                         onEnded={() => {
                             if (autoPlayEnabled) {
@@ -605,19 +655,38 @@ export const Player: React.FC<PlayerProps> = ({
                             </svg>
                         </div>
                         <h2 className="player-audio-title">{media.file_name}</h2>
-                        <audio
-                            ref={audioRef}
-                            src={fileUrl}
-                            onEnded={() => {
-                                if (autoPlayEnabled) {
-                                    if (onNext && hasNext) {
-                                        onNext()
-                                    } else if (isLooping && onPlayFirst && !hasNext) {
-                                        onPlayFirst()
+                        {isMpv ? (
+                            <div className="mpv-indicator" style={{
+                                marginTop: '16px',
+                                padding: '8px 16px',
+                                background: 'rgba(255, 170, 0, 0.15)',
+                                border: '1px solid rgba(255, 170, 0, 0.3)',
+                                borderRadius: '4px',
+                                color: '#ffaa00',
+                                fontSize: '12px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px'
+                            }}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+                                {isVideo ? 'WASAPI Video Mode (Audio Only)' : 'WASAPI Exclusive Mode (MPV Backend)'}
+                            </div>
+                        ) : (
+                            <audio
+                                ref={audioRef}
+                                src={fileUrl}
+                                crossOrigin="anonymous"
+                                onEnded={() => {
+                                    if (autoPlayEnabled) {
+                                        if (onNext && hasNext) {
+                                            onNext()
+                                        } else if (isLooping && onPlayFirst && !hasNext) {
+                                            onPlayFirst()
+                                        }
                                     }
-                                }
-                            }}
-                        />
+                                }}
+                            />
+                        )}
                     </div>
                 )}
 
@@ -803,6 +872,16 @@ export const Player: React.FC<PlayerProps> = ({
             </div>
 
             {/* 以前のback-button-overlayは削除済み */}
+
+            {/* オーディオエンジン設定モーダル */}
+            {showAudioSettings && (
+                <AudioSettingsModal
+                    settings={audioEngine.settings}
+                    updateSettings={audioEngine.updateSettings}
+                    analyser={audioEngine.analyser}
+                    onClose={() => setShowAudioSettings(false)}
+                />
+            )}
         </div >
     )
 }

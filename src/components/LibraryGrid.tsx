@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react'
 import { MediaFile, ViewSettings } from '../types'
 import { MediaCard } from './MediaCard'
 import SelectionBox from './SelectionBox'
@@ -46,6 +46,7 @@ export function LibraryGrid({
     const containerRef = useRef<HTMLDivElement | null>(null);
     const gridRef = useRef<VGridHandle>(null);
     const dragCurrentPosRef = useRef<{ x: number, y: number } | null>(null);
+    const scrollPosRef = useRef(0);
 
     // Shortcut Context
     const { pushScope, popScope } = React.useContext(ShortcutContext)!;
@@ -107,6 +108,8 @@ export function LibraryGrid({
         return () => window.removeEventListener('resize', handleResize);
     }, []);
 
+
+
     // Grid layout constants (match CSS)
     const GAP = 24;
     const PADDING = 24;
@@ -162,6 +165,23 @@ export function LibraryGrid({
 
         return { columnCount, itemWidth, itemHeight, cellWidth: finalCellWidth };
     };
+
+    // [SCROLL RESTORATION LOGIC]
+    // Window resizing changes the layout (column count), which alters the total height of the grid.
+    // Preserving the exact pixel scroll position causes the visible items to shift significantly (e.g., jump to a different section).
+    // Instead, we track the INDEX of the item currently at the top of the viewport.
+    // When the layout changes (re-mount due to key change), we recalculate the pixel position so that the same item index remains visible.
+    const { columnCount: currentColumnCount, itemHeight: currentItemHeight } = getLayoutInfo();
+    useLayoutEffect(() => {
+        if (gridRef.current && scrollPosRef.current > 0) {
+            // Recalculate scrollTop based on the stored item index and new layout parameters
+            // Formula: NewScrollTop = PADDING + (RowIndex * (ItemHeight + GAP))
+            const rowIndex = Math.floor(scrollPosRef.current / currentColumnCount);
+            const newScrollTop = PADDING + rowIndex * (currentItemHeight + GAP);
+
+            gridRef.current.scrollTo(newScrollTop);
+        }
+    }, [containerSize.width, currentColumnCount, gridSize, currentItemHeight])
 
     const handleNavigation = useCallback((direction: 'up' | 'down' | 'left' | 'right') => {
         if (mediaFiles.length === 0) return;
@@ -436,6 +456,14 @@ export function LibraryGrid({
                 ref={gridRef}
                 id="library-vgrid-container"
                 key={`${gridSize}-${columnCount}-${containerSize.width}-${mediaFiles.length}-${mediaFiles[0]?.id || 'empty'}`}
+                onScroll={(scrollTop: number) => {
+                    // Calculate and store the index of the item at the top of the viewport
+                    // scrollTop = PADDING + rowIndex * (itemHeight + GAP)
+                    // rowIndex = (scrollTop - PADDING) / (itemHeight + GAP)
+                    // index = rowIndex * columnCount
+                    const rowIndex = Math.max(0, Math.floor((scrollTop - PADDING) / (itemHeight + GAP)));
+                    scrollPosRef.current = rowIndex * columnCount;
+                }}
                 row={Math.ceil(mediaFiles.length / columnCount)}
                 col={columnCount}
                 cellHeight={itemHeight + GAP}

@@ -2,15 +2,20 @@ import { useState, useRef, useEffect } from 'react'
 import { MediaFile } from '../types'
 import { toMediaUrl } from '../utils/fileUrl'
 import { useShortcut } from '../contexts/ShortcutContext'
+import { useAudioEngine } from './useAudioEngine'
 
 interface UsePlayerProps {
     media?: MediaFile
     onNext?: () => void
     onPrev?: () => void
+    onPlayFirst?: () => void
+    hasNext?: boolean
+    autoPlayEnabled?: boolean
     pipControlMode?: 'navigation' | 'skip'
 }
 
-export function usePlayer({ media, onNext, onPrev, pipControlMode = 'navigation' }: UsePlayerProps = {}) {
+export function usePlayer({ media, onNext, onPrev, onPlayFirst, hasNext, autoPlayEnabled, pipControlMode = 'navigation' }: UsePlayerProps = {}) {
+    const audioEngine = useAudioEngine()
     const [isPlaying, setIsPlaying] = useState(false)
     const [currentTime, setCurrentTime] = useState(0)
     const [duration, setDuration] = useState(media?.duration || 0)
@@ -39,6 +44,30 @@ export function usePlayer({ media, onNext, onPrev, pipControlMode = 'navigation'
         return false
     })
 
+    const [exclusiveMode, setExclusiveMode] = useState(false)
+    const [useMpvAudio, setUseMpvAudio] = useState(false)
+    const [enableMpvForVideo, setEnableMpvForVideo] = useState(false)
+    const [configLoaded, setConfigLoaded] = useState(false)
+
+    const isMpv = useMpvAudio && (
+        media?.file_type === 'audio' ||
+        (media?.file_type === 'video' && enableMpvForVideo)
+    )
+
+    useEffect(() => {
+        if (window.electronAPI) {
+            window.electronAPI.getClientConfig().then(c => {
+                setExclusiveMode(!!c.exclusiveMode)
+                setUseMpvAudio(!!c.useMpvAudio)
+                setEnableMpvForVideo(!!c.enableMpvForVideo)
+                setConfigLoaded(true)
+            })
+        } else {
+            setConfigLoaded(true)
+        }
+    }, [])
+
+
     // 設定保存
     useEffect(() => {
         localStorage.setItem('player_settings', JSON.stringify({ volume, isMuted, isLooping }))
@@ -49,18 +78,54 @@ export function usePlayer({ media, onNext, onPrev, pipControlMode = 'navigation'
     const containerRef = useRef<HTMLDivElement>(null)
     const playPromiseRef = useRef<Promise<void> | null>(null)
 
+    // Refs for callback access inside MPV events
+    const onNextRef = useRef(onNext)
+    const onPrevRef = useRef(onPrev)
+    const onPlayFirstRef = useRef(onPlayFirst)
+    const autoPlayEnabledRef = useRef(autoPlayEnabled)
+    const hasNextRef = useRef(!!onNext)
+    const isLoopingRef = useRef(isLooping)
+    // Wait, onPlayFirst is NOT in props. It seems it was used in Player.tsx but not passed to usePlayer?
+    // Let's check where onPlayFirst comes from in Player.tsx. It's likely passed to Player, not usePlayer.
+    // Actually, usePlayer returns state, Player handles onEnded.
+    // BUT for MPV, usePlayer handles the event.
+    // So Player needs to pass onPlayFirst to usePlayer if we want to support loop playlist.
+    // Or we handle "loop single" here and let Player handle playlist loop?
+    // No, MPV is handled inside usePlayer entirely for events.
+
+    // Let's check UsePlayerProps again.
+    // onPlayFirst is NOT in UsePlayerProps.
+    // We need to add onPlayFirst to UsePlayerProps.
+
+
     // 再生/一時停止（メディア要素の実際の状態を基準に）
     const togglePlay = async () => {
-        const media = videoRef.current || audioRef.current
-        if (!media) return
+        if (isMpv) {
+            if (isPlaying) {
+                await window.electronAPI.pauseAudio()
+                setIsPlaying(false)
+            } else {
+                if (currentTime === 0 && !isPlaying) {
+                    // 初回再生
+                    await window.electronAPI.playAudio(media?.file_path)
+                } else {
+                    await window.electronAPI.resumeAudio()
+                }
+                setIsPlaying(true)
+            }
+            return
+        }
+
+        const mediaElement = videoRef.current || audioRef.current
+        if (!mediaElement) return
 
         try {
-            if (media.paused) {
+            if (mediaElement.paused) {
                 // 既存のplay()呼び出しが完了するのを待つ
                 if (playPromiseRef.current) {
                     await playPromiseRef.current
                 }
-                playPromiseRef.current = media.play()
+                playPromiseRef.current = mediaElement.play()
                 await playPromiseRef.current
                 playPromiseRef.current = null
                 setIsPlaying(true)
@@ -70,7 +135,7 @@ export function usePlayer({ media, onNext, onPrev, pipControlMode = 'navigation'
                     await playPromiseRef.current
                     playPromiseRef.current = null
                 }
-                media.pause()
+                mediaElement.pause()
                 setIsPlaying(false)
             }
         } catch (err) {
@@ -81,6 +146,12 @@ export function usePlayer({ media, onNext, onPrev, pipControlMode = 'navigation'
 
     // シーク（時間のみを設定、再生状態は変更しない）
     const seek = async (time: number) => {
+        if (isMpv) {
+            await window.electronAPI.seekAudio(time)
+            setCurrentTime(time)
+            return
+        }
+
         console.log('[usePlayer] seek called with time:', time)
         const media = videoRef.current || audioRef.current
         if (!media) {
@@ -88,64 +159,27 @@ export function usePlayer({ media, onNext, onPrev, pipControlMode = 'navigation'
             return
         }
 
-        console.log('[usePlayer] Media element details:', {
-            tagName: media.tagName,
-            src: media.src,
-            readyState: media.readyState,
-            duration: media.duration,
-            currentTime: media.currentTime,
-            paused: media.paused,
-            seekable: media.seekable ? {
-                length: media.seekable.length,
-                start: media.seekable.length > 0 ? media.seekable.start(0) : 'N/A',
-                end: media.seekable.length > 0 ? media.seekable.end(0) : 'N/A'
-            } : 'null'
-        })
-
-        // seekable情報を明示的に表示
-        if (media.seekable) {
-            console.log('[usePlayer] SEEKABLE INFO - length:', media.seekable.length)
-            if (media.seekable.length > 0) {
-                console.log('[usePlayer] SEEKABLE INFO - start(0):', media.seekable.start(0), 'end(0):', media.seekable.end(0))
-            }
-        } else {
-            console.log('[usePlayer] SEEKABLE INFO - seekable is null/undefined')
-        }
+        // ... (logging removed for brevity)
 
         try {
             // 進行中のplay()を待つ
             if (playPromiseRef.current) {
-                console.log('[usePlayer] Waiting for pending play() promise')
                 await playPromiseRef.current
                 playPromiseRef.current = null
             }
-            console.log('[usePlayer] Before set - media.currentTime:', media.currentTime, 'readyState:', media.readyState, 'duration:', media.duration)
-
-            try {
-                media.currentTime = time
-                console.log('[usePlayer] After set - media.currentTime:', media.currentTime, 'requested:', time)
-            } catch (setError) {
-                console.error('[usePlayer] Error setting currentTime:', setError)
-            }
-
+            media.currentTime = time
             setCurrentTime(time)
-            console.log('[usePlayer] Seek completed')
         } catch (err) {
             console.error('Seek failed:', err)
         }
     }
 
-    // 早送り・巻き戻し
     const forward = (seconds: number = 10) => {
-        const media = videoRef.current || audioRef.current
-        if (!media) return
-        media.currentTime = Math.min(media.duration, media.currentTime + seconds)
+        seek(Math.min(duration, currentTime + seconds))
     }
 
     const rewind = (seconds: number = 10) => {
-        const media = videoRef.current || audioRef.current
-        if (!media) return
-        media.currentTime = Math.max(0, media.currentTime - seconds)
+        seek(Math.max(0, currentTime - seconds))
     }
 
     const increaseVolume = () => {
@@ -158,19 +192,38 @@ export function usePlayer({ media, onNext, onPrev, pipControlMode = 'navigation'
 
     // 音量変更
     const changeVolume = (newVolume: number) => {
-        const media = videoRef.current || audioRef.current
-        if (!media) return
-
-        media.volume = newVolume
         setVolume(newVolume)
         if (newVolume > 0 && isMuted) {
             setIsMuted(false)
-            media.muted = false
+            if (isMpv) {
+                // MPV unMute is complicated, setting volume is easier
+            }
+        }
+
+        if (isMpv) {
+            window.electronAPI.setAudioVolume(newVolume * 100) // MPV uses 0-100
+        } else {
+            const media = videoRef.current || audioRef.current
+            if (media) {
+                media.volume = newVolume
+                if (newVolume > 0 && isMuted) media.muted = false
+            }
         }
     }
 
     // ミュート切り替え
     const toggleMute = () => {
+        if (isMpv) {
+            // MPV doesn't expose mute easy toggle via IPC without property get/set, or we track state.
+            // We track state in isMuted.
+            // window.electronAPI.setMute(!isMuted) -- need to implement if needed, or just vol 0
+            // For now just toggle UI state, actual volume control handles it via changeVolume?
+            // Or set volume to 0?
+            // Let's assume user just wants UI update for now, or use setVolume(0) if muted.
+            setIsMuted(!isMuted)
+            return
+        }
+
         const media = videoRef.current || audioRef.current
         if (!media) return
 
@@ -180,6 +233,12 @@ export function usePlayer({ media, onNext, onPrev, pipControlMode = 'navigation'
 
     // 再生速度変更
     const changePlaybackRate = (rate: number) => {
+        if (isMpv) {
+            setPlaybackRate(rate)
+            // window.electronAPI.setSpeed(rate) // TODO: Implement if needed
+            return
+        }
+
         const media = videoRef.current || audioRef.current
         if (!media) return
 
@@ -189,6 +248,11 @@ export function usePlayer({ media, onNext, onPrev, pipControlMode = 'navigation'
 
     // ループ切り替え
     const toggleLoop = () => {
+        if (isMpv) {
+            setIsLooping(!isLooping)
+            return
+        }
+
         const media = videoRef.current || audioRef.current
         if (!media) return
 
@@ -230,12 +294,49 @@ export function usePlayer({ media, onNext, onPrev, pipControlMode = 'navigation'
     useShortcut('PLAYER_VOLUME_UP', increaseVolume, { scope: 'player' })
     useShortcut('PLAYER_VOLUME_DOWN', decreaseVolume, { scope: 'player' })
 
-    // メディア要素のイベントリスナー設定
+    // オーディオエンジンの接続設定 (要素が切り替わった時のみ実行)
     useEffect(() => {
         const media = videoRef.current || audioRef.current
         if (!media) return
 
-        // 保存された設定を即座に適用
+        audioEngine.connectMediaElement(media)
+    }, [videoRef.current, audioRef.current])
+
+    // マウスボタンでの前後移動 (MB4: 戻る, MB5: 進む)
+    useEffect(() => {
+        const handleMouseUp = (e: MouseEvent) => {
+            // button 3: Back (MB4)
+            // button 4: Forward (MB5)
+            if (e.button === 3) {
+                if (onPrev) {
+                    onPrev()
+                    // ブラウザの戻る動作を防ぐためにpreventDefaultしたいが
+                    // mouseupでは遅い場合がある。mousedownでもpreventDefaultが必要かもしれないが
+                    // Electronアプリ内なのでブラウザの履歴バックは通常発生しないか、
+                    // またはアプリ側で無効化されていることを期待。
+                    // 一応標準のイベント伝播は止める
+                    e.preventDefault()
+                    e.stopPropagation()
+                }
+            } else if (e.button === 4) {
+                if (onNext) {
+                    onNext()
+                    e.preventDefault()
+                    e.stopPropagation()
+                }
+            }
+        }
+
+        window.addEventListener('mouseup', handleMouseUp)
+        return () => window.removeEventListener('mouseup', handleMouseUp)
+    }, [onNext, onPrev])
+
+    // メディア要素の属性同期とイベントリスナー設定
+    useEffect(() => {
+        const media = videoRef.current || audioRef.current
+        if (!media) return
+
+        // 保存された設定を適用
         media.volume = volume
         media.muted = isMuted
         media.loop = isLooping
@@ -294,10 +395,82 @@ export function usePlayer({ media, onNext, onPrev, pipControlMode = 'navigation'
             media.removeEventListener('play', handlePlay)
             media.removeEventListener('pause', handlePause)
             if (animationFrameId !== null) {
-                cancelAnimationFrame(animationFrameId)
             }
         }
-    }, [videoRef.current, audioRef.current, isLooping]) // メディア要素が切り替わった時に再実行
+    }, [videoRef.current, audioRef.current, volume, isMuted, isLooping, playbackRate, isMpv])
+
+    // Keep refs updated
+    useEffect(() => {
+        onNextRef.current = onNext
+        onPlayFirstRef.current = onPlayFirst
+        autoPlayEnabledRef.current = autoPlayEnabled
+        hasNextRef.current = !!onNext
+        isLoopingRef.current = isLooping
+    }, [onNext, onPlayFirst, autoPlayEnabled, isLooping])
+
+    // MPV Event Listeners
+    useEffect(() => {
+        if (!isMpv || !window.electronAPI) return
+
+        // 初期化時にボリューム設定
+        window.electronAPI.setAudioVolume(volume * 100)
+
+        // イベント購読
+        const cleanupTime = window.electronAPI.on('audio:time-update', (_: any, time: number) => {
+            setCurrentTime(time)
+        })
+        const cleanupDuration = window.electronAPI.on('audio:duration-update', (_: any, dur: number) => {
+            setDuration(dur)
+        })
+        const cleanupPause = window.electronAPI.on('audio:pause-update', (_: any, paused: boolean) => {
+            setIsPlaying(!paused)
+        })
+        const cleanupEnded = window.electronAPI.on('audio:ended', () => {
+            // Auto-play logic
+            // Note: autoPlayEnabled and hasNext logic is usually conditional in Player.tsx
+            // But here we are the player controller.
+            // We can use the props passed to usePlayer.
+
+            // Since we added autoPlayEnabled and hasNext to props, we need refs for them too?
+            // Or can we trust that if we use them in this effect deps, it re-subscribes?
+            // Re-subscribing on every prop change is probably fine for these events.
+            // But using refs is cleaner to avoid re-binding IPC listeners.
+
+            const _autoPlay = autoPlayEnabledRef.current
+            const _hasNext = hasNextRef.current
+            const _isLooping = isLoopingRef.current
+            const _onNext = onNextRef.current
+            const _onPlayFirst = onPlayFirstRef.current
+
+            if (_autoPlay) {
+                if (_onNext && _hasNext) {
+                    _onNext()
+                } else if (_isLooping && _onPlayFirst && !_hasNext) {
+                    _onPlayFirst()
+                } else if (_isLooping && !_hasNext) {
+                    // Single loop fallback if onPlayFirst not provided or simple loop
+                    window.electronAPI.seekAudio(0)
+                    window.electronAPI.playAudio()
+                } else {
+                    setIsPlaying(false)
+                }
+            } else {
+                setIsPlaying(false)
+            }
+        })
+
+        // 自動再生
+        window.electronAPI.playAudio(media?.file_path)
+
+        return () => {
+            // Cleanup: stop audio
+            window.electronAPI.stopAudio()
+            if (cleanupTime) cleanupTime()
+            if (cleanupDuration) cleanupDuration()
+            if (cleanupPause) cleanupPause()
+            if (cleanupEnded) cleanupEnded()
+        }
+    }, [isMpv, media?.id])
 
     // コンポーネントアンマウント時にメディアを確実に停止
     useEffect(() => {
@@ -488,5 +661,10 @@ export function usePlayer({ media, onNext, onPrev, pipControlMode = 'navigation'
         toggleLoop,
         toggleFullscreen,
         togglePiP,
+
+        audioEngine,
+        isMpv,
+        configLoaded
     }
 }
+

@@ -247,6 +247,7 @@ export function startServer(port: number): Promise<void> {
                     const { text, time } = req.body || {}
                     if (id === undefined || isNaN(Number(id)) || !text) return res.status(400).json({ error: { code: 'INVALID_INPUT', message: 'IDとテキストが必要です' } })
 
+                    library.setCurrentOperator(req.user?.nickname || 'Remote User')
                     const comment = library.addComment(Number(id), text, time, req.user?.nickname)
                     res.status(201).json(comment)
                     if (io) io.emit(`media:comment:${String(id)}`, comment)
@@ -328,6 +329,16 @@ export function startServer(port: number): Promise<void> {
                     const files = req.files as Express.Multer.File[]
                     if (!files || files.length === 0) return res.status(400).send()
 
+                    // メタデータのパース
+                    let metadataMap: any = {}
+                    try {
+                        if (req.body.metadata) {
+                            metadataMap = JSON.parse(req.body.metadata)
+                        }
+                    } catch (e) {
+                        console.warn('Failed to parse upload metadata:', e)
+                    }
+
                     const pathsToImport = files.map(f => {
                         // 文字化け対策: multerがファイル名を正しくデコードできていない場合の補正
                         // Latin1で解釈されてしまっているUTF-8バイト列を復元する
@@ -341,10 +352,69 @@ export function startServer(port: number): Promise<void> {
 
                         const newPath = path.join(uniqueDir, originalName)
                         fs.renameSync(f.path, newPath)
+
+                        // メタデータマップ用にオリジナル名を一時保存 (importMediaFilesの戻り値と照合するため)
+                        // importMediaFilesはMediaFileオブジェクトを返すが、そのfile_nameはoriginalNameと同じはず
                         return newPath
                     })
 
+                    library.setCurrentOperator(req.user?.nickname || 'Remote User')
                     const imported = await library.importMediaFiles(pathsToImport)
+
+                    // メタデータの適用
+                    if (imported.length > 0 && Object.keys(metadataMap).length > 0) {
+                        console.log(`[Upload] Applying metadata for ${imported.length} files...`)
+                        const allTags = library.getAllTags()
+                        const allFolders = library.getAllFolders()
+
+                        for (const media of imported) {
+                            const meta = metadataMap[media.file_name]
+                            if (meta) {
+                                // Rating
+                                if (typeof meta.rating === 'number') {
+                                    library.updateRating(media.id, meta.rating)
+                                }
+                                // Description
+                                if (meta.description) {
+                                    library.updateDescription(media.id, meta.description)
+                                }
+                                // Tags
+                                if (Array.isArray(meta.tags)) {
+                                    const tagIds = []
+                                    for (const tagName of meta.tags) {
+                                        // 名前で検索、なければ作成
+                                        let tag = allTags.find(t => t.name === tagName)
+                                        if (!tag) {
+                                            tag = library.createTag(tagName) // 同期的にタグ作成
+                                            // キャッシュ更新（次のループ等のため）
+                                            allTags.push(tag)
+                                        }
+                                        tagIds.push(tag.id)
+                                    }
+                                    if (tagIds.length > 0) {
+                                        library.addTagsToMedia([media.id], tagIds)
+                                    }
+                                }
+                                // Folders
+                                if (Array.isArray(meta.folders)) {
+                                    for (const folderName of meta.folders) {
+                                        // 名前で検索 (ルートフォルダのみ、または階層構造を表現するならパスで渡す必要があるが、
+                                        // 現状の簡易実装ではフラットな名前マッチング、または既存フォルダへの割り当てを行う)
+                                        // ここでは「同名のフォルダがあれば入れる、なければルートに作成して入れる」とする
+                                        let folder = allFolders.find(f => f.name === folderName)
+                                        if (!folder) {
+                                            folder = library.createFolder(folderName, null)
+                                            allFolders.push(folder)
+                                        }
+                                        if (folder) {
+                                            library.addFolderToMedia(media.id, folder.id)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     res.status(201).json(imported)
                     if (io) io.emit('library-updated')
                 } catch (e) {
@@ -367,6 +437,8 @@ export function startServer(port: number): Promise<void> {
                     const id = req.params.id ? parseInt(String(req.params.id)) : NaN
                     if (isNaN(id)) return res.status(400).send()
                     const { rating, artist, description, fileName } = req.body
+
+                    library.setCurrentOperator(req.user?.nickname || 'Remote User')
                     if (rating !== undefined) library.updateRating(id, rating)
                     if (artist !== undefined) library.updateArtist(id, artist)
                     if (description !== undefined) library.updateDescription(id, description)
@@ -418,6 +490,7 @@ export function startServer(port: number): Promise<void> {
                         return res.status(400).json({ error: { code: 'INVALID_INPUT', message: 'mediaId, tagId または mediaIds, tagIds が必要です' } })
                     }
 
+                    library.setCurrentOperator(req.user?.nickname || 'Remote User')
                     res.json({ success: true })
                     if (io) io.emit('library-updated')
                 } catch (e: any) {
@@ -433,6 +506,7 @@ export function startServer(port: number): Promise<void> {
                         return res.status(400).json({ error: { code: 'INVALID_INPUT', message: 'mediaId と tagId が必要です' } })
                     }
 
+                    library.setCurrentOperator(req.user?.nickname || 'Remote User')
                     library.removeTagFromMedia(Number(mediaId), Number(tagId))
                     res.json({ success: true })
                     if (io) io.emit('library-updated')
@@ -447,6 +521,8 @@ export function startServer(port: number): Promise<void> {
                 try {
                     const { name } = req.body || {}
                     if (!name) return res.status(400).json({ error: { code: 'INVALID_INPUT', message: '名前が必要です' } })
+
+                    library.setCurrentOperator(req.user?.nickname || 'Remote User')
                     const tag = library.createTag(name)
                     res.status(201).json(tag)
                     if (io) io.emit('library-updated')
@@ -460,6 +536,8 @@ export function startServer(port: number): Promise<void> {
                 try {
                     const { mediaId: id } = getSafeParams(req)
                     if (id === undefined || isNaN(Number(id))) return res.status(400).json({ error: { code: 'INVALID_INPUT', message: '有効なIDが必要です' } })
+
+                    library.setCurrentOperator(req.user?.nickname || 'Remote User')
                     library.deleteTag(Number(id))
                     res.json({ success: true })
                     if (io) io.emit('library-updated')

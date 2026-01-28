@@ -1,5 +1,5 @@
 import path from 'path'
-import { app } from 'electron'
+import { app, shell } from 'electron'
 import { getConfig as getClientConfig } from './settings'
 
 
@@ -22,6 +22,7 @@ interface Database {
   mediaTags: { mediaId: number; tagId: number }[]
   mediaFolders: { mediaId: number; folderId: number }[] // Renamed from mediaGenres
   comments: any[]
+  auditLogs: any[]
   nextMediaId: number
   nextTagId: number
   nextTagGroupId: number
@@ -74,7 +75,8 @@ export class MediaLibrary {
   private tagsPath: string
   private foldersPath: string
   private tagGroupsPath: string // Was foldersPath (now storing TagGroups)
-
+  private auditLogsPath: string
+  private currentOperator: string = 'System'
   private db: Database
   private importQueue: Promise<any> = Promise.resolve()
 
@@ -84,6 +86,7 @@ export class MediaLibrary {
     this.tagsPath = path.join(libraryPath, 'tags.json')
     this.foldersPath = path.join(libraryPath, 'folders.json') // Stores "Folders" (ex-Genres)
     this.tagGroupsPath = path.join(libraryPath, 'tag_folders.json') // Stores "TagGroups"
+    this.auditLogsPath = path.join(libraryPath, 'audit_logs.json')
 
     this.db = {
       mediaFiles: [],
@@ -93,6 +96,7 @@ export class MediaLibrary {
       mediaTags: [],
       mediaFolders: [],
       comments: [],
+      auditLogs: [],
       nextMediaId: 1,
       nextTagId: 1,
       nextTagGroupId: 1,
@@ -118,6 +122,7 @@ export class MediaLibrary {
       if (fs.existsSync(this.tagsPath)) this.db.tags = fs.readJsonSync(this.tagsPath)
       if (fs.existsSync(this.tagGroupsPath)) this.db.tagGroups = fs.readJsonSync(this.tagGroupsPath)
       if (fs.existsSync(this.foldersPath)) this.db.folders = fs.readJsonSync(this.foldersPath)
+      if (fs.existsSync(this.auditLogsPath)) this.db.auditLogs = fs.readJsonSync(this.auditLogsPath)
 
       // 2.5 Migration: Rename folderId to groupId in Tags
       if (this.db.tags) {
@@ -325,6 +330,9 @@ export class MediaLibrary {
   private saveFolders() { // Renamed from saveGenres
     fs.writeJsonSync(this.foldersPath, this.db.folders, { spaces: 2 })
   }
+  private saveAuditLogs() {
+    fs.writeJsonSync(this.auditLogsPath, this.db.auditLogs, { spaces: 2 })
+  }
 
   private saveMediaMetadata(media: any) {
     if (!media.uniqueId) return // Should throw?
@@ -334,6 +342,37 @@ export class MediaLibrary {
 
     // We dump the whole object including joined tags/genres/comments
     fs.writeJsonSync(metaPath, media, { spaces: 2 })
+  }
+
+  public addAuditLog(entry: {
+    action: string,
+    targetId?: number | string,
+    targetName: string,
+    description: string,
+    details?: any,
+    userId?: string,
+    userNickname?: string
+  }) {
+    const logEntry = {
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      userNickname: entry.userNickname || this.currentOperator,
+      ...entry
+    }
+    this.db.auditLogs.unshift(logEntry)
+    // ログが多くなりすぎないように制限（例: 2000件）
+    if (this.db.auditLogs.length > 2000) {
+      this.db.auditLogs = this.db.auditLogs.slice(0, 2000)
+    }
+    this.saveAuditLogs()
+  }
+
+  public setCurrentOperator(nickname: string) {
+    this.currentOperator = nickname || 'System'
+  }
+
+  public getAuditLogs() {
+    return this.db.auditLogs
   }
 
   // メディア操作
@@ -464,6 +503,14 @@ export class MediaLibrary {
           this.db.mediaFiles.push(metadata)
           this.saveMediaMetadata(metadata)
           importedFiles.push(metadata)
+
+          this.addAuditLog({
+            action: 'media_import',
+            targetId: id,
+            targetName: fileName,
+            description: `メディアをインポートしました: ${fileName}`
+          })
+
           report('Done', 1.0)
           console.log(`[MediaLibrary] Import completed: ${id} (${fileName})`)
         } catch (error) {
@@ -537,21 +584,35 @@ export class MediaLibrary {
 
   /**
    * ライブラリ内の重複ファイルを一括検索する
-   * Name + Size が一致するグループを返す
+   * Criteriaに基づいて一致するグループを返す
    */
-  public async findLibraryDuplicates(strict: boolean = true) {
+  public async findLibraryDuplicates(criteria?: { name: boolean; size: boolean; duration: boolean; modified: boolean }) {
     const groups: { [key: string]: any[] } = {}
 
-    // 1. グループ化 (Size + Name)
+    // デフォルトは厳密モード (互換性のため)
+    // 実際にはUIから必ずcriteriaが渡されるはず
+    const useName = criteria ? criteria.name : true
+    const useSize = criteria ? criteria.size : true
+    const useDuration = criteria ? criteria.duration : false
+    const useModified = criteria ? criteria.modified : false
+
+    // 1. グループ化
     for (const media of this.db.mediaFiles) {
       if (media.is_deleted) continue
 
-      let key = ''
-      if (strict) {
-        key = `${media.file_size}_${media.file_name}`
-      } else {
-        key = `${media.file_size}`
+      const parts = []
+      if (useName) parts.push(media.file_name)
+      if (useSize) parts.push(media.file_size)
+      if (useDuration) parts.push(media.duration || 0) // durationがない場合は0として扱う
+      if (useModified) {
+        // ミリ秒単位まで一致するか確認 (ISO文字列)
+        parts.push(media.modified_date)
       }
+
+      // 条件が一つも指定されていない場合はスキップ（あるいは全件マッチしてしまうのを防ぐ）
+      if (parts.length === 0) continue
+
+      const key = parts.join('_')
 
       if (!groups[key]) groups[key] = []
       groups[key].push(media)
@@ -574,7 +635,7 @@ export class MediaLibrary {
       created_date: stats.birthtime.toISOString(), modified_date: stats.mtime.toISOString(),
       thumbnail_path: null, created_at: new Date().toISOString(), is_deleted: false,
       last_played_at: null, artist: null, artists: [], description: null,
-      dominant_color: null, tags: [], folders: [], comments: [] // Renamed genres -> folders
+      dominant_color: null, tags: [], folders: [], comments: [], parentId: null // Renamed genres -> folders
     } as any)
     const newMedia = this.db.mediaFiles.find(m => m.id === id)
     if (newMedia) this.saveMediaMetadata(newMedia)
@@ -588,7 +649,17 @@ export class MediaLibrary {
 
   public updateRating(id: number, rating: number) {
     const media = this.db.mediaFiles.find((m) => m.id === id)
-    if (media) { media.rating = rating; this.saveMediaMetadata(media) }
+    if (media) {
+      media.rating = rating;
+      this.saveMediaMetadata(media)
+      this.addAuditLog({
+        action: 'media_update_rating',
+        targetId: id,
+        targetName: media.file_name,
+        description: `評価を ${rating} に更新しました: ${media.file_name}`,
+        details: { rating }
+      })
+    }
   }
 
   public getVideosMissingMetadata() {
@@ -608,14 +679,63 @@ export class MediaLibrary {
   public get(id: number) { return this.db.mediaFiles.find((m) => m.id === id) }
 
   public getAllMediaFiles() {
+    const tagMap = new Map(this.db.tags.map(t => [t.id, t]))
+    const folderMap = new Map(this.db.folders.map(f => [f.id, f]))
+    const mediaMap = new Map(this.db.mediaFiles.map(m => [m.id, m]))
+
+    // Media -> Tags pre-index
+    const mediaTagsMap = new Map<number, any[]>()
+    this.db.mediaTags.forEach(mt => {
+      if (!mediaTagsMap.has(mt.mediaId)) mediaTagsMap.set(mt.mediaId, [])
+      const tag = tagMap.get(mt.tagId)
+      if (tag) mediaTagsMap.get(mt.mediaId)!.push(tag)
+    })
+
+    // Media -> Folders pre-index
+    const mediaFoldersMap = new Map<number, any[]>()
+    this.db.mediaFolders.forEach(mf => {
+      if (!mediaFoldersMap.has(mf.mediaId)) mediaFoldersMap.set(mf.mediaId, [])
+      const folder = folderMap.get(mf.folderId)
+      if (folder) mediaFoldersMap.get(mf.mediaId)!.push(folder)
+    })
+
+    // Media -> Children pre-index (Shallow)
+    const childrenMap = new Map<number, any[]>()
+    this.db.mediaFiles.forEach(m => {
+      if (m.parentId) {
+        if (!childrenMap.has(m.parentId)) childrenMap.set(m.parentId, [])
+        childrenMap.get(m.parentId)!.push({
+          id: m.id,
+          title: m.title,
+          file_name: m.file_name,
+          thumbnail_path: m.thumbnail_path
+        })
+      }
+    })
+
     return this.db.mediaFiles.map((media) => {
-      const tagIds = this.db.mediaTags.filter((mt) => mt.mediaId === media.id).map((mt) => mt.tagId)
-      const tags = this.db.tags.filter((t) => tagIds.includes(t.id))
-      const folderIds = this.db.mediaFolders.filter((mg) => mg.mediaId === media.id).map((mg) => mg.folderId)
-      const folders = this.db.folders.filter((g) => folderIds.includes(g.id))
-      return { ...media, tags, folders } // Renamed genres -> folders
+      const tags = mediaTagsMap.get(media.id) || []
+      const folders = mediaFoldersMap.get(media.id) || []
+
+      // Resolve Parent (Shallow representation to avoid cycles/heavy payload)
+      let parent = null
+      if (media.parentId) {
+        const p = mediaMap.get(media.parentId)
+        if (p) {
+          parent = {
+            id: p.id,
+            title: p.title,
+            file_name: p.file_name,
+            thumbnail_path: p.thumbnail_path
+          }
+        }
+      }
+      const children = childrenMap.get(media.id) || []
+
+      return { ...media, tags, folders, parent, children }
     })
   }
+
 
   public getMediaFileWithDetails(id: number) {
     const media = this.db.mediaFiles.find((m) => m.id === id)
@@ -625,7 +745,19 @@ export class MediaLibrary {
     const folderIds = this.db.mediaFolders.filter((mg) => mg.mediaId === id).map((mg) => mg.folderId)
     const folders = this.db.folders.filter((g) => folderIds.includes(g.id))
     const comments = this.db.comments.filter((c) => c.mediaId === id)
-    return { ...media, tags, folders, comments } // Renamed genres -> folders
+
+    // Resolve Parent
+    let parent = null
+    if (media.parentId) {
+      parent = this.db.mediaFiles.find(m => m.id === media.parentId)
+      // Avoid infinite recursion if circular dependency exists (though UI prevents it, safety first)
+      // Simple object return is fine here as we are not deeply nesting.
+    }
+
+    // Resolve Children
+    const children = this.db.mediaFiles.filter(m => m.parentId === id)
+
+    return { ...media, tags, folders, comments, parent, children } // Renamed genres -> folders
   }
 
   public updateThumbnail(id: number, thumbnailPath: string) {
@@ -652,6 +784,13 @@ export class MediaLibrary {
       if (media && media.is_deleted !== isDeleted) {
         media.is_deleted = isDeleted
         this.saveMediaMetadata(media)
+
+        this.addAuditLog({
+          action: isDeleted ? 'media_trash' : 'media_restore',
+          targetId: id,
+          targetName: media.file_name,
+          description: isDeleted ? `ゴミ箱に移動しました: ${media.file_name}` : `ゴミ箱から元に戻しました: ${media.file_name}`
+        })
       }
     })
   }
@@ -679,7 +818,7 @@ export class MediaLibrary {
     // But we should probably explicitly update other files if needed?
     // No, dispersed means deletions are file removals.
 
-    // 物理ファイルの削除（非同期）
+    // 物理ファイルの削除（非同期でゴミ箱へ）
     for (const media of targets) {
       try {
         const filePath = media.file_path
@@ -688,27 +827,42 @@ export class MediaLibrary {
 
         if (parentDirName === 'images') {
           if (fs.existsSync(dirPath)) {
-            console.log(`[Database] Deleting media directory: ${dirPath}`)
-            await fs.remove(dirPath)
+            console.log(`[Database] Trashing media directory: ${dirPath}`)
+            await shell.trashItem(dirPath)
           }
         } else {
-          if (fs.existsSync(filePath)) await fs.remove(filePath)
+          // 個別ファイルの場合（レガシー互換など）
+          if (fs.existsSync(filePath)) {
+            console.log(`[Database] Trashing media file: ${filePath}`)
+            await shell.trashItem(filePath)
+          }
 
           const thumbDir = path.join(this.path, 'images', media.id.toString())
           if (fs.existsSync(thumbDir)) {
-            console.log(`[Database] Deleting thumbnail directory: ${thumbDir}`)
+            console.log(`[Database] Deleting thumbnail directory (direct remove): ${thumbDir}`)
             await fs.remove(thumbDir)
           }
         }
+
+        this.addAuditLog({
+          action: 'media_delete_permanent',
+          targetId: media.id,
+          targetName: media.file_name,
+          description: `ファイルを完全に削除しました: ${media.file_name}`
+        })
       } catch (error) {
-        console.error('Failed to delete file/directory:', media.file_path, error)
+        console.error('Failed to move to trash:', media.file_path, error)
       }
     }
   }
 
   public updateLastPlayed(id: number) {
     const media = this.db.mediaFiles.find((m) => m.id === id)
-    if (media) { media.last_played_at = new Date().toISOString(); this.saveMediaMetadata(media) }
+    if (media) {
+      media.last_played_at = new Date().toISOString();
+      this.saveMediaMetadata(media)
+      // 非表示（再生履歴はログに残さない方が良い場合が多いが、必要なら追加可能）
+    }
   }
 
   public updateFileName(id: number, newName: string) {
@@ -737,14 +891,11 @@ export class MediaLibrary {
         const oldPath = media.file_path
         const dir = path.dirname(oldPath)
         const newPath = path.join(dir, newName)
+        const oldName = media.file_name
         if (fs.existsSync(oldPath)) {
           fs.renameSync(oldPath, newPath)
           media.file_path = newPath
           media.file_name = newName
-          // If physically renamed successfully, we should probably clear the virtual title
-          // to ensure the file name and display name match,
-          // OR we assume that if the user provides a valid filename, they want that to be the name.
-          // Let's clear title if it was set, or set it to null to fall back to filename.
           media.title = null
           this.saveMediaMetadata(media)
         } else {
@@ -752,6 +903,15 @@ export class MediaLibrary {
           media.title = null
           this.saveMediaMetadata(media)
         }
+
+        this.addAuditLog({
+          action: 'media_rename',
+          targetId: id,
+          targetName: newName,
+          description: `ファイル名を変更しました: ${oldName} -> ${newName}`,
+          details: { oldName, newName }
+        })
+
         return media // Return updated media
       } catch (error) { console.error('Failed to rename physical file:', error); throw error }
     }
@@ -760,18 +920,89 @@ export class MediaLibrary {
 
   public updateArtist(id: number, artist: string | null) {
     const media = this.db.mediaFiles.find((m) => m.id === id)
-    if (media) { media.artist = artist; this.saveMediaMetadata(media) }
+    if (media) {
+      media.artist = artist;
+      this.saveMediaMetadata(media)
+      this.addAuditLog({
+        action: 'media_update_artist',
+        targetId: id,
+        targetName: media.file_name,
+        description: `投稿者を "${artist || '設定なし'}" に更新しました: ${media.file_name}`
+      })
+    }
   }
 
   public updateDescription(id: number, description: string | null) {
     const media = this.db.mediaFiles.find((m) => m.id === id)
-    if (media) { media.description = description; this.saveMediaMetadata(media) }
+    if (media) {
+      media.description = description;
+      this.saveMediaMetadata(media)
+      this.addAuditLog({
+        action: 'media_update_description',
+        targetId: id,
+        targetName: media.file_name,
+        description: `説明を更新しました: ${media.file_name}`
+      })
+    }
   }
 
   public updateUrl(id: number, url: string | null) {
     const media = this.db.mediaFiles.find((m) => m.id === id)
-    if (media) { media.url = url; this.saveMediaMetadata(media) }
+    if (media) {
+      media.url = url;
+      this.saveMediaMetadata(media)
+      this.addAuditLog({
+        action: 'media_update_url',
+        targetId: id,
+        targetName: media.file_name,
+        description: `URLを更新しました: ${media.file_name}`
+      })
+    }
   }
+
+  public updateParentId(childId: number, parentId: number | null) {
+    const media = this.db.mediaFiles.find((m) => m.id === childId)
+    if (media) {
+      // Prevent self-referencing
+      if (parentId === childId) return
+
+      // Prevent circular dependency (Simple check: direct parent)
+      if (parentId) {
+        const parent = this.db.mediaFiles.find(m => m.id === parentId)
+        if (parent && parent.parentId === childId) return // Direct circle
+      }
+
+      media.parentId = parentId
+      this.saveMediaMetadata(media)
+    }
+  }
+
+  public searchMedia(query: string, targets?: any) {
+    if (!query) return []
+    const q = query.toLowerCase()
+
+    // Default to searching by title/file_name if no targets specified
+    const searchTargets = targets || { name: true }
+
+    // Exclude deleted files, limit results for performance
+    return this.getAllMediaFiles()
+      .filter(m => {
+        if (m.is_deleted) return false
+
+        const matchName = searchTargets.name && (
+          (m.file_name && m.file_name.toLowerCase().includes(q)) ||
+          (m.title && m.title.toLowerCase().includes(q))
+        )
+        const matchArtist = searchTargets.artist && m.artist && m.artist.toLowerCase().includes(q)
+        const matchDescription = searchTargets.description && m.description && m.description.toLowerCase().includes(q)
+        const matchFolder = searchTargets.folder && m.folders && m.folders.some((f: any) => f.name.toLowerCase().includes(q))
+        const matchTags = searchTargets.tags && m.tags && m.tags.some((t: any) => t.name.toLowerCase().includes(q))
+
+        return matchName || matchArtist || matchDescription || matchFolder || matchTags
+      })
+      .slice(0, 50)
+  }
+
 
 
   public async refreshLibraryMetadata(onProgress?: (current: number, total: number) => void) {
@@ -877,12 +1108,30 @@ export class MediaLibrary {
     const tag = { id, name }
     this.db.tags.push(tag)
     this.saveTags()
+
+    this.addAuditLog({
+      action: 'tag_create',
+      targetId: id,
+      targetName: name,
+      description: `タグを作成しました: ${name}`
+    })
+
     return tag
   }
   public deleteTag(id: number) {
+    const tag = this.db.tags.find(t => t.id === id)
+    const tagName = tag ? tag.name : 'Unknown'
+
     this.db.tags = this.db.tags.filter((t) => t.id !== id)
     this.db.mediaTags = this.db.mediaTags.filter((mt) => mt.tagId !== id)
     this.saveTags()
+
+    this.addAuditLog({
+      action: 'tag_delete',
+      targetId: id,
+      targetName: tagName,
+      description: `タグを削除しました: ${tagName}`
+    })
     this.db.mediaFiles.forEach(m => {
       if (m.tags) {
         const initial = m.tags.length
@@ -900,6 +1149,13 @@ export class MediaLibrary {
         media.tags.push(tag)
         this.db.mediaTags.push({ mediaId, tagId }) // Keep for search compatibility
         this.saveMediaMetadata(media)
+
+        this.addAuditLog({
+          action: 'media_add_tag',
+          targetId: mediaId,
+          targetName: media.file_name,
+          description: `タグを追加しました: ${tag.name} - ${media.file_name}`
+        })
       }
     }
   }
@@ -922,7 +1178,15 @@ export class MediaLibrary {
           }
         })
 
-        if (changed) this.saveMediaMetadata(media)
+        if (changed) {
+          this.saveMediaMetadata(media)
+          this.addAuditLog({
+            action: 'media_add_tags_batch',
+            targetId: mediaId,
+            targetName: media.file_name,
+            description: `タグを一括追加しました (${uniqueTags.length}件): ${media.file_name}`
+          })
+        }
       }
     }
   }
@@ -975,13 +1239,31 @@ export class MediaLibrary {
     const group = { id, name }
     this.db.tagGroups.push(group)
     this.saveTagGroups() // Fixed: saveTagGroups
+
+    this.addAuditLog({
+      action: 'tag_group_create',
+      targetId: id,
+      targetName: name,
+      description: `タググループを作成しました: ${name}`
+    })
+
     return group
   }
   public deleteTagGroup(id: number) {
+    const group = this.db.tagGroups.find(g => g.id === id)
+    const groupName = group ? group.name : 'Unknown'
+
     this.db.tagGroups = this.db.tagGroups.filter((f: any) => f.id !== id)
     this.db.tags.forEach((t) => { if (t.groupId === id) t.groupId = null })
     this.saveTagGroups() // Fixed: saveTagGroups
     this.saveTags()
+
+    this.addAuditLog({
+      action: 'tag_group_delete',
+      targetId: id,
+      targetName: groupName,
+      description: `タググループを削除しました: ${groupName}`
+    })
     // Need to update tags in mediaFiles?
     // Since we store COPY of tags in media.tags (full object), yes we do.
     this.db.mediaFiles.forEach(m => {
@@ -996,7 +1278,18 @@ export class MediaLibrary {
   }
   public renameTagGroup(id: number, newName: string) {
     const group = this.db.tagGroups.find((f: any) => f.id === id)
-    if (group) { group.name = newName; this.saveTagGroups() } // Fixed: saveTagGroups
+    if (group) {
+      const oldName = group.name
+      group.name = newName;
+      this.saveTagGroups()
+
+      this.addAuditLog({
+        action: 'tag_group_rename',
+        targetId: id,
+        targetName: newName,
+        description: `タググループ名を変更しました: ${oldName} -> ${newName}`
+      })
+    }
   }
 
   // フォルダー (ex-Genres)
@@ -1030,13 +1323,31 @@ export class MediaLibrary {
     const folder = { id, name, parentId, orderIndex: maxOrder + 100 }
     this.db.folders.push(folder)
     this.saveFolders()
+
+    this.addAuditLog({
+      action: 'folder_create',
+      targetId: id,
+      targetName: name,
+      description: `フォルダーを作成しました: ${name}`
+    })
+
     return folder
   }
   public deleteFolder(id: number) {
     const targetId = Number(id)
+    const folder = this.db.folders.find(f => f.id === targetId)
+    const folderName = folder ? folder.name : 'Unknown'
+
     this.db.folders = this.db.folders.filter((g) => Number(g.id) !== targetId)
     this.db.mediaFolders = this.db.mediaFolders.filter((mg) => Number(mg.folderId) !== targetId)
     this.saveFolders()
+
+    this.addAuditLog({
+      action: 'folder_delete',
+      targetId: targetId,
+      targetName: folderName,
+      description: `フォルダーを削除しました: ${folderName}`
+    })
     // Update media files
     this.db.mediaFiles.forEach(m => {
       if (m.folders) {
@@ -1055,6 +1366,13 @@ export class MediaLibrary {
         media.folders.push(folder)
         this.db.mediaFolders.push({ mediaId, folderId })
         this.saveMediaMetadata(media)
+
+        this.addAuditLog({
+          action: 'media_add_folder',
+          targetId: mediaId,
+          targetName: media.file_name,
+          description: `フォルダーを割り当てました: ${folder.name} - ${media.file_name}`
+        })
       }
     }
   }
@@ -1064,12 +1382,21 @@ export class MediaLibrary {
     if (media && media.folders) {
       media.folders = media.folders.filter((g: any) => g.id !== folderId)
       this.saveMediaMetadata(media)
+
+      const folder = this.db.folders.find(f => f.id === folderId)
+      this.addAuditLog({
+        action: 'media_remove_folder',
+        targetId: mediaId,
+        targetName: media.file_name,
+        description: `メディアからフォルダーを解除しました: ${folder ? folder.name : folderId} - ${media.file_name}`
+      })
     }
   }
   public renameFolder(id: number, newName: string) {
     const targetId = Number(id)
     const folder = this.db.folders.find((g) => Number(g.id) === targetId)
     if (folder) {
+      const oldName = folder.name
       folder.name = newName;
       this.saveFolders()
       // Update media
@@ -1078,6 +1405,13 @@ export class MediaLibrary {
           const g = m.folders.find((x: any) => x.id === targetId)
           if (g) { g.name = newName; this.saveMediaMetadata(m) }
         }
+      })
+
+      this.addAuditLog({
+        action: 'folder_rename',
+        targetId: targetId,
+        targetName: newName,
+        description: `フォルダー名を変更しました: ${oldName} -> ${newName}`
       })
     }
   }
@@ -1093,6 +1427,12 @@ export class MediaLibrary {
       }
     })
     this.saveFolders()
+
+    this.addAuditLog({
+      action: 'folder_reorder',
+      targetName: 'Multiple Folders',
+      description: `フォルダー構成/順序を更新しました (${updates.length}件)`
+    })
   }
 
   // コメント
@@ -1106,6 +1446,14 @@ export class MediaLibrary {
       if (!media.comments) media.comments = []
       media.comments.push(comment)
       this.saveMediaMetadata(media)
+
+      this.addAuditLog({
+        action: 'media_comment',
+        targetId: mediaId,
+        targetName: media.file_name,
+        description: `コメントを追加しました: ${media.file_name} - "${text.substring(0, 20)}${text.length > 20 ? '...' : ''}"`,
+        details: { text, time, nickname }
+      })
     }
     return comment
   }
@@ -1293,7 +1641,12 @@ export function initDatabase() {
 // アクティブライブラリ取得ヘルパー
 export function getActiveMediaLibrary(): MediaLibrary | null {
   if (!activeLibraryPath) return null
-  return libraryRegistry.getLibrary(activeLibraryPath)
+  const lib = libraryRegistry.getLibrary(activeLibraryPath)
+  if (lib) {
+    const config = getClientConfig()
+    lib.setCurrentOperator(config.nickname || 'Local User')
+  }
+  return lib
 }
 
 // ライブラリリスト操作
@@ -1361,8 +1714,10 @@ export const mediaDB = {
   updateDominantColor: (id: number, color: string) => getActiveMediaLibrary()?.updateDominantColor(id, color),
   checkDuplicates: (filePaths: string[]) => getActiveMediaLibrary()?.checkDuplicates(filePaths) || Promise.resolve([]),
   getDuplicatesForMedia: (mediaId: number) => getActiveMediaLibrary()?.getDuplicatesForMedia(mediaId) || [],
-  findLibraryDuplicates: (strict?: boolean) => getActiveMediaLibrary()?.findLibraryDuplicates(strict) || Promise.resolve([]),
+  findLibraryDuplicates: (criteria?: { name: boolean; size: boolean; duration: boolean; modified: boolean }) => getActiveMediaLibrary()?.findLibraryDuplicates(criteria) || Promise.resolve([]),
   refreshLibraryMetadata: (onProgress: (c: number, t: number) => void) => getActiveMediaLibrary()?.refreshLibraryMetadata(onProgress) || Promise.resolve(),
+  searchMedia: (query: string, targets?: any) => getActiveMediaLibrary()?.searchMedia(query, targets) || [],
+  updateParentId: (childId: number, parentId: number | null) => getActiveMediaLibrary()?.updateParentId(childId, parentId),
 }
 
 export const tagDB = {

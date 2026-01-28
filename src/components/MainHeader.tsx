@@ -30,6 +30,7 @@ interface MainHeaderProps {
 }
 
 import { DuplicateResolutionModal } from './DuplicateResolutionModal'
+import { DuplicateSearchModal } from './DuplicateSearchModal'
 
 export function MainHeader({
     title,
@@ -76,7 +77,10 @@ export function MainHeader({
     const shouldRenderDurationFilter = useDelayUnmount(isDurationFilterOpen, 150)
     const shouldRenderDateFilter = useDelayUnmount(isDateFilterOpen, 150)
 
+
+
     const [isRefreshModalOpen, setIsRefreshModalOpen] = useState(false)
+    const [isDuplicateSearchOpen, setIsDuplicateSearchOpen] = useState(false)
     const [duplicateResults, setDuplicateResults] = useState<{ [key: string]: MediaFile[] }[] | null>(null)
 
     const handleConfirmRefresh = () => {
@@ -387,6 +391,7 @@ export function MainHeader({
                                             <option value="rating">評価</option>
                                             <option value="duration">再生時間</option>
                                             <option value="last_played">再生日</option>
+                                            <option value="random">ランダム</option>
                                         </select>
                                         <button
                                             className={`sort-dir-btn ${filterOptions.sortDirection === 'asc' ? 'active' : ''}`}
@@ -525,24 +530,12 @@ export function MainHeader({
                                 <div className="dropdown-row" style={{ marginTop: '5px' }}>
                                     <button
                                         className="btn btn-full btn-outline-secondary"
-                                        onClick={async () => {
+                                        onClick={() => {
                                             setIsViewMenuOpen(false)
-                                            if (confirm('ライブラリ内の重複ファイル（名前とサイズが一致）を検索しますか？')) {
-                                                try {
-                                                    const duplicates = await (window.electronAPI as unknown as ElectronAPI).findLibraryDuplicates()
-                                                    if (duplicates && duplicates.length > 0) {
-                                                        setDuplicateResults(duplicates)
-                                                    } else {
-                                                        alert('重複ファイルは見つかりませんでした。')
-                                                    }
-                                                } catch (e) {
-                                                    console.error(e)
-                                                    alert('エラーが発生しました')
-                                                }
-                                            }
+                                            setIsDuplicateSearchOpen(true)
                                         }}
                                     >
-                                        重複を検索
+                                        重複を検索...
                                     </button>
                                 </div>
                             </div>
@@ -825,6 +818,26 @@ export function MainHeader({
                 <DuplicateResolutionModal
                     duplicates={duplicateResults}
                     onClose={() => setDuplicateResults(null)}
+                />
+            )}
+
+            {isDuplicateSearchOpen && (
+                <DuplicateSearchModal
+                    onClose={() => setIsDuplicateSearchOpen(false)}
+                    onSearch={async (criteria) => {
+                        setIsDuplicateSearchOpen(false)
+                        try {
+                            const duplicates = await (window.electronAPI as unknown as ElectronAPI).findLibraryDuplicates(criteria)
+                            if (duplicates && duplicates.length > 0) {
+                                setDuplicateResults(duplicates)
+                            } else {
+                                alert('重複ファイルは見つかりませんでした。')
+                            }
+                        } catch (e) {
+                            console.error(e)
+                            alert('エラーが発生しました')
+                        }
+                    }}
                 />
             )}
         </div>

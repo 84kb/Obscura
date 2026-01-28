@@ -71,16 +71,42 @@ export function updateWatcher(config: ClientConfig, onImport?: (files: string[])
 
                 try {
                     const lib = libraryRegistry.getLibrary(cfg.targetLibraryId)
-                    // Library handles sequential execution internally via importQueue
+                    // Auto-import: Import without internal duplicate check (allow collisions to be resolved by UI)
+                    // We will check for duplicates AFTER import and notify frontend if any
                     const imported = await lib.importMediaFiles([filePath], (data: any) => {
-                        // main.ts で定義されている global mainWindow を使用
                         if (mainWindow && !mainWindow.isDestroyed()) {
                             mainWindow.webContents.send('import-progress', { id: 'auto-import', ...data })
                         }
-                    }, { checkDuplicates: true })
+                    }, { checkDuplicates: false })
 
-                    if (imported && imported.length > 0 && onImport) {
-                        onImport(imported.map((m: any) => m.file_path))
+                    if (imported && imported.length > 0) {
+                        if (onImport) onImport(imported.map((m: any) => m.file_path))
+
+                        // Post-Import Duplicate Check
+                        for (const media of imported) {
+                            try {
+                                const duplicates = lib.getDuplicatesForMedia(media.id)
+                                // Strict check: Name + Size
+                                // getDuplicatesForMedia checks Size. We add Name check here.
+                                const strictDuplicates = duplicates.filter((d: any) => d.existingMedia.file_name === media.file_name)
+
+                                if (strictDuplicates.length > 0) {
+                                    console.log(`[Watcher] Duplicate detected for ${media.file_name}. Notifying frontend.`)
+                                    const win = mainWindow
+                                    if (win && !win.isDestroyed()) {
+                                        // Send each duplicate pair to frontend
+                                        strictDuplicates.forEach((d: any) => {
+                                            win.webContents.send('auto-import-collision', {
+                                                newMedia: d.newMedia,
+                                                existingMedia: d.existingMedia
+                                            })
+                                        })
+                                    }
+                                }
+                            } catch (e) {
+                                console.error(`[Watcher] Failed duplicate check for ${media.id}`, e)
+                            }
+                        }
                     }
                 } catch (error: any) {
                     console.error(`[Watcher] Failed to trigger import: ${filePath}`, error)

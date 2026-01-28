@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { FilterOptions, Folder, Library } from '../types'
+import { createPortal } from 'react-dom'
+import AuditLogModal from './AuditLogModal'
+import { FilterOptions, Library, RemoteLibrary, Folder } from '../types'
 import './Sidebar.css'
 
-import { RemoteLibrary } from '../types'
 import { ConfirmModal } from './ConfirmModal'
 
 interface SidebarProps {
@@ -168,6 +169,10 @@ export function Sidebar({
     const [dropTarget, setDropTarget] = useState<{ id: number; position: 'top' | 'middle' | 'bottom' } | null>(null)
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; folderId: number } | null>(null)
     const [folderToDelete, setFolderToDelete] = useState<number | null>(null)
+    const [libraryMenuPos, setLibraryMenuPos] = useState<{ top: number; left: number; width: number } | null>(null)
+    const [libContextMenu, setLibContextMenu] = useState<{ x: number; y: number; library: Library } | null>(null)
+    const [auditLogLibrary, setAuditLogLibrary] = useState<Library | null>(null)
+    const libraryDropdownRef = useRef<HTMLDivElement>(null)
     const libraryMenuRef = useRef<HTMLDivElement>(null)
 
     // フォルダーツリーの構築 (メモ化)
@@ -175,18 +180,33 @@ export function Sidebar({
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
-            if (libraryMenuRef.current && !libraryMenuRef.current.contains(event.target as Node)) {
+            const target = event.target as Node
+            const isClickInsideMenu = libraryMenuRef.current?.contains(target)
+            const isClickInsideDropdown = libraryDropdownRef.current?.contains(target)
+
+            const isClickInsideContextMenu = (event.target as Element).closest('.context-menu')
+
+            if (!isClickInsideMenu && !isClickInsideDropdown && !isClickInsideContextMenu) {
                 setIsLibraryMenuOpen(false)
             }
             if (contextMenu && !(event.target as Element).closest('.context-menu')) {
                 setContextMenu(null)
+            }
+            if (libContextMenu && !(event.target as Element).closest('.context-menu')) {
+                setLibContextMenu(null)
             }
         }
         document.addEventListener('mousedown', handleClickOutside)
         return () => {
             document.removeEventListener('mousedown', handleClickOutside)
         }
-    }, [contextMenu])
+    }, [contextMenu, libContextMenu, isLibraryMenuOpen])
+
+    useEffect(() => {
+        if (!isLibraryMenuOpen) {
+            setLibContextMenu(null)
+        }
+    }, [isLibraryMenuOpen])
 
     const handleCreateClick = async (e: React.MouseEvent) => {
         e.preventDefault()
@@ -595,7 +615,17 @@ export function Sidebar({
                 <div className="library-menu-container" ref={libraryMenuRef}>
                     <button
                         className="current-library-btn"
-                        onClick={() => setIsLibraryMenuOpen(!isLibraryMenuOpen)}
+                        onClick={() => {
+                            if (!isLibraryMenuOpen && libraryMenuRef.current) {
+                                const rect = libraryMenuRef.current.getBoundingClientRect()
+                                setLibraryMenuPos({
+                                    top: rect.bottom + 8,
+                                    left: rect.left,
+                                    width: rect.width
+                                })
+                            }
+                            setIsLibraryMenuOpen(!isLibraryMenuOpen)
+                        }}
                     >
                         <span className="library-icon">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -610,13 +640,23 @@ export function Sidebar({
                                     ? activeRemoteLibrary.name
                                     : 'ライブラリを選択...'}
                         </span>
-                        <svg className={`chevron ${isLibraryMenuOpen ? 'open' : ''}`} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <svg className={`chevron ${isLibraryMenuOpen ? 'open' : ''} `} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <polyline points="6 9 12 15 18 9"></polyline>
                         </svg>
                     </button>
 
-                    {isLibraryMenuOpen && (
-                        <div className="library-dropdown-menu">
+                    {isLibraryMenuOpen && libraryMenuPos && createPortal(
+                        <div
+                            className="library-dropdown-menu"
+                            ref={libraryDropdownRef}
+                            style={{
+                                position: 'fixed',
+                                top: libraryMenuPos.top,
+                                left: libraryMenuPos.left,
+                                width: libraryMenuPos.width,
+                                zIndex: 99999
+                            }}
+                        >
                             <div className="library-search-container">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <circle cx="11" cy="11" r="8"></circle>
@@ -671,6 +711,11 @@ export function Sidebar({
                                         onSwitchLibrary(lib)
                                         setIsLibraryMenuOpen(false)
                                     }}
+                                    onContextMenu={(e) => {
+                                        e.preventDefault()
+                                        e.stopPropagation()
+                                        setLibContextMenu({ x: e.clientX, y: e.clientY, library: lib })
+                                    }}
                                 >
                                     <Icons.Folder />
                                     <span>{lib.name}</span>
@@ -697,7 +742,8 @@ export function Sidebar({
                                     ))}
                                 </>
                             )}
-                        </div>
+                        </div>,
+                        document.body
                     )}
                 </div>
             </div>
@@ -805,10 +851,10 @@ export function Sidebar({
 
             {/* コンテキストメニュー */}
             {
-                contextMenu && (
+                contextMenu && createPortal(
                     <div
                         className="context-menu"
-                        style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 1000 }}
+                        style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 99999 }}
                     >
                         <div className="context-menu-item" onClick={() => handleContextAction('rename')}>
                             名前を変更
@@ -823,7 +869,8 @@ export function Sidebar({
                         <div className="context-menu-item delete" onClick={() => handleContextAction('delete')}>
                             削除
                         </div>
-                    </div>
+                    </div>,
+                    document.body
                 )
             }
             {
@@ -840,6 +887,36 @@ export function Sidebar({
                             await onDeleteFolder(id)
                         }}
                         onCancel={() => setFolderToDelete(null)}
+                    />
+                )
+            }
+
+            {/* ライブラリコンテキストメニュー */}
+            {
+                libContextMenu && createPortal(
+                    <div
+                        className="context-menu"
+                        style={{ position: 'fixed', top: libContextMenu.y, left: libContextMenu.x, zIndex: 100000 }}
+                    >
+                        <div className="context-menu-item" onClick={() => {
+                            setAuditLogLibrary(libContextMenu.library)
+                            setLibContextMenu(null)
+                            setIsLibraryMenuOpen(false)
+                        }}>
+                            監査ログを表示
+                        </div>
+                    </div>,
+                    document.body
+                )
+            }
+
+            {/* 監査ログモーダル */}
+            {
+                auditLogLibrary && (
+                    <AuditLogModal
+                        libraryPath={auditLogLibrary.path}
+                        libraryName={auditLogLibrary.name}
+                        onClose={() => setAuditLogLibrary(null)}
                     />
                 )
             }

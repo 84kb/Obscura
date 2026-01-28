@@ -12,7 +12,7 @@ interface SettingsModalProps {
 }
 
 // 削除された定義
-type Category = 'general' | 'sidebar' | 'controls' | 'viewer' | 'screenshot' | 'shortcuts' | 'notification' | 'password' | 'import' | 'network' | 'developer' | 'media-engine' | 'profile' | 'theme'
+type Category = 'general' | 'sidebar' | 'controls' | 'viewer' | 'screenshot' | 'shortcuts' | 'notification' | 'password' | 'import' | 'network' | 'developer' | 'media-engine' | 'profile' | 'theme' | 'audio'
 
 interface ApiEndpoint {
     method: 'GET' | 'POST' | 'PUT' | 'DELETE'
@@ -325,6 +325,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
         // ライブラリ
         { id: 'import', label: 'インポート・ダウンロード', group: 'ライブラリ', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> },
+        { id: 'audio', label: 'オーディオ', group: 'ライブラリ', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg> },
         { id: 'media-engine', label: 'メディアエンジン', group: 'ライブラリ', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> },
         { id: 'network', label: 'ネットワーク同期', group: 'ライブラリ', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg> },
 
@@ -919,6 +920,29 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         </section>
                     )
                 })}
+
+                {/* マウスナビゲーション */}
+                <section key="Mouse" className="settings-section">
+                    <h4 className="section-title">Mouse Navigation</h4>
+                    <div className="settings-card">
+                        <div className="settings-row">
+                            <div className="settings-info">
+                                <span className="settings-label">前の動画</span>
+                            </div>
+                            <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
+                                Mouse Button 4 (戻る)
+                            </div>
+                        </div>
+                        <div className="settings-row">
+                            <div className="settings-info">
+                                <span className="settings-label">次の動画</span>
+                            </div>
+                            <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
+                                Mouse Button 5 (進む)
+                            </div>
+                        </div>
+                    </div>
+                </section>
             </div>
         )
     }
@@ -2453,6 +2477,9 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
         }
     }
 
+    // renderAudioSettings removed from here
+
+
     const renderProfileSettings = () => {
         return (
             <div className="settings-page">
@@ -2588,11 +2615,12 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                             activeCategory === 'network' ? renderNetworkSettings() :
                                                 activeCategory === 'shortcuts' ? renderShortcutsSettings() :
                                                     activeCategory === 'media-engine' ? renderMediaEngineSettings() :
-                                                        activeCategory === 'developer' ? renderDeveloperSettings() : (
-                                                            <div className="empty-state">
-                                                                <p>このセクションの設定は準備中です。</p>
-                                                            </div>
-                                                        )}
+                                                        activeCategory === 'audio' ? <AudioSettings clientConfig={clientConfig} setClientConfig={setClientConfig} /> :
+                                                            activeCategory === 'developer' ? renderDeveloperSettings() : (
+                                                                <div className="empty-state">
+                                                                    <p>このセクションの設定は準備中です。</p>
+                                                                </div>
+                                                            )}
                     </div>
 
                     <footer className="main-footer">
@@ -2600,6 +2628,139 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                     </footer>
                 </div>
             </div>
+        </div>
+    )
+}
+
+const AudioSettings = ({ clientConfig, setClientConfig }: { clientConfig: ClientConfig, setClientConfig: (config: ClientConfig) => void }) => {
+    const [audioDevices, setAudioDevices] = useState<{ name: string, description: string }[]>([])
+    const [loadingDevices, setLoadingDevices] = useState(false)
+
+    useEffect(() => {
+        if (window.electronAPI) {
+            setLoadingDevices(true)
+            window.electronAPI.getAudioDevices()
+                .then(devices => setAudioDevices(devices))
+                .catch(console.error)
+                .finally(() => setLoadingDevices(false))
+        }
+    }, [])
+
+    const useMpvAudio = clientConfig?.useMpvAudio || false
+    const exclusiveMode = clientConfig?.exclusiveMode || false
+    const enableMpvForVideo = clientConfig?.enableMpvForVideo || false
+    const currentDevice = clientConfig?.audioDevice || 'auto'
+
+    const updateConfig = async (update: Partial<ClientConfig>) => {
+        if (!window.electronAPI) return
+        try {
+            await window.electronAPI.updateClientConfig(update)
+            setClientConfig({ ...clientConfig, ...update })
+
+            // Trigger backend updates if needed
+            if (update.audioDevice) {
+                await window.electronAPI.setAudioDevice(update.audioDevice)
+            }
+            if (update.exclusiveMode !== undefined) {
+                await window.electronAPI.setExclusiveMode(update.exclusiveMode)
+            }
+        } catch (e) {
+            console.error(e)
+        }
+    }
+
+    return (
+        <div className="settings-page">
+            <h3 className="settings-page-title">オーディオ設定</h3>
+            <section className="settings-section">
+                <div className="settings-card">
+                    {/* Master Switch: Enable WASAPI/MPV */}
+                    <div className="settings-row">
+                        <div className="settings-info">
+                            <span className="settings-label">WASAPI (MPVバックエンド) を使用する</span>
+                            <span className="settings-description">
+                                高品質なオーディオ再生のためにMPVバックエンドを使用します。<br />
+                                <span style={{ fontSize: '0.85em', opacity: 0.8 }}>無効の場合は標準のWeb Audio (Shared Mode) が使用されます。</span>
+                            </span>
+                        </div>
+                        <label className="toggle-switch">
+                            <input
+                                type="checkbox"
+                                checked={useMpvAudio}
+                                onChange={(e) => updateConfig({ useMpvAudio: e.target.checked })}
+                            />
+                            <span className="slider"></span>
+                        </label>
+                    </div>
+
+                    {/* Dependent Settings */}
+                    <div style={{ opacity: useMpvAudio ? 1 : 0.5, pointerEvents: useMpvAudio ? 'auto' : 'none', transition: 'opacity 0.2s' }}>
+
+                        <div className="settings-row">
+                            <div className="settings-info">
+                                <span className="settings-label">出力デバイス</span>
+                                <span className="settings-description">
+                                    再生に使用するオーディオデバイスを選択します。
+                                </span>
+                            </div>
+                            <select
+                                className="settings-input"
+                                style={{ width: '250px' }}
+                                value={currentDevice}
+                                onChange={(e) => updateConfig({ audioDevice: e.target.value })}
+                                disabled={!useMpvAudio}
+                            >
+                                <option value="auto">自動 (デフォルト)</option>
+                                {audioDevices.map((dev, i) => (
+                                    <option key={i} value={dev.name}>
+                                        {dev.description}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="settings-row">
+                            <div className="settings-info">
+                                <span className="settings-label">WASAPI 排他モード (Exclusive Mode)</span>
+                                <span className="settings-description">
+                                    <span style={{ color: '#ffaa00', fontWeight: 'bold' }}>⚠ 実験的機能</span><br />
+                                    システムミキサーをバイパスし、ビットパーフェクトな再生を行います。<br />
+                                    有効にすると、他のアプリケーションの音声は再生されなくなります。
+                                </span>
+                            </div>
+                            <label className="toggle-switch">
+                                <input
+                                    type="checkbox"
+                                    checked={exclusiveMode}
+                                    onChange={(e) => updateConfig({ exclusiveMode: e.target.checked })}
+                                    disabled={!useMpvAudio}
+                                />
+                                <span className="slider"></span>
+                            </label>
+                        </div>
+
+                        <div className="settings-row">
+                            <div className="settings-info">
+                                <span className="settings-label">動画ファイルでも使用する (音声のみ)</span>
+                                <span className="settings-description">
+                                    <span style={{ color: '#ff4444', fontWeight: 'bold' }}>⚠ 画面は真っ暗になります</span><br />
+                                    MP4などの動画ファイルでも高音質再生を行いますが、<br />映像は表示されません。
+                                </span>
+                            </div>
+                            <label className="toggle-switch">
+                                <input
+                                    type="checkbox"
+                                    checked={enableMpvForVideo}
+                                    onChange={(e) => updateConfig({ enableMpvForVideo: e.target.checked })}
+                                    disabled={!useMpvAudio}
+                                />
+                                <span className="slider"></span>
+                            </label>
+                        </div>
+
+                    </div>
+                </div>
+            </section>
         </div>
     )
 }

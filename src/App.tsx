@@ -13,13 +13,13 @@ import { ConfirmModal } from './components/ConfirmModal'
 import { SubfolderGrid } from './components/SubfolderGrid'
 import { ProfileSetupModal } from './components/ProfileSetupModal'
 import { useLibrary } from './hooks/useLibrary'
-import { MediaFile, AppSettings, RemoteLibrary, ViewSettings, defaultViewSettings, ElectronAPI, ClientConfig } from './types'
+import { MediaFile, AppSettings, RemoteLibrary, ViewSettings, defaultViewSettings, ElectronAPI, ClientConfig, SharedUser } from './types'
 import { MainHeader } from './components/MainHeader'
 import { useSocket } from './hooks/useSocket'
 import { useTheme } from './hooks/useTheme'
 import { useSettings } from './hooks/useSettings'
 import { DuplicateModal } from './components/DuplicateModal'
-import { ShortcutProvider } from './contexts/ShortcutContext'
+import { ShortcutProvider, useShortcut } from './contexts/ShortcutContext'
 import './styles/index.css'
 import './styles/drag-overlay.css'
 
@@ -71,8 +71,10 @@ function AppContent() {
         importMedia,
         libraryStats,
         updateRating,
-        renameMedia,
         updateArtist,
+        renameMedia,
+        updateDescription,
+        updateUrl,
         refreshLibrary,
         loadFolders,
         renameFolder,
@@ -83,7 +85,6 @@ function AppContent() {
         openLibrary,
         myUserToken,
         addTagsToMedia,
-        setMediaFiles,
         reloadLibrary,
         checkEntryDuplicates
     } = useLibrary()
@@ -232,6 +233,27 @@ function AppContent() {
         }
     }, [addNotification, updateProgress])
 
+
+    // Shared Users State
+    const [sharedUsers, setSharedUsers] = useState<SharedUser[]>([])
+
+    // Poll shared users
+    useEffect(() => {
+        if (!window.electronAPI) return
+
+        const fetchUsers = async () => {
+            try {
+                const users = await window.electronAPI.getSharedUsers()
+                setSharedUsers(users)
+            } catch (e) {
+                console.error("Failed to fetch shared users:", e)
+            }
+        }
+
+        fetchUsers()
+        const interval = setInterval(fetchUsers, 5000)
+        return () => clearInterval(interval)
+    }, [])
 
 
     // 選択されたメディアのIDリスト
@@ -545,14 +567,29 @@ function AppContent() {
             })
         }
 
+        const handleAutoImportCollision = (_: any, data: { newMedia: MediaFile; existingMedia: MediaFile }) => {
+            console.log('[App] Auto-import collision detected:', data)
+            // 重複解決キューに追加し、コールバックは不要（自動でDBに残るか消えるか決まるため）
+            // handleResolveDuplicateで action決定後に処理される
+            // onResolve: null でもよいが、handleResolveDuplicate内で呼ばれるため空関数でも
+            setDuplicateQueue(prev => [...prev, {
+                ...data,
+                onResolve: async (resolvedMedia) => {
+                    console.log('[App] Auto-import duplicate resolved. Winner:', resolvedMedia.id)
+                }
+            }])
+        }
+
         // イベントリスナー登録
         let unsubscribeTrigger: (() => void) | undefined
         let unsubscribeAutoImport: (() => void) | undefined
+        let unsubscribeAutoImportCollision: (() => void) | undefined
         let unsubscribeExportProgress: (() => void) | undefined
 
         if (window.electronAPI && window.electronAPI.on) {
             unsubscribeTrigger = window.electronAPI.on('trigger-import', handleTriggerImport) as any
             unsubscribeAutoImport = window.electronAPI.on('auto-import-complete', handleAutoImportComplete) as any
+            unsubscribeAutoImportCollision = window.electronAPI.on('auto-import-collision', handleAutoImportCollision) as any
             unsubscribeExportProgress = window.electronAPI.on('export-progress', (_e: any, data: { id: string, progress: number }) => {
                 // eはeventオブジェクトだが、preloadでどうラップしたかによる
                 // preloadの実装: callback(_event, ...args)
@@ -578,6 +615,7 @@ function AppContent() {
         return () => {
             if (unsubscribeTrigger) unsubscribeTrigger()
             if (unsubscribeAutoImport) unsubscribeAutoImport()
+            if (unsubscribeAutoImportCollision) unsubscribeAutoImportCollision()
             if (unsubscribeExportProgress) unsubscribeExportProgress()
         }
     }, [importMedia, refreshLibrary, addNotification])
@@ -790,6 +828,23 @@ function AppContent() {
         return () => document.removeEventListener('keydown', handleKeyDown)
     }, [selectedMediaIds, moveToTrash, filterOptions.filterType])
 
+    // スペースキーで再生 (ライブラリで選択中、かつプレイヤーが開いていない場合)
+    // プレイヤーが開いている場合はShortcutContextのscope='player'が優先されるため、ここでは発火しない(はず)
+    // または発火しても無視する条件を入れる
+    useShortcut('PLAYER_TOGGLE_PLAY', () => {
+        if (!playingMedia && selectedMediaIds.length > 0) {
+            // 最後に選択されたID、または最初の選択IDを使用
+            const targetId = lastSelectedId || selectedMediaIds[0]
+            const media = mediaFiles.find(m => m.id === targetId)
+            if (media) {
+                handleMediaDoubleClick(media)
+            }
+        }
+    }, {
+        // scope: 'global', // default
+        enabled: !playingMedia && selectedMediaIds.length > 0
+    })
+
     const handleMediaClick = useCallback((media: MediaFile, e: React.MouseEvent) => {
         // ドラッグ操作中はクリック処理（選択変更）を行わない
         if (isInternalDrag.current) {
@@ -940,6 +995,75 @@ function AppContent() {
             targetMediaIds = selectedMediaIds
         }
 
+        // リモートライブラリかチェック
+        const remoteLib = remoteLibraries.find(l => l.id === libraryId)
+
+        if (remoteLib) {
+            // リモート転送処理
+            const filesToTransfer = targetMediaIds.map(id => mediaFiles.find(m => m.id === id)).filter(Boolean) as MediaFile[]
+            if (filesToTransfer.length === 0) return
+
+            const notificationId = addNotification({
+                type: 'progress',
+                title: `転送中: ${remoteLib.name}`,
+                message: `${filesToTransfer.length} 個のファイルをアップロードしています...`,
+                progress: 0,
+                duration: 0
+            })
+
+            try {
+                // メタデータの構築
+                const metadata: any = {};
+                filesToTransfer.forEach(f => {
+                    metadata[f.file_name] = {
+                        tags: f.tags?.map(t => t.name) || [],
+                        rating: f.rating,
+                        description: f.description,
+                        folders: f.folders?.map(fold => fold.name) || []
+                    }
+                })
+
+                const filePaths = filesToTransfer.map(f => f.file_path)
+
+                // アップロード実行 (メタデータ付き)
+                const result = await window.electronAPI.uploadRemoteMedia(
+                    remoteLib.url,
+                    remoteLib.token,
+                    filePaths,
+                    metadata, // new argument
+                    { notificationId }
+                )
+
+                removeNotification(notificationId)
+
+                if (result.success) {
+                    addNotification({
+                        type: 'success',
+                        title: '転送完了',
+                        message: `${filesToTransfer.length} 個のファイルを ${remoteLib.name} にアップロードしました`,
+                        duration: 5000
+                    })
+                } else {
+                    addNotification({
+                        type: 'error',
+                        title: '転送失敗',
+                        message: result.message || '不明なエラーが発生しました',
+                        duration: 5000
+                    })
+                }
+            } catch (e: any) {
+                removeNotification(notificationId)
+                addNotification({
+                    type: 'error',
+                    title: '転送失敗',
+                    message: e.message,
+                    duration: 5000
+                })
+            }
+            return
+        }
+
+        // 以下、ローカル転送処理 (既存)
         // クライアント設定から転送設定を取得
         let config: ClientConfig | null = null
         if (window.electronAPI) {
@@ -1068,10 +1192,7 @@ function AppContent() {
 
 
 
-    const updateDescription = async (id: number, description: string | null) => {
-        await window.electronAPI.updateDescription(id, description)
-        refreshLibrary()
-    }
+
 
     // ヘッダータイトルの取得
     const getHeaderTitle = () => {
@@ -1090,6 +1211,19 @@ function AppContent() {
         }
 
         return activeLibrary ? activeLibrary.name : 'すべて'
+    }
+
+    const handleUpdateRelation = async (childId: number, parentId: number | null) => {
+        if (!window.electronAPI) return
+        await (window.electronAPI as any).updateMediaRelation(childId, parentId)
+        if (!activeRemoteLibrary) {
+            refreshLibrary()
+        }
+    }
+
+    const handleSearchMedia = async (query: string, targets: any): Promise<any[]> => {
+        if (!window.electronAPI) return []
+        return await (window.electronAPI as any).searchMediaFiles(query, targets)
     }
 
     const renderMainContent = () => {
@@ -1377,6 +1511,17 @@ function AppContent() {
                     onAddFolder={addFolderToMedia}
                     onRemoveFolder={removeFolderFromMedia}
                     onCreateFolder={createFolder}
+                    onUpdateDescription={activeRemoteLibrary ? undefined : updateDescription} // TODO: Remote update
+                    onUpdateUrl={activeRemoteLibrary ? undefined : updateUrl} // TODO: Remote update
+                    onUpdateArtist={updateArtist}
+                    // Remote library relation update support depends on backend API implementation.
+                    // Assuming local only for now unless remote API supports it.
+                    onUpdateRelation={activeRemoteLibrary ? undefined : handleUpdateRelation}
+                    onSearchMedia={activeRemoteLibrary ? undefined : handleSearchMedia}
+
+                    totalStats={libraryStats}
+                    currentContextMedia={mediaFiles}
+                    contextTitle={getHeaderTitle()}
                     enableRichText={settings.enableRichText}
                     onPlay={(media) => {
                         setPlayingMedia(media)
@@ -1393,17 +1538,7 @@ function AppContent() {
                     onClose={handleCloseInspector}
                     onRenameMedia={renameMedia}
                     onUpdateRating={updateRating}
-                    onUpdateArtist={updateArtist}
-                    onUpdateDescription={updateDescription}
-                    onUpdateUrl={(id, url) => window.electronAPI.updateUrl(id, url).then(() => {
-                        setMediaFiles(prev => prev.map(m => m.id === id ? { ...m, url } : m))
-                    })}
-                    totalStats={{
-                        totalCount: mediaFiles.length,
-                        totalSize: mediaFiles.reduce((acc, m) => acc + m.file_size, 0)
-                    }}
-                    currentContextMedia={mediaFiles}
-                    contextTitle={getHeaderTitle()}
+                    sharedUsers={sharedUsers}
                 />
             )}
 
@@ -1439,6 +1574,7 @@ function AppContent() {
                     onShowInExplorer={handleShowInExplorer}
                     onAddToFolder={handleAddToFolder}
                     availableLibraries={availableLibraries}
+                    remoteLibraries={remoteLibraries}
                     onAddToLibrary={handleAddToLibrary}
                     onRename={() => {
                         setRenamingMediaId(contextMenu.media.id)
@@ -1454,7 +1590,6 @@ function AppContent() {
                         const downloadUrl = media.file_path
                         const filename = media.file_name || 'download.mp4'
 
-                        // 通知ID生成 (addNotificationの戻り値を使用)
                         const notificationId = addNotification({
                             title: 'ダウンロード中...',
                             message: filename,
@@ -1466,8 +1601,6 @@ function AppContent() {
 
                         try {
                             const result = await (window.electronAPI as any).downloadRemoteMedia(downloadUrl, filename, { notificationId })
-
-                            // 完了後、プログレス通知を消して結果通知を表示
                             removeNotification(notificationId)
 
                             if (result.success) {
@@ -1495,6 +1628,7 @@ function AppContent() {
                             })
                         }
                     } : undefined}
+                    isRemote={!!activeRemoteLibrary}
                 />
             )}
 

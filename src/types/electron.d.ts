@@ -50,7 +50,7 @@ export interface ElectronAPI {
     importMedia: (filePaths: string[]) => Promise<MediaFile[]>
     checkImportDuplicates: (filePaths: string[]) => Promise<{ newFile: any; existing: any }[]>
     checkEntryDuplicates: (mediaId: number) => Promise<{ newMedia: MediaFile; existingMedia: MediaFile }[]>
-    findLibraryDuplicates: () => Promise<{ [key: string]: MediaFile[] }[]>
+    findLibraryDuplicates: (criteria?: { name: boolean; size: boolean; duration: boolean; modified: boolean }) => Promise<{ [key: string]: MediaFile[] }[]>
 
     // キャプチャ
     onTriggerFrameCapture: (callback: (action: string) => void) => () => void

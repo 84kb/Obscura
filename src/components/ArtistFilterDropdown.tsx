@@ -68,7 +68,16 @@ export function ArtistFilterDropdown({
         })
     }
 
+    const clearFilters = () => {
+        onFilterChange({
+            ...filterOptions,
+            selectedArtists: [],
+            excludedArtists: []
+        })
+    }
+
     const selectAll = () => {
+
         const visibleNames = filteredArtists.map(a => a.name)
         const allSelected = visibleNames.every(name => filterOptions.selectedArtists?.includes(name))
 
@@ -108,6 +117,19 @@ export function ArtistFilterDropdown({
                         onChange={(e) => setSearchQuery(e.target.value)}
                         autoFocus
                     />
+                </div>
+                <div className="artist-filter-actions">
+                    <button
+                        className="clear-btn"
+                        onClick={clearFilters}
+                        title="フィルターをクリア"
+                        disabled={(!filterOptions.selectedArtists || filterOptions.selectedArtists.length === 0) && (!filterOptions.excludedArtists || filterOptions.excludedArtists.length === 0)}
+                    >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M3 6h18"></path>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                    </button>
                 </div>
             </div>
 

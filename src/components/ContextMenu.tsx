@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react'
-import { MediaFile, Folder } from '../types'
+import { useRef, useEffect } from 'react'
+import { MediaFile, Folder, RemoteLibrary } from '../types'
 import './ContextMenu.css'
 
 interface ContextMenuProps {
@@ -19,7 +19,9 @@ interface ContextMenuProps {
     onDownload?: () => void
     onExport?: (media: MediaFile) => void
     availableLibraries?: { name: string; path: string }[]
+    remoteLibraries?: RemoteLibrary[]
     onAddToLibrary?: (libraryId: string) => void
+    isRemote?: boolean
 }
 
 export function ContextMenu({
@@ -39,7 +41,9 @@ export function ContextMenu({
     onDownload,
     onExport,
     availableLibraries,
-    onAddToLibrary
+    remoteLibraries,
+    onAddToLibrary,
+    isRemote
 }: ContextMenuProps) {
     const menuRef = useRef<HTMLDivElement>(null)
 
@@ -97,7 +101,7 @@ export function ContextMenu({
             className="context-menu"
             style={{ left: x, top: y }}
         >
-            <div className="context-menu-item" onClick={onOpenDefault}>
+            <div className={`context-menu-item ${isRemote ? 'disabled' : ''}`} onClick={!isRemote ? onOpenDefault : undefined}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
                     <polyline points="15 3 21 3 21 9" />
@@ -106,7 +110,7 @@ export function ContextMenu({
                 <span>規定のアプリで開く</span>
             </div>
 
-            <div className="context-menu-item" onClick={onOpenWith}>
+            <div className={`context-menu-item ${isRemote ? 'disabled' : ''}`} onClick={!isRemote ? onOpenWith : undefined}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
                     <line x1="9" y1="3" x2="9" y2="21" />
@@ -114,7 +118,7 @@ export function ContextMenu({
                 <span>他のプログラムで開く</span>
             </div>
 
-            <div className="context-menu-item" onClick={onShowInExplorer}>
+            <div className={`context-menu-item ${isRemote ? 'disabled' : ''}`} onClick={!isRemote ? onShowInExplorer : undefined}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                 </svg>
@@ -159,7 +163,7 @@ export function ContextMenu({
 
             {/* 他のライブラリに追加サブメニュー */}
             {
-                onAddToLibrary && availableLibraries && availableLibraries.length > 0 && (
+                onAddToLibrary && (
                     <div className="context-menu-item has-submenu">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M20 14.66V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5.34" />
@@ -170,19 +174,51 @@ export function ContextMenu({
                             <polyline points="9 18 15 12 9 6" />
                         </svg>
                         <div className="context-submenu">
-                            {availableLibraries.map(lib => (
-                                <div
-                                    key={lib.path}
-                                    className="context-menu-item"
-                                    onClick={() => onAddToLibrary(lib.path)}
-                                >
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-                                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-                                    </svg>
-                                    <span>{lib.name}</span>
+                            {availableLibraries && availableLibraries.length > 0 && (
+                                <>
+                                    <div className="context-menu-header">ローカル</div>
+                                    {availableLibraries.map(lib => (
+                                        <div
+                                            key={lib.path}
+                                            className="context-menu-item"
+                                            onClick={() => onAddToLibrary(lib.path)}
+                                        >
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                                                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                                            </svg>
+                                            <span>{lib.name}</span>
+                                        </div>
+                                    ))}
+                                </>
+                            )}
+
+                            {remoteLibraries && remoteLibraries.length > 0 && (
+                                <>
+                                    {availableLibraries && availableLibraries.length > 0 && (
+                                        <div className="context-menu-separator" />
+                                    )}
+                                    <div className="context-menu-header">リモート</div>
+                                    {remoteLibraries.map(lib => (
+                                        <div
+                                            key={lib.id}
+                                            className="context-menu-item"
+                                            onClick={() => onAddToLibrary(lib.id)}
+                                        >
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+                                            </svg>
+                                            <span>{lib.name}</span>
+                                        </div>
+                                    ))}
+                                </>
+                            )}
+
+                            {(!availableLibraries || availableLibraries.length === 0) && (!remoteLibraries || remoteLibraries.length === 0) && (
+                                <div className="context-menu-item disabled">
+                                    <span>ライブラリがありません</span>
                                 </div>
-                            ))}
+                            )}
                         </div>
                     </div>
                 )

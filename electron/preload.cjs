@@ -59,6 +59,7 @@ try {
             ipcRenderer.on('refresh-progress', handler)
             return () => ipcRenderer.removeListener('refresh-progress', handler) // クリーンアップ関数を返す
         },
+        getAuditLogs: (libraryPath) => ipcRenderer.invoke('get-audit-logs', libraryPath),
 
         // リモート接続
         // ジャンル操作
@@ -165,6 +166,10 @@ try {
 
         // === 自動アップデート ===
         checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+
+        // === 親子関係 ===
+        updateMediaRelation: (childId, parentId) => ipcRenderer.invoke('update-media-relation', childId, parentId),
+        searchMediaFiles: (query, targets) => ipcRenderer.invoke('search-media-files', query, targets),
         downloadUpdate: () => ipcRenderer.invoke('download-update'),
         quitAndInstall: () => ipcRenderer.invoke('quit-and-install'),
         onUpdateStatus: (callback) => {
@@ -189,6 +194,17 @@ try {
         updateDiscordActivity: (activity) => ipcRenderer.invoke('discord-update-activity', activity),
         clearDiscordActivity: () => ipcRenderer.invoke('discord-clear-activity'),
 
+        // Audio
+        getAudioDevices: () => ipcRenderer.invoke('audio:get-devices'),
+        setAudioDevice: (deviceName) => ipcRenderer.invoke('audio:set-device', deviceName),
+        setExclusiveMode: (enabled) => ipcRenderer.invoke('audio:set-exclusive', enabled),
+        playAudio: (filePath) => ipcRenderer.invoke('audio:play', filePath),
+        pauseAudio: () => ipcRenderer.invoke('audio:pause'),
+        resumeAudio: () => ipcRenderer.invoke('audio:resume'),
+        stopAudio: () => ipcRenderer.invoke('audio:stop'),
+        seekAudio: (time) => ipcRenderer.invoke('audio:seek', time),
+        setAudioVolume: (volume) => ipcRenderer.invoke('audio:set-volume', volume),
+
         // ウィンドウ操作
         minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
         maximizeWindow: () => ipcRenderer.invoke('window-maximize'),
@@ -197,7 +213,7 @@ try {
 
         // 汎用イベントリスナー (ホワイトリスト形式)
         on: (channel, callback) => {
-            const validChannels = ['trigger-import', 'auto-import-complete', 'export-progress', 'download-progress', 'notification-progress'];
+            const validChannels = ['trigger-import', 'auto-import-complete', 'auto-import-collision', 'export-progress', 'download-progress', 'notification-progress', 'audio:time-update', 'audio:duration-update', 'audio:pause-update', 'audio:ended'];
             if (validChannels.includes(channel)) {
                 // 自動的に購読解除できるようにラッパーを返すか、あるいは単純にonするか
                 // App.tsxの実装を見ると removeListener は使っていないようなので、

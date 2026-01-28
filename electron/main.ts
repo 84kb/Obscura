@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, protocol, Menu, MenuItem, nativeImage, clipboard } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, protocol, Menu, MenuItem, nativeImage, clipboard, powerSaveBlocker } from 'electron'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import fs from 'fs-extra'
@@ -20,6 +20,7 @@ import { updateWatcher } from './watcher'
 import { downloadFile } from './downloader'
 import { initUpdater } from './updater'
 import { initDiscordRpc, updateActivity, clearActivity, destroyDiscordRpc } from './discord'
+import { registerAudioHandlers, setupAudioEvents } from './audio-ipc'
 
 // クラッシュハンドリング
 process.on('uncaughtException', (error) => {
@@ -40,6 +41,10 @@ const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 try {
     console.log('[Main] Initializing client settings...')
     initClientSettings()
+
+    // パワーセーブブロッカーの有効化 (アプリサスペンド防止 - バックグラウンド再生の安定化)
+    const powerSaveId = powerSaveBlocker.start('prevent-app-suspension')
+    console.log(`[Main] PowerSaveBlocker active with ID: ${powerSaveId}`)
 
     // Discord RPC 初期化
     const config = getClientConfig()
@@ -95,6 +100,7 @@ app.setPath('cache', path.join(app.getPath('home'), '.obscura', 'cache'))
 // バックグラウンドでのパフォーマンス低下を防ぐ
 app.commandLine.appendSwitch('disable-renderer-backgrounding')
 app.commandLine.appendSwitch('disable-background-timer-throttling')
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
 
 function createWindow() {
     // builtファイルからの相対パスで解決
@@ -129,6 +135,9 @@ function createWindow() {
         mainWindow?.show()
         if (mainWindow) {
             initUpdater(mainWindow)
+        }
+        if (mainWindow) {
+            setupAudioEvents(mainWindow.webContents)
         }
     })
 
@@ -511,6 +520,7 @@ app.on('window-all-closed', () => {
 
 // IPC ハンドラー
 console.log('[Main] Registering IPC handlers...')
+registerAudioHandlers()
 
 // ライブラリ管理
 // メディアの他のライブラリへのコピー
@@ -592,6 +602,8 @@ ipcMain.handle('get-libraries', async () => {
 ipcMain.handle('set-active-library', async (_, libraryPath: string) => {
     libraryDB.setActiveLibrary(libraryPath)
 })
+
+
 
 ipcMain.handle('get-active-library', async () => {
     return libraryDB.getActiveLibrary()
@@ -712,9 +724,9 @@ ipcMain.handle('check-entry-duplicates', async (_, mediaId: number) => {
     return mediaDB.getDuplicatesForMedia(mediaId)
 })
 
-ipcMain.handle('find-library-duplicates', async () => {
-    console.log('[Main] Finding library duplicates...')
-    return mediaDB.findLibraryDuplicates(true) // Strict mode by default
+ipcMain.handle('find-library-duplicates', async (_, criteria) => {
+    console.log('[Main] Finding library duplicates with criteria:', criteria)
+    return mediaDB.findLibraryDuplicates(criteria)
 })
 
 ipcMain.handle('update-rating', async (_, mediaId: number, rating: number) => {
@@ -1091,6 +1103,24 @@ ipcMain.handle('update-url', async (_event, mediaId: number, url: string | null)
         mediaDB.updateUrl(mediaId, url)
     } catch (error) {
         console.error('Failed to update url:', error)
+    }
+})
+
+ipcMain.handle('update-media-relation', async (_event, childId: number, parentId: number | null) => {
+    try {
+        return mediaDB.updateParentId(childId, parentId)
+    } catch (error) {
+        console.error('Failed to update media relation:', error)
+        throw error
+    }
+})
+
+ipcMain.handle('search-media-files', async (_event, query: string, targets?: any) => {
+    try {
+        return mediaDB.searchMedia(query, targets)
+    } catch (error) {
+        console.error('Failed to search media files:', error)
+        throw error
     }
 })
 
@@ -1601,7 +1631,7 @@ ipcMain.handle('download-remote-media', async (event, url: string, filename: str
 
 
 console.log('[DEBUG] Registering IPC handler: upload-remote-media')
-ipcMain.handle('upload-remote-media', async (event, { url, token, filePaths, options }: { url: string; token: string; filePaths: string[], options?: { notificationId?: string } }) => {
+ipcMain.handle('upload-remote-media', async (event, { url, token, filePaths, metadata, options }: { url: string; token: string; filePaths: string[], metadata?: any, options?: { notificationId?: string } }) => {
     try {
         const notificationId = options?.notificationId
         const results = []
@@ -1635,9 +1665,24 @@ ipcMain.handle('upload-remote-media', async (event, { url, token, filePaths, opt
             const requestLib = isHttps ? https : http
             const boundary = '----ObscuraUploadBoundary' + crypto.randomUUID()
 
-            const postDataStart = `--${boundary}\r\n` +
+            let postDataStart = `--${boundary}\r\n` +
                 `Content-Disposition: form-data; name="files"; filename="${file.name}"\r\n` +
                 `Content-Type: application/octet-stream\r\n\r\n`
+
+            // メタデータの追加（存在する場合）
+            if (metadata) {
+                // ファイルアップロードパートの前にメタデータパートを追加
+                // 注: 通常、ファイルデータの前にテキストデータを置く方がパースしやすい場合があるが、
+                // multerは順序を気にしない。ただし、postDataStartに混ぜ込むため、
+                // 先にメタデータパーツ、次にファイルヘッダーという順序で構築する。
+
+                const metadataPart = `--${boundary}\r\n` +
+                    `Content-Disposition: form-data; name="metadata"\r\n\r\n` +
+                    `${JSON.stringify(metadata)}\r\n`
+
+                postDataStart = metadataPart + postDataStart
+            }
+
             const postDataEnd = `\r\n--${boundary}--\r\n`
 
             const reqOptions = {
@@ -1770,6 +1815,18 @@ async function callRemoteApi(baseUrl: string, token: string, path: string, metho
         throw e
     }
 }
+
+// === Audit Log Handler ===
+ipcMain.handle('get-audit-logs', async (_event, libraryPath?: string) => {
+    try {
+        const lib = libraryPath ? libraryRegistry.getLibrary(libraryPath) : getActiveMediaLibrary()
+        if (!lib) return []
+        return lib.getAuditLogs()
+    } catch (error) {
+        console.error('Failed to get audit logs:', error)
+        return []
+    }
+})
 
 // === FFmpeg Info Handler ===
 ipcMain.handle('ffmpeg-get-info', async () => {

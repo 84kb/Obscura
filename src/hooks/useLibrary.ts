@@ -29,6 +29,7 @@ export function useLibrary() {
         selectedTags: [],
         excludedTags: [],
         selectedFolders: [], // Renamed from selectedGenres
+        excludedFolders: [],
         tagFilterMode: 'or',
         selectedSysDirs: [], // Renamed from selectedFolders
         excludedSysDirs: [], // Renamed from excludedFolders
@@ -777,6 +778,32 @@ export function useLibrary() {
         }
     }, [loadMediaFiles, activeRemoteLibrary])
 
+    const updateUrl = useCallback(async (id: number, url: string | null) => {
+        // Optimistic
+        setMediaFiles(prev => prev.map(m => m.id === id ? { ...m, url } : m))
+
+        try {
+            if (activeRemoteLibrary) {
+                // Remote support for URL update (Check API availability or skip)
+                // Assuming similar to description
+                try {
+                    await (window.electronAPI as any).updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { url })
+                    return
+                } catch (e: any) {
+                    if (e.message && e.message.includes('403')) {
+                        addNotification({ type: 'error', title: '権限不足', message: 'URLを更新する権限がありません。' })
+                    }
+                    await loadMediaFiles()
+                    throw e
+                }
+            }
+            await window.electronAPI.updateUrl(id, url)
+        } catch (error) {
+            console.error('Failed to update url:', error)
+            await loadMediaFiles()
+        }
+    }, [loadMediaFiles, activeRemoteLibrary])
+
     // 再生日時更新
     const updateLastPlayed = useCallback(async (id: number) => {
         try {
@@ -934,17 +961,8 @@ export function useLibrary() {
             case 'recent':
                 result = result.filter(m => m.last_played_at !== null)
                 break
-            case 'random':
-                // シードに基づく決定論的なソート (再生開始時などにmediaFilesが更新されても順序を維持するため)
-                result = result.sort((a, b) => {
-                    const seedA = a.id + randomSeed
-                    const seedB = b.id + randomSeed
-                    // 簡易的なハッシュ関数 (Math.sinを使用)
-                    const valA = Math.sin(seedA) * 10000 - Math.floor(Math.sin(seedA) * 10000)
-                    const valB = Math.sin(seedB) * 10000 - Math.floor(Math.sin(seedB) * 10000)
-                    return valA - valB
-                })
-                return result
+            // case 'random': removed to enable filtering, handled in sort logic
+
             default:
                 break
         }
@@ -1033,6 +1051,15 @@ export function useLibrary() {
                     m.folders?.some(g => filterOptions.selectedFolders.includes(g.id))
                 )
             }
+        }
+
+
+
+        // フォルダー除外フィルター
+        if (filterOptions.excludedFolders && filterOptions.excludedFolders.length > 0) {
+            result = result.filter(m =>
+                !m.folders?.some(g => filterOptions.excludedFolders.includes(g.id))
+            )
         }
 
         // 評価フィルター
@@ -1161,9 +1188,11 @@ export function useLibrary() {
         // if (filterOptions.excludedFolders.length > 0) { ... }
 
         // ソート処理
+        const effectiveSortOrder = filterOptions.filterType === 'random' ? 'random' : filterOptions.sortOrder
+
         result.sort((a, b) => {
             let comparison = 0
-            switch (filterOptions.sortOrder) {
+            switch (effectiveSortOrder) {
                 case 'name':
                     comparison = a.file_name.localeCompare(b.file_name)
                     break
@@ -1198,6 +1227,13 @@ export function useLibrary() {
                     const tagsA = (a.tags || []).map(t => t.name).sort().join(', ')
                     const tagsB = (b.tags || []).map(t => t.name).sort().join(', ')
                     comparison = tagsA.localeCompare(tagsB, 'ja')
+                    break
+                case 'random':
+                    const seedA = a.id + randomSeed
+                    const seedB = b.id + randomSeed
+                    const valA = Math.sin(seedA) * 10000 - Math.floor(Math.sin(seedA) * 10000)
+                    const valB = Math.sin(seedB) * 10000 - Math.floor(Math.sin(seedB) * 10000)
+                    comparison = valA - valB
                     break
             }
             return filterOptions.sortDirection === 'asc' ? comparison : -comparison
@@ -1247,7 +1283,7 @@ export function useLibrary() {
     // ライブラリの再読み込み (ソフトリロード + 再ランダム化)
     const reloadLibrary = useCallback(async () => {
         // ランダムモードならシードを更新
-        if (filterOptions.filterType === 'random') {
+        if (filterOptions.filterType === 'random' || filterOptions.sortOrder === 'random') {
             setRandomSeed(Date.now())
         }
 
@@ -1257,7 +1293,7 @@ export function useLibrary() {
             loadTags(),
             loadFolders()
         ])
-    }, [filterOptions.filterType, loadMediaFiles, loadTags, loadFolders])
+    }, [filterOptions.filterType, filterOptions.sortOrder, loadMediaFiles, loadTags, loadFolders])
 
     // ライブラリ統計
     const libraryStats = useMemo(() => {
@@ -1466,7 +1502,8 @@ export function useLibrary() {
                 }
             }
             return window.electronAPI.checkEntryDuplicates(mediaId)
-        }
+        },
+        updateUrl
     }), [
         filteredMediaFiles, mediaFiles, tags, tagGroups, folders, libraries, loading, activeLibrary,
         filterOptions, setFilterOptions, createLibrary, switchLibrary, selectAndScanFolder,
@@ -1475,6 +1512,6 @@ export function useLibrary() {
         moveFilesToTrash, restoreFilesFromTrash, deleteFilesPermanently,
         updateLastPlayed, importMedia, updateRating, renameMedia, updateArtist, libraryStats,
         loadMediaFiles, loadFolders, renameFolder, activeRemoteLibrary, switchToRemoteLibrary,
-        switchToLocalLibrary, openLibrary, myUserToken, updateDescription
+        switchToLocalLibrary, openLibrary, myUserToken, updateDescription, updateUrl
     ])
 }

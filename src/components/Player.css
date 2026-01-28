@@ -11,6 +11,7 @@
     z-index: 10;
     opacity: 1;
     flex-shrink: 0;
+    -webkit-app-region: drag;
 }
 
 .header-left,
@@ -47,6 +48,7 @@
     justify-content: center;
     cursor: pointer;
     transition: all 0.2s ease;
+    -webkit-app-region: no-drag;
 }
 
 .header-back-button:hover {
@@ -72,6 +74,7 @@
     justify-content: center;
     cursor: pointer;
     transition: all 0.2s ease;
+    -webkit-app-region: no-drag;
 }
 
 .nav-btn:hover:not(:disabled) {

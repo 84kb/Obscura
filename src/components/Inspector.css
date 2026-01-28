@@ -1,4 +1,4 @@
-﻿.inspector {
+.inspector {
     width: var(--right-sidebar-width);
     height: 100%;
     background-color: var(--bg-sidebar);
@@ -749,6 +749,7 @@
 /* Empty State Simplification */
 .inspector-content.empty-state {
     display: block;
+    height: auto;
     padding-top: 0;
     /* Remove top padding */
 }
@@ -795,4 +796,501 @@
     font-weight: 500;
     font-family: 'Consolas', 'Monaco', monospace;
     /* Keep numbers monospaced */
+}
+
+/* 関連作品セクションの洗練 */
+.relation-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.relation-register-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-main);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-bottom: 4px;
+}
+
+.relation-register-btn:hover {
+    background: var(--bg-secondary);
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.relation-register-btn:active {
+    transform: scale(0.98);
+}
+
+.relation-group-header {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    padding-left: 2px;
+}
+
+.no-relation-placeholder {
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    text-align: center;
+    border: 1px dashed var(--border);
+}
+
+.relation-item-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px;
+    position: relative;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+
+.relation-item-card:hover {
+    border-color: var(--primary);
+}
+
+.relation-thumbnail {
+    width: 60px;
+    height: 34px;
+    background: #000;
+    border-radius: 4px;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.relation-thumbnail img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.relation-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    color: #444;
+}
+
+.relation-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.relation-title {
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-main);
+}
+
+.relation-remove-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    padding: 4px;
+    cursor: pointer;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, color 0.2s;
+}
+
+.relation-remove-btn:hover {
+    background: rgba(255, 66, 66, 0.1);
+    color: #ff4242;
+}
+
+/* MediaPicker Popover */
+.media-picker-popover {
+    width: 400px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    z-index: 2100;
+    display: flex;
+    flex-direction: column;
+    max-height: 450px;
+    animation: pickerAppear 0.2s ease-out;
+}
+
+@keyframes pickerAppear {
+    from {
+        opacity: 0;
+        transform: translateX(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.media-picker-header {
+    padding: 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.media-picker-search {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    /* Gap is now 0 as buttons/inputs are adjacent */
+    background: var(--bg-sidebar);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0;
+    overflow: hidden;
+    color: var(--text-muted);
+}
+
+.media-picker-search-btn {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 8px;
+    background: transparent;
+    border: none;
+    border-right: 1px solid var(--border);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s;
+    align-self: stretch;
+    /* Ensure it fills height to avoid gap */
+}
+
+.media-picker-search-btn:hover,
+.media-picker-search-btn.active {
+    background: var(--bg-hover);
+    color: var(--primary);
+}
+
+.media-picker-search input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text-main);
+    font-size: 13px;
+    outline: none;
+    padding: 6px 12px;
+}
+
+.media-picker-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 0;
+    min-height: 200px;
+    border-bottom-left-radius: 12px;
+    border-bottom-right-radius: 12px;
+}
+
+.picker-loading,
+.picker-no-results {
+    padding: 24px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
+.picker-results-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.picker-result-item {
+    display: flex;
+    gap: 12px;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: background 0.2s;
+    align-items: center;
+}
+
+.picker-result-item:hover {
+    background: var(--bg-hover);
+}
+
+.picker-result-thumbnail {
+    width: 64px;
+    height: 36px;
+    background: #000;
+    border-radius: 4px;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.picker-result-thumbnail img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.picker-thumbnail-placeholder {
+    width: 100%;
+    height: 100%;
+    background: #1a1a1a;
+}
+
+.picker-result-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.picker-result-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-main);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 2px;
+}
+
+.picker-result-path {
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.picker-result-actions {
+    display: flex;
+    gap: 6px;
+    margin-left: 12px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.picker-result-item:hover .picker-result-actions {
+    opacity: 1;
+}
+
+.picker-action-btn {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--bg-sidebar);
+    color: var(--text-main);
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.picker-action-btn:hover {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: white;
+}
+
+.picker-action-btn.parent:hover {
+    background: #4cc9f0;
+    border-color: #4cc9f0;
+}
+
+.picker-action-btn.child:hover {
+    background: #4895ef;
+    border-color: #4895ef;
+}
+
+/* Picker Search Scope Dropdown */
+.media-picker-header {
+    position: relative;
+}
+
+.picker-search-options-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 12px;
+    width: 180px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    padding: 4px;
+    z-index: 2200;
+    margin-top: 4px;
+}
+
+.picker-search-options-header {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    padding: 8px 12px 4px;
+    text-transform: uppercase;
+}
+
+.picker-search-option-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: var(--text-main);
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+.picker-search-option-row:hover {
+    background: var(--bg-hover);
+}
+
+.picker-search-option-row .check-icon {
+    margin-left: auto;
+    color: var(--primary);
+    opacity: 0;
+}
+
+.picker-search-option-row.active .check-icon {
+    opacity: 1;
+}
+
+.picker-search-option-icon {
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+}
+
+/* User List (Discord-like) */
+.user-list-section {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    /* 強制的に高さ制限を解除 */
+    max-height: none !important;
+    height: auto !important;
+    overflow: visible !important;
+    flex: none !important;
+}
+
+.user-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 8px;
+    /* 強制的にスクロールを無効化し、親に委ねる */
+    max-height: none !important;
+    height: auto !important;
+    overflow: visible !important;
+}
+
+.user-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 8px;
+    /* パディング少し増加 */
+    border-radius: 4px;
+    transition: background-color 0.2s;
+    user-select: none;
+    cursor: default;
+    min-height: 48px;
+    /* アイテムの高さを確保 */
+}
+
+.user-item:hover {
+    background-color: var(--bg-hover);
+}
+
+.user-item.offline {
+    opacity: 0.6;
+}
+
+.user-avatar {
+    position: relative;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+}
+
+.user-avatar-placeholder,
+.user-avatar-img {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.user-avatar-placeholder {
+    background-color: var(--primary);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 13px;
+    user-select: none;
+}
+
+.user-status-indicator {
+    position: absolute;
+    bottom: -2px;
+    right: -2px;
+    width: 12px;
+    /* 少し小さく */
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid var(--bg-sidebar);
+    /* 枠線を細く */
+    box-sizing: border-box;
+}
+
+.user-item.online .user-status-indicator {
+    background-color: #23a559;
+}
+
+.user-item.offline .user-status-indicator {
+    background-color: #80848e;
+}
+
+.user-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+}
+
+.user-name {
+    font-size: 14px;
+    /* フォントサイズ微増 */
+    font-weight: 500;
+    color: var(--text-main);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.user-status-text {
+    font-size: 11px;
+    color: var(--text-muted);
 }

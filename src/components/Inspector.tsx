@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { MediaFile, Tag, Folder, MediaComment } from '../types'
+import { MediaFile, Tag, Folder, MediaComment, SharedUser } from '../types'
 import './Inspector.css'
 import { toMediaUrl } from '../utils/fileUrl'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
-import { InspectorSection, InfoSectionContent, CommentSectionContent, PlaylistSectionContent } from './InspectorSections'
+import { InspectorSection, InfoSectionContent, CommentSectionContent, PlaylistSectionContent, RelationSectionContent, MediaPicker } from './InspectorSections'
 import { useNotification } from '../contexts/NotificationContext'
 
 interface InspectorProps {
@@ -33,10 +33,13 @@ interface InspectorProps {
     onUpdateArtist?: (id: number, artist: string | null) => void
     onUpdateDescription?: (id: number, description: string | null) => void
     onUpdateUrl?: (id: number, url: string | null) => void
+    onUpdateRelation?: (childId: number, parentId: number | null) => void
+    onSearchMedia?: (query: string, targets: any) => Promise<any[]>
     totalStats: { totalCount: number; totalSize: number }
     currentContextMedia?: MediaFile[]
     enableRichText?: boolean
     contextTitle?: string
+    sharedUsers?: SharedUser[]
 }
 
 export function Inspector({
@@ -64,10 +67,13 @@ export function Inspector({
     onUpdateArtist,
     onUpdateDescription,
     onUpdateUrl,
+    onUpdateRelation,
+    onSearchMedia,
     totalStats,
     currentContextMedia,
     enableRichText,
-    contextTitle
+    contextTitle,
+    sharedUsers = []
 }: InspectorProps) {
     const { addNotification } = useNotification()
 
@@ -97,6 +103,8 @@ export function Inspector({
     // ポップオーバー位置
     const [tagPickerPos, setTagPickerPos] = useState<{ top: number; right: number } | null>(null)
     const [folderPickerPos, setFolderPickerPos] = useState<{ top: number; right: number } | null>(null)
+    const [relationPickerPos, setRelationPickerPos] = useState<React.CSSProperties | null>(null)
+    const [showRelationPicker, setShowRelationPicker] = useState(false)
     const tagButtonRef = useRef<HTMLButtonElement>(null)
     const folderButtonRef = useRef<HTMLButtonElement>(null)
     const inspectorRef = useRef<HTMLDivElement>(null)
@@ -410,7 +418,7 @@ export function Inspector({
     }
 
     // --- DnD & Layout State ---
-    const initialOrder = ['artist', 'description', 'url', 'tags', 'folders', 'info', 'comments', 'playlist']
+    const initialOrder = ['artist', 'description', 'relations', 'url', 'tags', 'folders', 'info', 'comments', 'playlist']
     const [sectionOrder, setSectionOrder] = useState<string[]>(() => {
         try {
             const saved = localStorage.getItem('inspector_layout_order_v2')
@@ -518,6 +526,39 @@ export function Inspector({
                             <span className="stat-value">{formatFileSize(totalStats.totalSize)}</span>
                         </div>
                     </div>
+
+                    {sharedUsers && sharedUsers.length > 0 && (
+                        <div className="library-stats simple-stats user-list-section">
+                            <div className="stats-header">ユーザー - {sharedUsers.length}人</div>
+                            <div className="user-list">
+                                {sharedUsers.map(user => {
+                                    // 最終アクセスから5分以内ならオンラインとみなす
+                                    const lastAccess = new Date(user.lastAccessAt).getTime()
+                                    const now = new Date().getTime()
+                                    const isOnline = (now - lastAccess) < 5 * 60 * 1000 // 5 minutes
+                                    return { ...user, isOnline }
+                                }).sort((a, b) => {
+                                    if (a.isOnline === b.isOnline) return a.nickname.localeCompare(b.nickname)
+                                    return a.isOnline ? -1 : 1
+                                }).map(user => (
+                                    <div key={user.id} className={`user-item ${user.isOnline ? 'online' : 'offline'}`}>
+                                        <div className="user-avatar">
+                                            <div className="user-avatar-placeholder">
+                                                {user.nickname.slice(0, 2).toUpperCase()}
+                                            </div>
+                                            <div className="user-status-indicator"></div>
+                                        </div>
+                                        <div className="user-info">
+                                            <div className="user-name" title={user.nickname}>{user.nickname}</div>
+                                            <div className="user-status-text">
+                                                {user.isOnline ? 'オンライン' : `最終アクセス: ${new Date(user.lastAccessAt).toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}`}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
         )
@@ -695,6 +736,36 @@ export function Inspector({
                                                     }
                                                 }}
                                             />
+                                        </InspectorSection>
+                                    )
+                                case 'relations':
+                                    return (
+                                        <InspectorSection
+                                            key={sectionId}
+                                            id={sectionId}
+                                            title="関連作品"
+                                            isOpen={isOpen}
+                                            onToggle={() => toggleSection(sectionId)}
+                                        >
+                                            {onUpdateRelation && onSearchMedia ? (
+                                                <RelationSectionContent
+                                                    media={media}
+                                                    toMediaUrl={toMediaUrl}
+                                                    onUpdateRelation={onUpdateRelation}
+                                                    onSelectMedia={onPlay}
+                                                    onOpenPicker={(rect) => {
+                                                        const inspectorRect = inspectorRef.current?.getBoundingClientRect()
+                                                        if (inspectorRect) {
+                                                            setRelationPickerPos({
+                                                                position: 'fixed',
+                                                                top: rect.top,
+                                                                right: (window.innerWidth - rect.left) + 8,
+                                                            })
+                                                            setShowRelationPicker(true)
+                                                        }
+                                                    }}
+                                                />
+                                            ) : <div>機能が無効です</div>}
                                         </InspectorSection>
                                     )
                                 case 'description':
@@ -1109,6 +1180,25 @@ export function Inspector({
                         </div>
                     )
                 }
+                {showRelationPicker && relationPickerPos && createPortal(
+                    <MediaPicker
+                        style={relationPickerPos}
+                        onClose={() => setShowRelationPicker(false)}
+                        onSearch={onSearchMedia || (async () => []) as any}
+                        toMediaUrl={toMediaUrl}
+                        onSelect={(selected, type) => {
+                            if (media.length === 1 && onUpdateRelation) {
+                                if (type === 'parent') {
+                                    onUpdateRelation(media[0].id, selected.id)
+                                } else {
+                                    onUpdateRelation(selected.id, media[0].id)
+                                }
+                            }
+                            setShowRelationPicker(false)
+                        }}
+                    />,
+                    document.body
+                )}
             </div >
         </div >
     )

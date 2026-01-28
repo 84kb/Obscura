@@ -55,26 +55,43 @@ export function FolderFilterDropdown({
     // フォルダーの選択/解除（左クリック）
     const toggleFolder = (folderId: number) => {
         let newSelectedFolders = [...filterOptions.selectedFolders]
+        let newExcludedFolders = [...(filterOptions.excludedFolders || [])]
 
         if (newSelectedFolders.includes(folderId)) {
             newSelectedFolders = newSelectedFolders.filter(id => id !== folderId)
         } else {
-            // 現在の仕様では単一選択または複数選択か確認が必要だが、Sidebarに合わせて複数選択可とする
-            // ただしSidebarは通常単一選択挙動に近いことが多いが、FilterOptionsは配列。
-            // ここではシンプルにトグルする。
             newSelectedFolders.push(folderId)
+            // 除外されていたら解除
+            newExcludedFolders = newExcludedFolders.filter(id => id !== folderId)
         }
 
         onFilterChange({
             ...filterOptions,
-            selectedFolders: newSelectedFolders
+            selectedFolders: newSelectedFolders,
+            excludedFolders: newExcludedFolders
         })
     }
 
-    // フォルダーの除外/解除（右クリック） - ジャンルには未実装のため無効化
-    const handleFolderContextMenu = (e: React.MouseEvent, _folderId: number) => {
+    // フォルダーの除外/解除（右クリック）
+    const handleFolderContextMenu = (e: React.MouseEvent, folderId: number) => {
         e.preventDefault()
-        // 将来的にジャンル除外が必要なら実装
+
+        let newExcludedFolders = [...(filterOptions.excludedFolders || [])]
+        let newSelectedFolders = [...filterOptions.selectedFolders]
+
+        if (newExcludedFolders.includes(folderId)) {
+            newExcludedFolders = newExcludedFolders.filter(id => id !== folderId)
+        } else {
+            newExcludedFolders.push(folderId)
+            // 選択されていたら解除
+            newSelectedFolders = newSelectedFolders.filter(id => id !== folderId)
+        }
+
+        onFilterChange({
+            ...filterOptions,
+            excludedFolders: newExcludedFolders,
+            selectedFolders: newSelectedFolders
+        })
     }
 
     // すべて選択/解除
@@ -83,6 +100,7 @@ export function FolderFilterDropdown({
         const isAllSelected = visibleFolderIds.length > 0 && visibleFolderIds.every(id => filterOptions.selectedFolders.includes(id))
 
         let newSelectedFolders = [...filterOptions.selectedFolders]
+        let newExcludedFolders = [...(filterOptions.excludedFolders || [])]
 
         if (isAllSelected) {
             newSelectedFolders = newSelectedFolders.filter(id => !visibleFolderIds.includes(id))
@@ -90,13 +108,24 @@ export function FolderFilterDropdown({
             visibleFolderIds.forEach(id => {
                 if (!newSelectedFolders.includes(id)) {
                     newSelectedFolders.push(id)
+                    // 除外から削除
+                    newExcludedFolders = newExcludedFolders.filter(exId => exId !== id)
                 }
             })
         }
 
         onFilterChange({
             ...filterOptions,
-            selectedFolders: newSelectedFolders
+            selectedFolders: newSelectedFolders,
+            excludedFolders: newExcludedFolders
+        })
+    }
+
+    const clearFilters = () => {
+        onFilterChange({
+            ...filterOptions,
+            selectedFolders: [],
+            excludedFolders: []
         })
     }
 
@@ -142,6 +171,17 @@ export function FolderFilterDropdown({
                             <rect x="3" y="14" width="7" height="7"></rect>
                         </svg>
                     </button>
+                    <button
+                        className="clear-btn"
+                        onClick={clearFilters}
+                        title="フィルターをクリア"
+                        disabled={filterOptions.selectedFolders.length === 0 && (!filterOptions.excludedFolders || filterOptions.excludedFolders.length === 0)}
+                    >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M3 6h18"></path>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                    </button>
                 </div>
             </div>
 
@@ -149,18 +189,19 @@ export function FolderFilterDropdown({
             <div className="folder-filter-list">
                 {filteredFolders.map(folder => {
                     const isSelected = filterOptions.selectedFolders.includes(folder.id)
-                    // const isExcluded = filterOptions.excludedFolders.includes(folder.id) // 未対応
+                    const isExcluded = filterOptions.excludedFolders?.includes(folder.id)
                     return (
                         <div
                             key={folder.id}
-                            className={`folder-filter-item ${isSelected ? 'selected' : ''}`}
+                            className={`folder-filter-item ${isSelected ? 'selected' : ''} ${isExcluded ? 'excluded' : ''}`}
                             onClick={() => toggleFolder(folder.id)}
                             onContextMenu={(e) => handleFolderContextMenu(e, folder.id)}
                         >
                             <div className="folder-checkbox">
                                 {isSelected && <span className="check-mark">✓</span>}
+                                {isExcluded && <span className="exclude-mark">✕</span>}
                             </div>
-                            <span className={`folder-name`}>{folder.name}</span>
+                            <span className={`folder-name ${isExcluded ? 'excluded-text' : ''}`}>{folder.name}</span>
                             <span className="folder-count">{folder.count.toLocaleString()}</span>
                         </div>
                     )
