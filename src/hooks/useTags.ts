@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { Tag, TagGroup, Library, RemoteLibrary } from '../types'
 import { useNotification } from '../contexts/NotificationContext'
+import { getAuthHeaders } from '../utils/auth'
 import { api } from '../api'
 
 export function useTags(
@@ -16,21 +17,10 @@ export function useTags(
     const loadTags = useCallback(async () => {
         if (activeRemoteLibrary) {
             try {
-                let userToken = myUserToken
-                let accessToken = activeRemoteLibrary.token
-
-                if (activeRemoteLibrary.token.includes(':')) {
-                    const parts = activeRemoteLibrary.token.split(':')
-                    userToken = parts[0]
-                    accessToken = parts[1]
-                }
                 const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
 
                 const response = await fetch(`${baseUrl}/api/tags`, {
-                    headers: {
-                        'Authorization': `Bearer ${accessToken}`,
-                        'X-User-Token': userToken
-                    }
+                    headers: getAuthHeaders(activeRemoteLibrary.token, myUserToken)
                 })
                 if (response.ok) {
                     const data = await response.json()
@@ -53,21 +43,10 @@ export function useTags(
     const loadTagGroups = useCallback(async () => {
         if (activeRemoteLibrary) {
             try {
-                let userToken = myUserToken
-                let accessToken = activeRemoteLibrary.token
-
-                if (activeRemoteLibrary.token.includes(':')) {
-                    const parts = activeRemoteLibrary.token.split(':')
-                    userToken = parts[0]
-                    accessToken = parts[1]
-                }
                 const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
 
                 const response = await fetch(`${baseUrl}/api/tag-groups`, {
-                    headers: {
-                        'Authorization': `Bearer ${accessToken}`,
-                        'X-User-Token': userToken
-                    }
+                    headers: getAuthHeaders(activeRemoteLibrary.token, myUserToken)
                 })
                 if (response.ok) {
                     const data = await response.json()

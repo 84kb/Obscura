@@ -1,4 +1,5 @@
 import { RemoteLibrary } from '../types'
+import { getAuthHeaders } from './auth'
 
 /**
  * リモートライブラリへの接続確認（ヘルスチェック）
@@ -15,25 +16,14 @@ export async function waitForRemoteConnection(
     maxRetries: number = 5,
     retryDelay: number = 1000
 ): Promise<string | null> {
-    let userToken = myUserToken
-    let accessToken = remoteLib.token
     let currentUrl = remoteLib.url.replace(/\/$/, '')
     let tryAlternateProtocol = true
-
-    if (remoteLib.token.includes(':')) {
-        const parts = remoteLib.token.split(':')
-        userToken = parts[0]
-        accessToken = parts[1]
-    }
 
     const checkHealth = async (url: string): Promise<boolean> => {
         const healthUrl = `${url}/api/health`
         try {
             const response = await fetch(healthUrl, {
-                headers: {
-                    'Authorization': `Bearer ${accessToken}`,
-                    'X-User-Token': userToken
-                },
+                headers: getAuthHeaders(remoteLib.token, myUserToken),
                 signal: AbortSignal.timeout(3000)
             })
             return response.ok

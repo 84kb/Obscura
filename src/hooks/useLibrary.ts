@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { MediaFile, Tag, TagGroup, Folder, FilterOptions, Library, RemoteLibrary } from '../types'
 import { useNotification } from '../contexts/NotificationContext'
 import { api } from '../api'
+import { getAuthHeaders, getAuthQuery } from '../utils/auth'
 
 export function useLibrary() {
     const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([])
@@ -128,21 +129,9 @@ export function useLibrary() {
     const loadFolders = useCallback(async () => {
         if (activeRemoteLibrary) {
             try {
-                let userToken = myUserToken
-                let accessToken = activeRemoteLibrary.token
-
-                if (activeRemoteLibrary.token.includes(':')) {
-                    const parts = activeRemoteLibrary.token.split(':')
-                    userToken = parts[0]
-                    accessToken = parts[1]
-                }
                 const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
-
-                const response = await fetch(`${baseUrl}/api/folders`, { // Api endpoint also renamed? Yes usually.
-                    headers: {
-                        'Authorization': `Bearer ${accessToken}`,
-                        'X-User-Token': userToken
-                    }
+                const response = await fetch(`${baseUrl}/api/folders`, {
+                    headers: getAuthHeaders(activeRemoteLibrary.token, myUserToken)
                 })
                 if (response.ok) {
                     const data = await response.json()
@@ -276,15 +265,7 @@ export function useLibrary() {
 
     // メディアファイルのパスをリモート用に変換するヘルパー
     const transformRemoteMedia = useCallback((mediaList: MediaFile[], remoteLib: RemoteLibrary): MediaFile[] => {
-        // トークンのパース
-        let userToken = myUserToken
-        let accessToken = remoteLib.token
-
-        if (remoteLib.token.includes(':')) {
-            const parts = remoteLib.token.split(':')
-            userToken = parts[0]
-            accessToken = parts[1]
-        }
+        const { userToken, accessToken } = getAuthQuery(remoteLib.token, myUserToken)
 
         const baseUrl = remoteLib.url.replace(/\/$/, '')
 
@@ -306,22 +287,10 @@ export function useLibrary() {
             try {
                 setLoading(true)
                 // トークンヘッダー準備
-                let userToken = myUserToken
-                let accessToken = activeRemoteLibrary.token
-
-                if (activeRemoteLibrary.token.includes(':')) {
-                    const parts = activeRemoteLibrary.token.split(':')
-                    userToken = parts[0]
-                    accessToken = parts[1]
-                }
-
                 const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
                 // 全件取得するために limit を大きく設定
                 const response = await fetch(`${baseUrl}/api/media?limit=10000`, {
-                    headers: {
-                        'Authorization': `Bearer ${accessToken}`,
-                        'X-User-Token': userToken
-                    }
+                    headers: getAuthHeaders(activeRemoteLibrary.token, myUserToken)
                 })
 
                 if (!response.ok) {
@@ -356,21 +325,9 @@ export function useLibrary() {
     const loadTags = useCallback(async () => {
         if (activeRemoteLibrary) {
             try {
-                let userToken = myUserToken
-                let accessToken = activeRemoteLibrary.token
-
-                if (activeRemoteLibrary.token.includes(':')) {
-                    const parts = activeRemoteLibrary.token.split(':')
-                    userToken = parts[0]
-                    accessToken = parts[1]
-                }
                 const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
-
                 const response = await fetch(`${baseUrl}/api/tags`, {
-                    headers: {
-                        'Authorization': `Bearer ${accessToken}`,
-                        'X-User-Token': userToken
-                    }
+                    headers: getAuthHeaders(activeRemoteLibrary.token, myUserToken)
                 })
                 if (response.ok) {
                     const data = await response.json()
@@ -393,21 +350,9 @@ export function useLibrary() {
     const loadTagGroups = useCallback(async () => {
         if (activeRemoteLibrary) {
             try {
-                let userToken = myUserToken
-                let accessToken = activeRemoteLibrary.token
-
-                if (activeRemoteLibrary.token.includes(':')) {
-                    const parts = activeRemoteLibrary.token.split(':')
-                    userToken = parts[0]
-                    accessToken = parts[1]
-                }
                 const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
-
                 const response = await fetch(`${baseUrl}/api/tag-groups`, {
-                    headers: {
-                        'Authorization': `Bearer ${accessToken}`,
-                        'X-User-Token': userToken
-                    }
+                    headers: getAuthHeaders(activeRemoteLibrary.token, myUserToken)
                 })
                 if (response.ok) {
                     const data = await response.json()

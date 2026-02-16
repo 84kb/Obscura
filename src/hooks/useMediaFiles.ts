@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { MediaFile, Tag, Folder, FilterOptions, Library, RemoteLibrary } from '../types'
 import { useNotification } from '../contexts/NotificationContext'
 import { api } from '../api'
+import { getAuthHeaders, getAuthQuery } from '../utils/auth'
 
 export function useMediaFiles(
     activeLibrary: Library | null,
@@ -21,16 +22,7 @@ export function useMediaFiles(
 
     // メディアファイルのパスをリモート用に変換するヘルパー
     const transformRemoteMedia = useCallback((mediaList: MediaFile[], remoteLib: RemoteLibrary): MediaFile[] => {
-        // トークンのパース
-        let userToken = myUserToken
-        let accessToken = remoteLib.token
-
-        if (remoteLib.token.includes(':')) {
-            const parts = remoteLib.token.split(':')
-            userToken = parts[0]
-            accessToken = parts[1]
-        }
-
+        const { userToken, accessToken } = getAuthQuery(remoteLib.token, myUserToken)
         const baseUrl = remoteLib.url.replace(/\/$/, '')
 
         return mediaList.map(m => ({
@@ -47,23 +39,10 @@ export function useMediaFiles(
             try {
                 setLoading(true)
 
-                // トークンヘッダー準備
-                let userToken = myUserToken
-                let accessToken = activeRemoteLibrary.token
-
-                if (activeRemoteLibrary.token.includes(':')) {
-                    const parts = activeRemoteLibrary.token.split(':')
-                    userToken = parts[0]
-                    accessToken = parts[1]
-                }
-
                 const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
                 // 全件取得するために limit を大きく設定 (TODO: Remote Pagination)
                 const response = await fetch(`${baseUrl}/api/media?limit=10000`, {
-                    headers: {
-                        'Authorization': `Bearer ${accessToken}`,
-                        'X-User-Token': userToken
-                    }
+                    headers: getAuthHeaders(activeRemoteLibrary.token, myUserToken)
                 })
 
                 if (!response.ok) {

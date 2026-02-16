@@ -7,6 +7,7 @@ import { toMediaUrl } from '../utils/fileUrl'
 import { useContext } from 'react'
 import { ShortcutContext } from '../contexts/ShortcutContext'
 import { AudioSettingsModal } from './AudioSettingsModal'
+import { getAuthHeaders } from '../utils/auth'
 
 interface PlayerProps {
     media: MediaFile
@@ -418,8 +419,7 @@ export const Player: React.FC<PlayerProps> = ({
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${activeRemoteLibrary.token}`,
-                        'X-User-Token': myUserToken || ''
+                        ...getAuthHeaders(activeRemoteLibrary.token, myUserToken || '')
                     },
                     body: JSON.stringify({
                         text: commentText,

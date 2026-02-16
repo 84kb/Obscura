@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { Folder, Library, RemoteLibrary } from '../types'
+import { getAuthHeaders } from '../utils/auth'
 import { api } from '../api'
 
 export function useFolders(
@@ -13,21 +14,10 @@ export function useFolders(
     const loadFolders = useCallback(async () => {
         if (activeRemoteLibrary) {
             try {
-                let userToken = myUserToken
-                let accessToken = activeRemoteLibrary.token
-
-                if (activeRemoteLibrary.token.includes(':')) {
-                    const parts = activeRemoteLibrary.token.split(':')
-                    userToken = parts[0]
-                    accessToken = parts[1]
-                }
                 const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
 
                 const response = await fetch(`${baseUrl}/api/folders`, {
-                    headers: {
-                        'Authorization': `Bearer ${accessToken}`,
-                        'X-User-Token': userToken
-                    }
+                    headers: getAuthHeaders(activeRemoteLibrary.token, myUserToken)
                 })
                 if (response.ok) {
                     const data = await response.json()

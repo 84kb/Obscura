@@ -22,6 +22,8 @@ import { DuplicateModal } from './components/DuplicateModal'
 import { ShortcutProvider, useShortcut } from './contexts/ShortcutContext'
 import './styles/index.css'
 import './styles/drag-overlay.css'
+import { LoadingOverlay } from './components/LoadingOverlay'
+import { getAuthHeaders } from './utils/auth'
 import { api } from './api'
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -90,7 +92,8 @@ function AppContent() {
         myUserToken,
         addTagsToMedia,
         reloadLibrary,
-        checkEntryDuplicates
+        checkEntryDuplicates,
+        loading
     } = useLibrary()
 
     // テーマシステムの初期化
@@ -719,11 +722,9 @@ function AppContent() {
 
         const checkProfile = async () => {
             try {
-                const response = await fetch(`${activeRemoteLibrary.url}/api/profile`, {
-                    headers: {
-                        'Authorization': `Bearer ${activeRemoteLibrary.token}`,
-                        'X-User-Token': myUserToken
-                    }
+                const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
+                const response = await fetch(`${baseUrl}/api/profile`, {
+                    headers: getAuthHeaders(activeRemoteLibrary.token, myUserToken)
                 })
 
                 if (response.ok) {
@@ -750,8 +751,7 @@ function AppContent() {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${activeRemoteLibrary.token}`,
-                'X-User-Token': myUserToken
+                ...getAuthHeaders(activeRemoteLibrary.token, myUserToken)
             },
             body: JSON.stringify(profile)
         })
@@ -1385,7 +1385,10 @@ function AppContent() {
                         />
                     )}
 
-                    {/* 内容ヘッダー */}
+                    {/* Loading Overlay */}
+                    <LoadingOverlay isVisible={loading || isRefreshing} message={isRefreshing ? "ライブラリを更新中..." : "データを読み込み中..."} />
+
+                    {/* モーダル群 */}
                     {filterOptions.selectedFolders.length > 0 && folders.filter(f => f.parentId === filterOptions.selectedFolders[0]).length > 0 && (
                         <div className="content-section-header">
                             <span>内容 ({mediaFiles.length})</span>
