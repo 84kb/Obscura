@@ -130,6 +130,10 @@ export function useLibrary() {
     const loadFolders = useCallback(async () => {
         if (activeRemoteLibrary) {
             if (!isUserTokenLoaded) return
+            if (!myUserToken) {
+                console.warn('[loadFolders] User token is empty. Skipping request.')
+                return
+            }
             try {
                 const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
                 const response = await fetch(`${baseUrl}/api/folders`, {
@@ -253,13 +257,14 @@ export function useLibrary() {
         const loadConfig = async () => {
             try {
                 const config = await api.getClientConfig()
-                if (config && config.myUserToken) {
-                    setMyUserToken(config.myUserToken)
-                }
+                const token = config?.myUserToken || ''
+                console.log('[useLibrary] Loaded user token:', token ? '***' : '(empty)')
+                setMyUserToken(token)
             } catch (e) {
                 console.error('Failed to load client config in useLibrary', e)
             } finally {
                 setIsUserTokenLoaded(true)
+                console.log('[useLibrary] Token load userTokenLoaded = true')
             }
         }
         loadConfig()
@@ -286,16 +291,26 @@ export function useLibrary() {
     const loadMediaFiles = useCallback(async () => {
         if (activeRemoteLibrary) {
             // トークン読み込み待ち
-            if (!isUserTokenLoaded) return
+            if (!isUserTokenLoaded) {
+                console.log('[loadMediaFiles] Waiting for user token...')
+                return
+            }
+            if (!myUserToken) {
+                console.warn('[loadMediaFiles] User token is empty. Skipping request.')
+                return
+            }
 
             // リモートから取得
             try {
                 setLoading(true)
                 // トークンヘッダー準備
                 const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
+                const headers = getAuthHeaders(activeRemoteLibrary.token, myUserToken)
+                // console.log('[loadMediaFiles] Fetching media with headers:', headers) // Security: ensure not to log full tokens in production
+
                 // 全件取得するために limit を大きく設定
                 const response = await fetch(`${baseUrl}/api/media?limit=10000`, {
-                    headers: getAuthHeaders(activeRemoteLibrary.token, myUserToken)
+                    headers
                 })
 
                 if (!response.ok) {
@@ -330,6 +345,10 @@ export function useLibrary() {
     const loadTags = useCallback(async () => {
         if (activeRemoteLibrary) {
             if (!isUserTokenLoaded) return
+            if (!myUserToken) {
+                console.warn('[loadTags] User token is empty. Skipping request.')
+                return
+            }
             try {
                 const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
                 const response = await fetch(`${baseUrl}/api/tags`, {
@@ -356,6 +375,7 @@ export function useLibrary() {
     const loadTagGroups = useCallback(async () => {
         if (activeRemoteLibrary) {
             if (!isUserTokenLoaded) return
+            if (!myUserToken) return
             try {
                 const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
                 const response = await fetch(`${baseUrl}/api/tag-groups`, {

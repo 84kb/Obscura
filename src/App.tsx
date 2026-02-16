@@ -145,6 +145,10 @@ function AppContent() {
                 // リモートライブラリの場合は接続確認してから読み込み
                 // リモートライブラリの場合は接続確認してから読み込み
                 if (activeRemoteLibrary) {
+                    if (!myUserToken) {
+                        console.log('[App] Waiting for user token before connecting to remote library...')
+                        return
+                    }
                     const { waitForRemoteConnection } = await import('./utils/remoteHealth')
                     const connectedUrl = await waitForRemoteConnection(activeRemoteLibrary, myUserToken)
 
@@ -721,6 +725,7 @@ function AppContent() {
         if (!activeRemoteLibrary) return
 
         const checkProfile = async () => {
+            if (!myUserToken) return
             try {
                 const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
                 const response = await fetch(`${baseUrl}/api/profile`, {
@@ -746,6 +751,10 @@ function AppContent() {
     // プロファイル保存ハンドラー
     const handleSaveProfile = async (profile: { nickname: string; iconUrl?: string }) => {
         if (!activeRemoteLibrary) return
+        if (!myUserToken) {
+            alert('認証トークンがありません。再接続してください。')
+            return
+        }
 
         const response = await fetch(`${activeRemoteLibrary.url}/api/profile`, {
             method: 'PUT',
