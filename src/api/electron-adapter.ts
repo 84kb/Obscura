@@ -324,6 +324,10 @@ export class ElectronAdapter implements IMediaLibraryAPI {
         return this.api.getSharedUsers();
     }
 
+    async getRemoteSharedUsers(params: { url: string; userToken: string; accessToken: string }): Promise<SharedUser[]> {
+        return this.api.getRemoteSharedUsers(params);
+    }
+
     async addSharedUser(user: Omit<SharedUser, 'id' | 'createdAt' | 'lastAccessAt'>): Promise<SharedUser> {
         return this.api.addSharedUser(user);
     }

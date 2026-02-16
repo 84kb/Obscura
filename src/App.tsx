@@ -299,19 +299,31 @@ function AppContent() {
                     }
                 }
 
-                if (baseUrl) {
-                    // 末尾のスラッシュ削除
-                    baseUrl = baseUrl.replace(/\/$/, '')
-                    const processedUsers = users.map(u => {
-                        if (u.iconUrl && u.iconUrl.startsWith('/')) {
-                            return { ...u, iconUrl: `${baseUrl}${u.iconUrl}` }
+                const now = new Date()
+                const ONLINE_THRESHOLD_MS = 30000 // 30 seconds
+
+                const processUserData = (userList: SharedUser[]) => {
+                    return userList.map(u => {
+                        let isOnline = false
+                        if (u.lastAccessAt) {
+                            const lastAccess = new Date(u.lastAccessAt)
+                            isOnline = (now.getTime() - lastAccess.getMilliseconds()) < ONLINE_THRESHOLD_MS
+                            // 実行時のミリ秒ではなくタイムスタンプの差分を確認すべきなので getTime() を使用
+                            isOnline = (now.getTime() - lastAccess.getTime()) < ONLINE_THRESHOLD_MS
                         }
-                        return u
+
+                        let updatedUser = { ...u, isOnline }
+
+                        if (baseUrl && u.iconUrl && u.iconUrl.startsWith('/')) {
+                            const cleanBaseUrl = baseUrl.replace(/\/$/, '')
+                            updatedUser.iconUrl = `${cleanBaseUrl}${u.iconUrl}`
+                        }
+
+                        return updatedUser
                     })
-                    setSharedUsers(processedUsers)
-                } else {
-                    setSharedUsers(users)
                 }
+
+                setSharedUsers(processUserData(users))
             } catch (e) {
                 // console.error("Failed to fetch shared users:", e) // Suppress error if not supported
             }

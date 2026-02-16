@@ -215,6 +215,7 @@ export interface SharedUser {
     isActive: boolean
     ipAddress?: string
     iconUrl?: string
+    isOnline?: boolean
 }
 
 export interface AuditLogEntry {
