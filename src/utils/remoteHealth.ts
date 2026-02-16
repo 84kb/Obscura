@@ -21,12 +21,30 @@ export async function waitForRemoteConnection(
 
     const checkHealth = async (url: string): Promise<boolean> => {
         const healthUrl = `${url}/api/health`
+        const authCheckUrl = `${url}/api/profile`
         try {
+            // 1. 物理的な接続確認 (Health Check)
             const response = await fetch(healthUrl, {
                 headers: getAuthHeaders(remoteLib.token, myUserToken),
                 signal: AbortSignal.timeout(3000)
             })
-            return response.ok
+            if (!response.ok) return false
+
+            // 2. 認証確認 (Auth Check)
+            // Health Checkが通っても認証が通らないと意味がないため、ここでチェックする
+            const authResponse = await fetch(authCheckUrl, {
+                headers: getAuthHeaders(remoteLib.token, myUserToken),
+                signal: AbortSignal.timeout(3000)
+            })
+
+            if (!authResponse.ok) {
+                if (authResponse.status === 401) {
+                    console.warn(`[Remote Health] Auth failed for ${url} (401 Unauthorized)`)
+                }
+                return false
+            }
+
+            return true
         } catch (e) {
             return false
         }
@@ -35,7 +53,7 @@ export async function waitForRemoteConnection(
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         // 現在のURLで試行
         if (await checkHealth(currentUrl)) {
-            console.log(`[Remote Health] Connection established to ${remoteLib.name} (attempt ${attempt}/${maxRetries})`)
+            console.log(`[Remote Health] Connection and Auth established to ${remoteLib.name} (attempt ${attempt}/${maxRetries})`)
             return currentUrl
         }
 
