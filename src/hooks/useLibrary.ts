@@ -306,7 +306,7 @@ export function useLibrary() {
                 // トークンヘッダー準備
                 const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
                 const headers = getAuthHeaders(activeRemoteLibrary.token, myUserToken)
-                // console.log('[loadMediaFiles] Fetching media with headers:', headers) // Security: ensure not to log full tokens in production
+                console.log(`[loadMediaFiles] Fetching media... UserToken: ${myUserToken.substring(0, 10)}...`)
 
                 // 全件取得するために limit を大きく設定
                 const response = await fetch(`${baseUrl}/api/media?limit=10000`, {

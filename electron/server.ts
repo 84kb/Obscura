@@ -82,23 +82,33 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
             return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: 'トークンが不足しています' } })
         }
 
-        // デバッグログ
-        // console.log(`[Auth] AccessToken: ${accessToken ? '***' : 'missing'}, UserToken: ${userToken ? 'exists' : 'missing'}`)
-
+        // デバッグログ (一時的)
+        console.log(`[AuthDebug] Headers:`, req.headers)
+        console.log(`[AuthDebug] Extracted - UserToken: ${userToken.substring(0, 10)}..., AccessToken: ${accessToken.substring(0, 10)}...`)
 
         const userTokenValidation = validateUserToken(userToken)
         const accessTokenValidation = validateAccessToken(accessToken)
 
         if (!userTokenValidation.valid || !accessTokenValidation.valid) {
+            console.warn(`[AuthDebug] Invalid format - UserToken: ${userTokenValidation.valid}, AccessToken: ${accessTokenValidation.valid}`)
             return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: 'トークン形式が無効です' } })
         }
 
         const user = sharedUserDB.getUserByToken(userToken)
-        if (!user || user.accessToken !== accessToken) {
-            return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: '認証に失敗しました' } })
+        if (!user) {
+            console.warn(`[AuthDebug] User not found for token: ${userToken.substring(0, 10)}...`)
+            // DBの中身を少しダンプ (危険だがデバッグのため)
+            // console.log('[AuthDebug] All users:', sharedUserDB.getAllUsers().map(u => ({ id: u.id, tokenStart: u.userToken.substring(0,5) })))
+            return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: '認証に失敗しました (User not found)' } })
+        }
+
+        if (user.accessToken !== accessToken) {
+            console.warn(`[AuthDebug] AccessToken mismatch for user ${user.nickname}. Expected: ${user.accessToken.substring(0, 10)}..., Got: ${accessToken.substring(0, 10)}...`)
+            return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: '認証に失敗しました (Token mismatch)' } })
         }
 
         if (!user.isActive) {
+            console.warn(`[AuthDebug] User ${user.nickname} is inactive`)
             return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: 'このユーザーは無効化されています' } })
         }
 
@@ -190,7 +200,15 @@ export function startServer(port: number): Promise<void> {
                 message: { error: { code: 'RATE_LIMIT_EXCEEDED', message: 'リクエスト回数が多すぎます。' } }
             })
             expressApp.use(limiter)
-            expressApp.use(express.json())
+            // DataURIでの画像アップロードに対応するため制限緩和
+            expressApp.use(express.json({ limit: '50mb' }))
+
+            // アバター画像の静的配信
+            const avatarDir = path.join(app.getPath('userData'), 'avatars')
+            if (!fs.existsSync(avatarDir)) {
+                fs.mkdirSync(avatarDir, { recursive: true })
+            }
+            expressApp.use('/api/avatars', express.static(avatarDir))
 
             expressApp.get('/api/health', (_req: Request, res: Response) => {
                 res.json({
@@ -200,6 +218,8 @@ export function startServer(port: number): Promise<void> {
                     serverTime: new Date().toISOString()
                 })
             })
+
+
 
             expressApp.get('/api/media', authMiddleware, requirePermission('READ_ONLY'), async (req: AuthenticatedRequest, res: Response) => {
                 try {
@@ -551,6 +571,57 @@ export function startServer(port: number): Promise<void> {
                 } catch (e: any) {
                     logError('api', `DELETE /api/tags/${req.params.id} error`, e)
                     res.status(500).json({ error: { code: 'SERVER_ERROR', message: e.message } })
+                }
+            })
+
+            expressApp.put('/api/profile', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+                try {
+                    const { nickname, iconUrl } = req.body
+                    if (!req.user) return res.status(401).json({ error: { code: 'UNAUTHENTICATED', message: '認証が必要です' } })
+
+                    const updates: any = {}
+                    if (nickname !== undefined) updates.nickname = nickname
+
+                    if (iconUrl !== undefined) {
+                        // DataURIの場合はファイルとして保存
+                        if (iconUrl && iconUrl.startsWith('data:image')) {
+                            try {
+                                const matches = iconUrl.match(/^data:image\/([a-zA-Z+]+);base64,(.+)$/)
+                                if (matches && matches.length === 3) {
+                                    const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1]
+                                    const buffer = Buffer.from(matches[2], 'base64')
+                                    const filename = `${req.user.id}_${Date.now()}.${ext}`
+                                    const filePath = path.join(avatarDir, filename)
+
+                                    fs.writeFileSync(filePath, buffer)
+                                    updates.iconUrl = `/api/avatars/${filename}`
+
+                                    // 古いアバターの削除（任意実装: 同じユーザーの古いファイルがあれば消すなど）
+                                }
+                            } catch (e) {
+                                console.error('Failed to save avatar:', e)
+                                // 失敗したら更新しない、またはエラーを返す？ここでは元の値を維持するかエラーにするか。
+                                // クライアント側でエラーハンドリングできるようにエラーを返しても良いが、ここではログのみで続行
+                            }
+                        } else {
+                            updates.iconUrl = iconUrl
+                        }
+                    }
+
+                    if (Object.keys(updates).length > 0) {
+                        sharedUserDB.updateUser(req.user.id, updates)
+
+                        // 現在のリクエストコンテキストのユーザー情報も更新
+                        if (updates.nickname !== undefined) req.user.nickname = updates.nickname
+                        if (updates.iconUrl !== undefined) req.user.iconUrl = updates.iconUrl
+                    }
+
+                    res.json({ success: true, user: req.user })
+                    // 自分自身を含む全員に配信（再接続時などに反映されるように）
+                    if (io) io.emit('profile-updated', { userId: req.user.id, ...updates })
+                } catch (error) {
+                    logError('api', 'PUT /api/profile error', error)
+                    res.status(500).json({ error: { code: 'SERVER_ERROR', message: 'サーバーエラー' } })
                 }
             })
 

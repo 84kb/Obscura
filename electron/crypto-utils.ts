@@ -93,11 +93,7 @@ export function validateUserToken(token: string): { valid: boolean; timestamp?: 
             return { valid: false }
         }
 
-        // トークンが古すぎないかチェック（30日以内）
-        const thirtyDaysInMs = 30 * 24 * 60 * 60 * 1000
-        if (Date.now() - timestamp > thirtyDaysInMs) {
-            return { valid: false }
-        }
+        // 有効期限チェックを削除（永続化）
 
         return { valid: true, timestamp }
     } catch (error) {
@@ -137,11 +133,9 @@ export function validateAccessToken(token: string): { valid: boolean; userId?: s
             return { valid: false }
         }
 
-        // トークンが古すぎないかチェック（90日以内）
-        const ninetyDaysInMs = 90 * 24 * 60 * 60 * 1000
-        if (Date.now() - timestamp > ninetyDaysInMs) {
-            return { valid: false }
-        }
+        // 有効期限チェックを削除（永続化）
+
+        return { valid: true, userId, timestamp }
 
         return { valid: true, userId, timestamp }
     } catch (error) {

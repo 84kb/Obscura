@@ -544,9 +544,17 @@ export function Inspector({
                                 }).map(user => (
                                     <div key={user.id} className={`user-item ${user.isOnline ? 'online' : 'offline'}`}>
                                         <div className="user-avatar">
-                                            <div className="user-avatar-placeholder">
-                                                {user.nickname.slice(0, 2).toUpperCase()}
-                                            </div>
+                                            {user.iconUrl ? (
+                                                <img
+                                                    src={user.iconUrl}
+                                                    alt={user.nickname}
+                                                    style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                                                />
+                                            ) : (
+                                                <div className="user-avatar-placeholder">
+                                                    {user.nickname.slice(0, 2).toUpperCase()}
+                                                </div>
+                                            )}
                                             <div className="user-status-indicator"></div>
                                         </div>
                                         <div className="user-info">

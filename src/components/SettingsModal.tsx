@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useContext } from 'react'
+import { useState, useEffect, useCallback, useContext, useRef } from 'react'
 import { api } from '../api'
 import { AppSettings, Library, ClientConfig, AutoImportPath, Theme, ThemeColors } from '../types'
 import { ShortcutContext, ShortcutAction } from '../contexts/ShortcutContext'
@@ -2434,6 +2434,22 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
             // 更新後のconfを再取得して反映
             const config = await window.electronAPI.getClientConfig()
             setClientConfig(config)
+
+            // リモートライブラリへのプロファイル同期
+            if (config.remoteLibraries && config.remoteLibraries.length > 0) {
+                console.log('[Profile] Syncing profile to remote libraries...')
+                Promise.all(config.remoteLibraries.map(lib =>
+                    window.electronAPI.updateRemoteProfile(lib.url, lib.token, nickname.trim(), selectedIcon)
+                        .then(res => {
+                            if (!res.success) console.warn(`[Profile] Failed to sync to ${lib.name}:`, res.message)
+                            else console.log(`[Profile] Synced to ${lib.name}`)
+                        })
+                        .catch(err => console.error(`[Profile] Error syncing to ${lib.name}:`, err))
+                )).then(() => {
+                    console.log('[Profile] Sync completed')
+                })
+            }
+
             alert('プロファイルを保存しました')
         } catch (e: any) {
             console.error('Failed to save profile:', e)
@@ -2441,7 +2457,56 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
         }
     }
 
+
     // renderAudioSettings removed from here
+
+    const fileInputRef = useRef<HTMLInputElement>(null)
+
+    const resizeImage = (file: File): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const img = new Image()
+            img.onload = () => {
+                const canvas = document.createElement('canvas')
+                let width = img.width
+                let height = img.height
+                const maxSize = 1024
+
+                if (width > maxSize || height > maxSize) {
+                    if (width > height) {
+                        height = Math.round((height * maxSize) / width)
+                        width = maxSize
+                    } else {
+                        width = Math.round((width * maxSize) / height)
+                        height = maxSize
+                    }
+                }
+
+                canvas.width = width
+                canvas.height = height
+                const ctx = canvas.getContext('2d')
+                if (!ctx) return reject(new Error('Canvas context error'))
+
+                ctx.drawImage(img, 0, 0, width, height)
+                resolve(canvas.toDataURL('image/jpeg', 0.85))
+            }
+            img.onerror = reject
+            img.src = URL.createObjectURL(file)
+        })
+    }
+
+    const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (!file) return
+
+        try {
+            const resizedDataUrl = await resizeImage(file)
+            setSelectedIcon(resizedDataUrl)
+        } catch (err) {
+            console.error('Failed to process image:', err)
+            alert('画像の処理に失敗しました')
+        }
+    }
+
 
 
     const renderProfileSettings = () => {
@@ -2471,7 +2536,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
                         <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '12px', marginTop: '16px' }}>
                             <label className="settings-label">アイコン</label>
-                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
                                 {DEFAULT_ICONS.map(icon => (
                                     <button
                                         key={icon}
@@ -2494,6 +2559,22 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                         {icon}
                                     </button>
                                 ))}
+                                <div style={{ width: '1px', height: '32px', background: 'var(--border)', margin: '0 8px' }}></div>
+                                <button
+                                    type="button"
+                                    className="btn btn-secondary"
+                                    onClick={() => fileInputRef.current?.click()}
+                                    style={{ height: '40px', padding: '0 12px' }}
+                                >
+                                    画像を選択...
+                                </button>
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept="image/png,image/jpeg,image/webp"
+                                    style={{ display: 'none' }}
+                                    onChange={handleFileSelect}
+                                />
                             </div>
                         </div>
 
@@ -2505,9 +2586,14 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     borderRadius: '50%',
                                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                                     fontSize: '24px',
-                                    border: '2px solid var(--border)'
+                                    border: '2px solid var(--border)',
+                                    overflow: 'hidden'
                                 }}>
-                                    {selectedIcon}
+                                    {selectedIcon && selectedIcon.startsWith('http') || selectedIcon.startsWith('data:') || selectedIcon.startsWith('/api') ? (
+                                        <img src={selectedIcon} alt="icon" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                    ) : (
+                                        selectedIcon
+                                    )}
                                 </div>
                                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                                     <span style={{ fontWeight: 'bold', fontSize: '16px' }}>{nickname || '（未設定）'}</span>

@@ -214,6 +214,7 @@ export interface SharedUser {
     lastAccessAt: string
     isActive: boolean
     ipAddress?: string
+    iconUrl?: string
 }
 
 export interface AuditLogEntry {
@@ -305,6 +306,7 @@ export interface ElectronAPI {
     searchMediaFiles: (query: string) => Promise<{ id: number; file_name: string; title?: string; thumbnail_path?: string | null }[]>
     exportMedia: (mediaId: number, options?: { notificationId?: string }) => Promise<{ success: boolean; message?: string }>
     copyMediaToLibrary: (mediaIds: number[], libraryPath: string, settings: LibraryTransferSettings, options?: { notificationId?: string }) => Promise<{ success: boolean; message?: string }>
+    updateRemoteProfile: (url: string, token: string, nickname: string, iconUrl?: string) => Promise<{ success: boolean; message?: string }>;
 
     // クリップボード
     copyFileToClipboard: (filePath: string) => Promise<boolean>

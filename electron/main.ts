@@ -1836,6 +1836,10 @@ ipcMain.handle('remove-remote-tag-from-media', async (_event, { url, token, medi
     return callRemoteApi(url, token, `/api/tags/media?mediaId=${mediaId}&tagId=${tagId}`, 'DELETE')
 })
 
+ipcMain.handle('update-remote-profile', async (_event, { url, token, nickname, iconUrl }: { url: string; token: string; nickname: string; iconUrl?: string }) => {
+    return callRemoteApi(url, token, '/api/profile', 'PUT', { nickname, iconUrl })
+})
+
 // ヘルパー関数
 async function callRemoteApi(baseUrl: string, token: string, path: string, method: string, body?: any) {
     try {

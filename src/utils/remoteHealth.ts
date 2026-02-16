@@ -32,6 +32,7 @@ export async function waitForRemoteConnection(
 
             // 2. 認証確認 (Auth Check)
             // Health Checkが通っても認証が通らないと意味がないため、ここでチェックする
+            console.log(`[Remote Health] Checking auth for ${authCheckUrl}. UserToken: ${myUserToken.substring(0, 10)}...`)
             const authResponse = await fetch(authCheckUrl, {
                 headers: getAuthHeaders(remoteLib.token, myUserToken),
                 signal: AbortSignal.timeout(3000)

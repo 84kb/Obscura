@@ -261,7 +261,35 @@ function AppContent() {
         const fetchUsers = async () => {
             try {
                 const users = await api.getSharedUsers()
-                setSharedUsers(users)
+
+                // URL補完
+                let baseUrl = ''
+                if (activeRemoteLibrary) {
+                    baseUrl = activeRemoteLibrary.url
+                } else {
+                    try {
+                        const serverConfig = await api.getServerConfig()
+                        if (serverConfig && serverConfig.port) {
+                            baseUrl = `http://localhost:${serverConfig.port}`
+                        }
+                    } catch (e) {
+                        // サーバー設定取得失敗（起動していない等）時は補完しない
+                    }
+                }
+
+                if (baseUrl) {
+                    // 末尾のスラッシュ削除
+                    baseUrl = baseUrl.replace(/\/$/, '')
+                    const processedUsers = users.map(u => {
+                        if (u.iconUrl && u.iconUrl.startsWith('/')) {
+                            return { ...u, iconUrl: `${baseUrl}${u.iconUrl}` }
+                        }
+                        return u
+                    })
+                    setSharedUsers(processedUsers)
+                } else {
+                    setSharedUsers(users)
+                }
             } catch (e) {
                 // console.error("Failed to fetch shared users:", e) // Suppress error if not supported
             }
@@ -270,7 +298,7 @@ function AppContent() {
         fetchUsers()
         const interval = setInterval(fetchUsers, 5000)
         return () => clearInterval(interval)
-    }, [])
+    }, [activeRemoteLibrary])
 
 
     // 選択されたメディアのIDリスト

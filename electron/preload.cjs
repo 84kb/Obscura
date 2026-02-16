@@ -164,8 +164,10 @@ try {
         createRemoteTag: (url, token, name) => ipcRenderer.invoke('create-remote-tag', { url, token, name }),
         deleteRemoteTag: (url, token, id) => ipcRenderer.invoke('delete-remote-tag', { url, token, id }),
         addRemoteTagToMedia: (url, token, mediaId, tagId) => ipcRenderer.invoke('add-remote-tag-to-media', { url, token, mediaId, tagId }),
-        addRemoteTagsToMedia: (url, token, mediaIds, tagIds) => ipcRenderer.invoke('add-remote-tag-to-media', { url, token, mediaIds, tagIds }),
+        addRemoteTagsToMedia: (url, token, mediaIds, tagIds) => ipcRenderer.invoke('add-remote-tags-to-media', { url, token, mediaIds, tagIds }),
         removeRemoteTagFromMedia: (url, token, mediaId, tagId) => ipcRenderer.invoke('remove-remote-tag-from-media', { url, token, mediaId, tagId }),
+
+        updateRemoteProfile: (url, token, nickname, iconUrl) => ipcRenderer.invoke('update-remote-profile', { url, token, nickname, iconUrl }),
 
         // === 自動アップデート ===
         checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
