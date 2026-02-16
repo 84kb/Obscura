@@ -210,11 +210,11 @@ export const PlaylistSectionContent = ({
 
     return (
         <div className="playlist-container">
-            {playlistItems.map((item) => {
+            {playlistItems.map((item, index) => {
                 const isPlaying = item.id === playingMedia.id
                 return (
                     <div
-                        key={item.id}
+                        key={`${item.id}-${index}`}
                         className={`playlist-item ${isPlaying ? 'active' : ''}`}
                         onClick={(e) => {
                             e.stopPropagation()

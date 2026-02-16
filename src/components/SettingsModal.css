@@ -40,19 +40,19 @@
     flex-direction: column;
 }
 
-.settings-modal-sidebar .sidebar-header {
-    padding: 24px;
+.settings-modal-sidebar .settings-sidebar-header {
+    padding: 16px 20px 8px 20px;
 }
 
 .settings-modal-sidebar h2 {
     font-size: 18px;
     font-weight: 700;
-    margin-bottom: 20px;
+    margin-bottom: 12px;
     color: var(--text-main);
     letter-spacing: 0.5px;
 }
 
-.sidebar-search {
+.settings-sidebar-search {
     position: relative;
     display: flex;
     align-items: center;
@@ -61,30 +61,31 @@
     border-radius: 8px;
     padding: 0 12px;
     transition: all 0.2s;
+    margin: 0 12px 12px 12px;
 }
 
-.sidebar-search:focus-within {
+.settings-sidebar-search:focus-within {
     border-color: var(--primary);
     /* Orange-600 */
     box-shadow: 0 0 0 2px var(--primary-light);
 }
 
-.sidebar-search svg {
+.settings-sidebar-search svg {
     color: var(--text-muted);
     margin-right: 8px;
 }
 
-.sidebar-search input {
+.settings-sidebar-search input {
     background: transparent;
     border: none;
     color: var(--text-main);
     font-size: 13px;
-    padding: 10px 0;
+    padding: 8px 0;
     outline: none;
     width: 100%;
 }
 
-.settings-modal-sidebar .sidebar-nav {
+.settings-modal-sidebar .settings-sidebar-nav {
     flex: 1;
     overflow-y: auto;
     padding: 0 12px;
@@ -93,33 +94,56 @@
     gap: 2px;
 }
 
-.nav-item {
+.settings-nav-group-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    padding: 16px 12px 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.8;
+}
+
+.settings-nav-item {
     width: 100%;
-    padding: 10px 14px;
+    padding: 8px 12px;
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
     background: transparent;
     border: none;
     border-radius: 8px;
     color: var(--text-muted);
     cursor: pointer;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
     transition: all 0.2s;
     text-align: left;
 }
 
-.nav-item:hover {
+.settings-nav-item:hover {
     background: rgba(255, 255, 255, 0.04);
     color: var(--text-main);
 }
 
-.nav-item.active {
+.settings-nav-item.active {
     background: color-mix(in srgb, var(--primary), transparent 85%);
     /* Orange tint */
     color: var(--primary);
     /* Orange-300 */
+    font-weight: 600;
+}
+
+.settings-nav-item span {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.settings-nav-item svg {
+    flex-shrink: 0;
+    color: inherit;
 }
 
 /* Main Content */
@@ -140,23 +164,22 @@
     -webkit-app-region: no-drag;
 }
 
-.category-title {
+.settings-category-title {
     font-size: 20px;
     font-weight: 700;
     color: var(--text-main);
 }
 
-.close-btn {
-    width: 36px;
-    height: 36px;
+.settings-close-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 8px;
-    color: var(--text-muted);
-    cursor: pointer;
     transition: all 0.2s;
     -webkit-app-region: no-drag;
     pointer-events: auto;
@@ -167,7 +190,7 @@
     color: var(--text-main);
 }
 
-.settings-modal-main .main-content {
+.settings-modal-main .settings-main-content {
     flex: 1;
     overflow-y: auto;
     padding: 32px;
@@ -204,7 +227,7 @@
     gap: 16px;
 }
 
-.setting-item {
+.settings-item {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -215,7 +238,7 @@
     transition: all 0.2s;
 }
 
-.setting-item:hover {
+.settings-item:hover {
     border-color: rgba(255, 230, 200, 0.15);
 }
 
@@ -239,12 +262,12 @@
     border-bottom: none;
 }
 
-.setting-info {
+.settings-info {
     flex: 1;
     padding-right: 24px;
 }
 
-.setting-label {
+.settings-label {
     display: block;
     font-weight: 500;
     margin-bottom: 6px;
@@ -259,8 +282,8 @@
 }
 
 /* Controls */
-.setting-control select,
-.setting-control input[type="text"] {
+.settings-control select,
+.settings-control input[type="text"] {
     background: var(--bg-sidebar);
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -272,8 +295,8 @@
     min-width: 200px;
 }
 
-.setting-control select:focus,
-.setting-control input[type="text"]:focus {
+.settings-control select:focus,
+.settings-control input[type="text"]:focus {
     border-color: var(--primary);
 }
 
@@ -415,7 +438,7 @@
 }
 
 /* Footer */
-.main-footer {
+.settings-main-footer {
     height: 70px;
     padding: 0 24px;
     display: flex;
@@ -484,43 +507,47 @@
     height: 0;
 }
 
-.slider {
+.slider,
+.toggle-slider {
     position: absolute;
     cursor: pointer;
     top: 0;
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: #121110;
+    background-color: var(--bg-dark);
     /* Solid dark background for contrast */
-    border: 1px solid rgba(255, 255, 255, 0.3);
+    border: 1px solid var(--border);
     /* Higher contrast border */
     transition: .4s;
     border-radius: 24px;
-    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.6);
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4);
 }
 
-.slider:before {
+.slider:before,
+.toggle-slider:before {
     position: absolute;
     content: "";
     height: 18px;
     width: 18px;
     left: 2px;
     bottom: 2px;
-    background-color: #e0e0e0;
+    background-color: var(--text-muted);
     transition: .3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
     border-radius: 50%;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
     /* Thumb shadow */
 }
 
-input:checked+.slider {
+input:checked+.slider,
+input:checked+.toggle-slider {
     background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
-    border-color: color-mix(in srgb, var(--primary), white 20%);
+    border-color: var(--primary-light);
     box-shadow: 0 0 12px color-mix(in srgb, var(--primary), transparent 40%), inset 0 1px 2px rgba(255, 255, 255, 0.2);
 }
 
-input:checked+.slider:before {
+input:checked+.slider:before,
+input:checked+.toggle-slider:before {
     transform: translateX(20px);
     background-color: #fff;
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4);

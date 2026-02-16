@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { MediaFile, ItemInfoType } from '../types'
+import { api } from '../api'
 import './MediaCard.css'
 import { toMediaUrl } from '../utils/fileUrl'
 
@@ -63,8 +64,8 @@ export function MediaCard({
                 const url = toMediaUrl(media.thumbnail_path)
                 const separator = url.includes('?') ? '&' : '?'
                 setThumbnailUrl(thumbnailMode === 'speed' ? `${url}${separator}width=${width}` : url)
-            } else if (thumbnailMode === 'quality' && media.file_type === 'video' && window.electronAPI) {
-                window.electronAPI.generateThumbnail(media.id, media.file_path)
+            } else if (thumbnailMode === 'quality' && media.file_type === 'video') {
+                api.generateThumbnail(media.id, media.file_path)
                     .then((path: string | null) => {
                         if (path) {
                             setThumbnailUrl(toMediaUrl(path))
@@ -186,11 +187,11 @@ export function MediaCard({
 
         e.preventDefault()
 
-        if (window.electronAPI?.startDrag) {
+        if (api.startDrag) {
             console.log('[MediaCard] Calling startDrag IPC with', dragPaths.length, 'files')
-            window.electronAPI.startDrag(dragPaths)
+            api.startDrag(dragPaths)
         } else {
-            console.error('[MediaCard] electronAPI.startDrag not available')
+            console.error('[MediaCard] api.startDrag not available')
         }
     }
 

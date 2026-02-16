@@ -3,8 +3,11 @@ import { MediaFile } from '../types'
 import { toMediaUrl } from '../utils/fileUrl'
 import { useShortcut } from '../contexts/ShortcutContext'
 import { useAudioEngine } from './useAudioEngine'
+import { api } from '../api'
 
 interface UsePlayerProps {
+    mode?: string | null
+    playlist?: any | null
     media?: MediaFile
     onNext?: () => void
     onPrev?: () => void
@@ -12,9 +15,16 @@ interface UsePlayerProps {
     hasNext?: boolean
     autoPlayEnabled?: boolean
     pipControlMode?: 'navigation' | 'skip'
+    hasPrev?: boolean
+    onPlayPause?: () => void
+    volume?: number
+    setVolume?: (volume: number) => void
+    isMuted?: boolean
+    toggleMute?: () => void
+    controlMode?: 'navigation' | 'skip'
 }
 
-export function usePlayer({ media, onNext, onPrev, onPlayFirst, hasNext, autoPlayEnabled, pipControlMode = 'navigation' }: UsePlayerProps = {}) {
+export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasPrev: _hasPrev = false, hasNext: _hasNext = false, onPlayPause: _onPlayPause = () => { }, onNext = () => { }, onPrev = () => { }, volume: _externalVolume = 1, setVolume: _externalSetVolume = () => { }, isMuted: _externalIsMuted = false, toggleMute: _externalToggleMute = () => { }, controlMode: _controlMode = 'navigation', media, onPlayFirst, autoPlayEnabled, pipControlMode = 'navigation' }: UsePlayerProps = {}) => {
     const audioEngine = useAudioEngine()
     const [isPlaying, setIsPlaying] = useState(false)
     const [currentTime, setCurrentTime] = useState(0)
@@ -44,7 +54,7 @@ export function usePlayer({ media, onNext, onPrev, onPlayFirst, hasNext, autoPla
         return false
     })
 
-    const [exclusiveMode, setExclusiveMode] = useState(false)
+    const [_exclusiveMode, setExclusiveMode] = useState(false)
     const [useMpvAudio, setUseMpvAudio] = useState(false)
     const [enableMpvForVideo, setEnableMpvForVideo] = useState(false)
     const [configLoaded, setConfigLoaded] = useState(false)
@@ -55,16 +65,15 @@ export function usePlayer({ media, onNext, onPrev, onPlayFirst, hasNext, autoPla
     )
 
     useEffect(() => {
-        if (window.electronAPI) {
-            window.electronAPI.getClientConfig().then(c => {
-                setExclusiveMode(!!c.exclusiveMode)
-                setUseMpvAudio(!!c.useMpvAudio)
-                setEnableMpvForVideo(!!c.enableMpvForVideo)
-                setConfigLoaded(true)
-            })
-        } else {
+        api.getClientConfig().then(c => {
+            setExclusiveMode(!!c.exclusiveMode)
+            setUseMpvAudio(!!c.useMpvAudio)
+            setEnableMpvForVideo(!!c.enableMpvForVideo)
             setConfigLoaded(true)
-        }
+        }).catch(() => {
+            // Fallback or ignore if API not available/implemented
+            setConfigLoaded(true)
+        })
     }, [])
 
 
@@ -80,7 +89,7 @@ export function usePlayer({ media, onNext, onPrev, onPlayFirst, hasNext, autoPla
 
     // Refs for callback access inside MPV events
     const onNextRef = useRef(onNext)
-    const onPrevRef = useRef(onPrev)
+
     const onPlayFirstRef = useRef(onPlayFirst)
     const autoPlayEnabledRef = useRef(autoPlayEnabled)
     const hasNextRef = useRef(!!onNext)
@@ -102,14 +111,14 @@ export function usePlayer({ media, onNext, onPrev, onPlayFirst, hasNext, autoPla
     const togglePlay = async () => {
         if (isMpv) {
             if (isPlaying) {
-                await window.electronAPI.pauseAudio()
+                await api.pauseAudio()
                 setIsPlaying(false)
             } else {
                 if (currentTime === 0 && !isPlaying) {
                     // 初回再生
-                    await window.electronAPI.playAudio(media?.file_path)
+                    await api.playAudio(media?.file_path)
                 } else {
-                    await window.electronAPI.resumeAudio()
+                    await api.resumeAudio()
                 }
                 setIsPlaying(true)
             }
@@ -147,7 +156,7 @@ export function usePlayer({ media, onNext, onPrev, onPlayFirst, hasNext, autoPla
     // シーク（時間のみを設定、再生状態は変更しない）
     const seek = async (time: number) => {
         if (isMpv) {
-            await window.electronAPI.seekAudio(time)
+            await api.seekAudio(time)
             setCurrentTime(time)
             return
         }
@@ -201,7 +210,7 @@ export function usePlayer({ media, onNext, onPrev, onPlayFirst, hasNext, autoPla
         }
 
         if (isMpv) {
-            window.electronAPI.setAudioVolume(newVolume * 100) // MPV uses 0-100
+            api.setAudioVolume(newVolume * 100) // MPV uses 0-100
         } else {
             const media = videoRef.current || audioRef.current
             if (media) {
@@ -305,28 +314,9 @@ export function usePlayer({ media, onNext, onPrev, onPlayFirst, hasNext, autoPla
     // マウスボタンでの前後移動 (MB4: 戻る, MB5: 進む)
     useEffect(() => {
         const handleMouseUp = (e: MouseEvent) => {
-            // button 3: Back (MB4)
-            // button 4: Forward (MB5)
-            if (e.button === 3) {
-                if (onPrev) {
-                    onPrev()
-                    // ブラウザの戻る動作を防ぐためにpreventDefaultしたいが
-                    // mouseupでは遅い場合がある。mousedownでもpreventDefaultが必要かもしれないが
-                    // Electronアプリ内なのでブラウザの履歴バックは通常発生しないか、
-                    // またはアプリ側で無効化されていることを期待。
-                    // 一応標準のイベント伝播は止める
-                    e.preventDefault()
-                    e.stopPropagation()
-                }
-            } else if (e.button === 4) {
-                if (onNext) {
-                    onNext()
-                    e.preventDefault()
-                    e.stopPropagation()
-                }
-            }
+            if (e.button === 3 && onPrev) onPrev()
+            if (e.button === 4 && onNext) onNext()
         }
-
         window.addEventListener('mouseup', handleMouseUp)
         return () => window.removeEventListener('mouseup', handleMouseUp)
     }, [onNext, onPrev])
@@ -410,22 +400,22 @@ export function usePlayer({ media, onNext, onPrev, onPlayFirst, hasNext, autoPla
 
     // MPV Event Listeners
     useEffect(() => {
-        if (!isMpv || !window.electronAPI) return
+        if (!isMpv) return
 
         // 初期化時にボリューム設定
-        window.electronAPI.setAudioVolume(volume * 100)
+        api.setAudioVolume(volume * 100)
 
         // イベント購読
-        const cleanupTime = window.electronAPI.on('audio:time-update', (_: any, time: number) => {
+        const cleanupTime = api.on('audio:time-update', (_: any, time: number) => {
             setCurrentTime(time)
         })
-        const cleanupDuration = window.electronAPI.on('audio:duration-update', (_: any, dur: number) => {
+        const cleanupDuration = api.on('audio:duration-update', (_: any, dur: number) => {
             setDuration(dur)
         })
-        const cleanupPause = window.electronAPI.on('audio:pause-update', (_: any, paused: boolean) => {
+        const cleanupPause = api.on('audio:pause-update', (_: any, paused: boolean) => {
             setIsPlaying(!paused)
         })
-        const cleanupEnded = window.electronAPI.on('audio:ended', () => {
+        const cleanupEnded = api.on('audio:ended', () => {
             // Auto-play logic
             // Note: autoPlayEnabled and hasNext logic is usually conditional in Player.tsx
             // But here we are the player controller.
@@ -449,8 +439,8 @@ export function usePlayer({ media, onNext, onPrev, onPlayFirst, hasNext, autoPla
                     _onPlayFirst()
                 } else if (_isLooping && !_hasNext) {
                     // Single loop fallback if onPlayFirst not provided or simple loop
-                    window.electronAPI.seekAudio(0)
-                    window.electronAPI.playAudio()
+                    api.seekAudio(0)
+                    api.playAudio()
                 } else {
                     setIsPlaying(false)
                 }
@@ -460,15 +450,15 @@ export function usePlayer({ media, onNext, onPrev, onPlayFirst, hasNext, autoPla
         })
 
         // 自動再生
-        window.electronAPI.playAudio(media?.file_path)
+        api.playAudio(media?.file_path)
 
         return () => {
-            // Cleanup: stop audio
-            window.electronAPI.stopAudio()
             if (cleanupTime) cleanupTime()
             if (cleanupDuration) cleanupDuration()
             if (cleanupPause) cleanupPause()
             if (cleanupEnded) cleanupEnded()
+            // Cleanup: stop audio
+            api.stopAudio()
         }
     }, [isMpv, media?.id])
 
@@ -519,9 +509,9 @@ export function usePlayer({ media, onNext, onPrev, onPlayFirst, hasNext, autoPla
             setIsPiP(false)
             // PiP終了時にウィンドウへフォーカス＆最前面化
             // 型定義の反映ラグ回避のため any キャスト
-            const api = window.electronAPI as any
-            if (api && api.focusWindow) {
-                api.focusWindow().catch((err: any) => console.error('Failed to focus window:', err))
+            const appApi = api as any
+            if (appApi && appApi.focusWindow) {
+                appApi.focusWindow().catch((err: any) => console.error('Failed to focus window:', err))
             }
         }
 
@@ -548,11 +538,12 @@ export function usePlayer({ media, onNext, onPrev, onPlayFirst, hasNext, autoPla
             const artworks = []
             if (media.thumbnail_path) {
                 // ローカルパスをブラウザが扱えるURLに変換
+                // ローカルパスをブラウザが扱えるURLに変換
                 // window.electronAPIが存在する場合のみ有効（レンダラープロセス）
-                const artUrl = window.electronAPI ? toMediaUrl(media.thumbnail_path) : media.thumbnail_path
+                const artUrl = toMediaUrl(media.thumbnail_path)
 
                 // media:// 等のカスタムスキームは MediaSession で警告が出る可能性があるため Blob URL に変換
-                if (artUrl.startsWith('media://') && window.electronAPI) {
+                if (artUrl.startsWith('media://')) {
                     try {
                         const res = await fetch(artUrl)
                         const blob = await res.blob()
@@ -608,12 +599,9 @@ export function usePlayer({ media, onNext, onPrev, onPlayFirst, hasNext, autoPla
             navigator.mediaSession.setActionHandler('nexttrack', null)
 
             // Determine controls based on availability (Skip mode removed)
-            if (onPrev) {
-                navigator.mediaSession.setActionHandler('previoustrack', handlePrevAction)
-            }
-            if (onNext) {
-                navigator.mediaSession.setActionHandler('nexttrack', handleNextAction)
-            }
+            // Determine controls based on availability (Skip mode removed)
+            navigator.mediaSession.setActionHandler('previoustrack', handlePrevAction)
+            navigator.mediaSession.setActionHandler('nexttrack', handleNextAction)
 
         } catch (e) {
             console.error('[usePlayer] Failed to set media session handlers:', e)

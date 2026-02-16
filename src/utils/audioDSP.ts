@@ -1,5 +1,5 @@
-export function makeDistortionCurve(amount: number) {
-    const k = typeof amount === 'number' ? amount : 50
+export const createDistortionCurve = (_amount: number) => {
+    const k = typeof _amount === 'number' ? _amount : 50
     const n_samples = 44100
     const curve = new Float32Array(n_samples)
     const deg = Math.PI / 180
@@ -12,7 +12,7 @@ export function makeDistortionCurve(amount: number) {
 
 // 6N1J Tube Simulator Approximation
 // Adds even harmonics for warmth
-export function makeTubeCurve(amount: number) {
+export function makeTubeCurve(_amount: number) {
     const n_samples = 44100
     const curve = new Float32Array(n_samples)
     for (let i = 0; i < n_samples; ++i) {
@@ -47,7 +47,7 @@ export function makeAnalogXCurve(mode: 'Class A' | 'Class AB' | 'Class B', drive
             }
         } else if (mode === 'Class AB') {
             // Crossover distortion simulation (slight step at 0)
-            const sign = x > 0 ? 1 : -1
+
             if (Math.abs(x) < 0.1) {
                 curve[i] = x * (1 - blend * 0.5)
             } else {
@@ -75,6 +75,17 @@ export function makeExciterCurve(amount: number) {
         curve[i] = x + (amount / 100) * (x * x * x) // 3rd harmonic
     }
     return curve
+}
+
+// Placeholder for AudioSettings type, assuming it's defined elsewhere or will be.
+// For the purpose of this edit, we'll define a minimal type to avoid syntax errors.
+type AudioSettings = {};
+
+export const processAudio = (buffer: AudioBuffer, _settings: AudioSettings) => {
+    // This function body is a placeholder based on the provided snippet's context.
+    // The original snippet had a syntax error mixing parameters from createReverbImpulse.
+    // Implement audio processing logic here.
+    return buffer;
 }
 
 // Simple algorithmic reverb Impulse Response generator

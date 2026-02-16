@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { MediaFile } from '../types'
+import { api } from '../api'
 // Reuse existing styles to match the standard duplicate warning
 import './DuplicateModal.css'
 
@@ -7,6 +8,8 @@ interface DuplicateResolutionModalProps {
     duplicates: { [key: string]: MediaFile[] }[]
     onClose: () => void
 }
+
+
 
 // Helper to format file size
 const formatSize = (bytes: number) => {
@@ -69,10 +72,10 @@ export const DuplicateResolutionModal: React.FC<DuplicateResolutionModalProps> =
         try {
             if (selectedOption === 'left') {
                 // Keep A, Delete B
-                await window.electronAPI.moveToTrash(fileB.id)
+                await api.moveToTrash(fileB.id)
             } else if (selectedOption === 'right') {
                 // Keep B, Delete A
-                await window.electronAPI.moveToTrash(fileA.id)
+                await api.moveToTrash(fileA.id)
             }
             // 'both' does nothing (keeps both)
 

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { MediaFile, Tag, TagGroup, Folder, FilterOptions, Library, RemoteLibrary } from '../types'
 import { useNotification } from '../contexts/NotificationContext'
+import { api } from '../api'
 
 export function useLibrary() {
     const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([])
@@ -70,7 +71,7 @@ export function useLibrary() {
             // 既にロード済みならスキップ…はできない（ライブラリ切り替え時）
 
             try {
-                const config = await (window.electronAPI as any).getClientConfig()
+                const config = await api.getClientConfig()
                 if (config && config.libraryViewSettings && config.libraryViewSettings[libId]) {
                     const saved = config.libraryViewSettings[libId]
                     setFilterOptions(prev => ({
@@ -102,7 +103,7 @@ export function useLibrary() {
             if (isViewSettingsLoaded.current !== libId) return
 
             try {
-                const currentConfig = await (window.electronAPI as any).getClientConfig()
+                const currentConfig = await api.getClientConfig()
                 const newSettings = {
                     ...currentConfig.libraryViewSettings,
                     [libId]: {
@@ -110,7 +111,7 @@ export function useLibrary() {
                         sortDirection: filterOptions.sortDirection
                     }
                 }
-                await (window.electronAPI as any).updateClientConfig({ libraryViewSettings: newSettings })
+                await api.updateClientConfig({ libraryViewSettings: newSettings })
             } catch (e) {
                 console.error('Failed to save view settings', e)
             }
@@ -145,17 +146,18 @@ export function useLibrary() {
                 })
                 if (response.ok) {
                     const data = await response.json()
-                    setFolders(data)
+                    setFolders(Array.isArray(data) ? data : [])
                 }
             } catch (e) {
                 console.error('Failed to load remote folders', e)
             }
         } else {
             try {
-                const loadedFolders = await window.electronAPI.getFolders()
-                setFolders(loadedFolders as Folder[])
+                const loadedFolders = await api.getFolders()
+                setFolders(Array.isArray(loadedFolders) ? loadedFolders : [])
             } catch (error) {
                 console.error('Failed to load folders:', error)
+                setFolders([])
             }
         }
     }, [activeRemoteLibrary, myUserToken])
@@ -167,7 +169,7 @@ export function useLibrary() {
     const createFolder = useCallback(async (name: string, parentId?: number | null) => {
         if (!activeLibrary && !activeRemoteLibrary) return null
         try {
-            const newFolder = await window.electronAPI.createFolder(name, parentId)
+            const newFolder = await api.createFolder(name, parentId)
             await loadFolders()
             return newFolder
         } catch (error) {
@@ -179,7 +181,7 @@ export function useLibrary() {
     // フォルダー削除
     const deleteFolder = useCallback(async (id: number) => {
         try {
-            await window.electronAPI.deleteFolder(id)
+            await api.deleteFolder(id)
             await loadFolders()
         } catch (error) {
             console.error('Failed to delete folder:', error)
@@ -189,7 +191,7 @@ export function useLibrary() {
     // フォルダー名変更
     const renameFolder = useCallback(async (id: number, newName: string) => {
         try {
-            await window.electronAPI.renameFolder(id, newName)
+            await api.renameFolder(id, newName)
             await loadFolders()
         } catch (error) {
             console.error('Failed to rename folder:', error)
@@ -202,7 +204,8 @@ export function useLibrary() {
 
     // インポート進捗リスナー
     useEffect(() => {
-        if (!window.electronAPI || !window.electronAPI.on) return
+        // if (!window.electronAPI || !window.electronAPI.on) return // Adapter pattern usually ensures api exists but let's check basic validity if needed
+        // Assuming api.on is available via adapter
 
         const activeNotifications = new Map<string, string>() // sessionId -> notificationId
 
@@ -242,9 +245,9 @@ export function useLibrary() {
             updateProgress(data.id, data.progress)
         }
 
-        const removeImportListener = window.electronAPI.on('import-progress', handleProgress)
-        const removeUploadListener = window.electronAPI.on('upload-progress', handleUploadProgress)
-        const removeDownloadListener = window.electronAPI.on('download-progress', handleUploadProgress)
+        const removeImportListener = api.on('import-progress', handleProgress)
+        const removeUploadListener = api.on('upload-progress', handleUploadProgress)
+        const removeDownloadListener = api.on('download-progress', handleUploadProgress)
 
         return () => {
             // @ts-ignore
@@ -260,7 +263,7 @@ export function useLibrary() {
     useEffect(() => {
         const loadConfig = async () => {
             try {
-                const config = await (window.electronAPI as any).getClientConfig()
+                const config = await api.getClientConfig()
                 if (config && config.myUserToken) {
                     setMyUserToken(config.myUserToken)
                 }
@@ -330,7 +333,7 @@ export function useLibrary() {
 
                 const data = await response.json()
                 // パス変換してセット
-                const transformed = transformRemoteMedia(data.media, activeRemoteLibrary)
+                const transformed = transformRemoteMedia(Array.isArray(data.media) ? data.media : [], activeRemoteLibrary)
                 setMediaFiles(transformed)
             } catch (error: any) {
                 console.error('Failed to load remote media files:', error)
@@ -341,8 +344,8 @@ export function useLibrary() {
         } else {
             // ローカル (IPC)
             try {
-                const files = await window.electronAPI.getMediaFiles()
-                setMediaFiles(files as MediaFile[])
+                const files = await api.getMediaFiles()
+                setMediaFiles(Array.isArray(files) ? files : [])
             } catch (error) {
                 console.error('Failed to load media files:', error)
             }
@@ -371,15 +374,15 @@ export function useLibrary() {
                 })
                 if (response.ok) {
                     const data = await response.json()
-                    setTags(data)
+                    setTags(Array.isArray(data) ? data : [])
                 }
             } catch (e) {
                 console.error('Failed to load remote tags', e)
             }
         } else {
             try {
-                const loadedTags = await window.electronAPI.getTags()
-                setTags(loadedTags as Tag[])
+                const loadedTags = await api.getTags()
+                setTags(Array.isArray(loadedTags) ? loadedTags : [])
             } catch (error) {
                 console.error('Failed to load tags:', error)
             }
@@ -408,7 +411,7 @@ export function useLibrary() {
                 })
                 if (response.ok) {
                     const data = await response.json()
-                    setTagGroups(data)
+                    setTagGroups(Array.isArray(data) ? data : [])
                 }
             } catch (e) {
                 console.error('Failed to load remote tag groups', e)
@@ -416,8 +419,8 @@ export function useLibrary() {
             return
         }
         try {
-            const loadedGroups = await window.electronAPI.getTagGroups()
-            setTagGroups(loadedGroups as TagGroup[])
+            const loadedGroups = await api.getTagGroups()
+            setTagGroups(Array.isArray(loadedGroups) ? loadedGroups : [])
         } catch (error) {
             console.error('Failed to load tag groups:', error)
         }
@@ -428,9 +431,9 @@ export function useLibrary() {
     const selectAndScanFolder = useCallback(async () => {
         setLoading(true)
         try {
-            const folderPath = await window.electronAPI.selectFolder()
+            const folderPath = await api.selectFolder()
             if (folderPath) {
-                await window.electronAPI.scanFolder(folderPath)
+                await api.scanFolder(folderPath)
                 await loadMediaFiles()
             }
         } catch (error) {
@@ -446,7 +449,7 @@ export function useLibrary() {
         try {
             if (activeRemoteLibrary) {
                 try {
-                    const newTag = await (window.electronAPI as any).createRemoteTag(activeRemoteLibrary.url, activeRemoteLibrary.token, name)
+                    const newTag = await api.createRemoteTag(activeRemoteLibrary.url, activeRemoteLibrary.token, name)
                     await loadTags()
                     return newTag
                 } catch (e: any) {
@@ -456,7 +459,7 @@ export function useLibrary() {
                     throw e
                 }
             }
-            const newTag = await window.electronAPI.createTag(name)
+            const newTag = await api.createTag(name)
             await loadTags()
             return newTag
         } catch (error) {
@@ -470,7 +473,7 @@ export function useLibrary() {
         try {
             if (activeRemoteLibrary) {
                 try {
-                    await (window.electronAPI as any).deleteRemoteTag(activeRemoteLibrary.url, activeRemoteLibrary.token, id)
+                    await api.deleteRemoteTag(activeRemoteLibrary.url, activeRemoteLibrary.token, id)
                     await loadTags()
                     return
                 } catch (e: any) {
@@ -480,7 +483,7 @@ export function useLibrary() {
                     throw e
                 }
             }
-            await window.electronAPI.deleteTag(id)
+            await api.deleteTag(id)
             await loadTags()
         } catch (error) {
             console.error('Failed to delete tag:', error)
@@ -507,7 +510,7 @@ export function useLibrary() {
         try {
             if (activeRemoteLibrary) {
                 try {
-                    await (window.electronAPI as any).addRemoteTagToMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, mediaId, tagId)
+                    await api.addRemoteTagToMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, mediaId, tagId)
                     return
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
@@ -518,7 +521,7 @@ export function useLibrary() {
                     throw e
                 }
             }
-            await window.electronAPI.addTagToMedia(mediaId, tagId)
+            await api.addTagToMedia(mediaId, tagId)
             await loadMediaFiles()
         } catch (error) {
             console.error('Failed to add tag to media:', error)
@@ -540,7 +543,7 @@ export function useLibrary() {
         try {
             if (activeRemoteLibrary) {
                 try {
-                    await (window.electronAPI as any).removeRemoteTagFromMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, mediaId, tagId)
+                    await api.removeRemoteTagFromMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, mediaId, tagId)
                     return
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
@@ -550,7 +553,7 @@ export function useLibrary() {
                     throw e
                 }
             }
-            await window.electronAPI.removeTagFromMedia(mediaId, tagId)
+            await api.removeTagFromMedia(mediaId, tagId)
         } catch (error) {
             console.error('Failed to remove tag from media:', error)
             await loadMediaFiles()
@@ -576,7 +579,7 @@ export function useLibrary() {
         try {
             if (activeRemoteLibrary) {
                 try {
-                    await (window.electronAPI as any).addRemoteTagsToMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, mediaIds, tagIds)
+                    await api.addRemoteTagsToMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, mediaIds, tagIds)
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
                         addNotification({ type: 'error', title: '権限不足', message: 'タグ一括追加の権限がありません。' })
@@ -586,7 +589,7 @@ export function useLibrary() {
                 }
                 return
             }
-            await window.electronAPI.addTagsToMedia(mediaIds, tagIds)
+            await api.addTagsToMedia(mediaIds, tagIds)
             await loadMediaFiles()
         } catch (error) {
             console.error('Failed to add tags to media:', error)
@@ -610,7 +613,7 @@ export function useLibrary() {
         }))
 
         try {
-            await window.electronAPI.addFolderToMedia(mediaId, folderId)
+            await api.addFolderToMedia(mediaId, folderId)
             await loadMediaFiles()
         } catch (error) {
             console.error('Failed to add folder to media:', error)
@@ -629,7 +632,7 @@ export function useLibrary() {
         }))
 
         try {
-            await window.electronAPI.removeFolderFromMedia(mediaId, folderId)
+            await api.removeFolderFromMedia(mediaId, folderId)
         } catch (error) {
             console.error('Failed to remove folder from media:', error)
             await loadMediaFiles()
@@ -638,27 +641,21 @@ export function useLibrary() {
 
     // ゴミ箱操作
     const moveToTrash = useCallback(async (id: number) => {
-        // Optimistic Update: リストから除外（またはis_deletedフラグ更新）
-        setMediaFiles(prev => {
-            // Trash表示でなければ除外
-            if (filterOptions.filterType !== 'trash') {
-                return prev.filter(m => m.id !== id)
+        // Optimistic Update: is_deletedフラグを更新
+        setMediaFiles(prev => prev.map(m => {
+            if (m.id === id) {
+                return { ...m, is_deleted: true }
             }
-            // Trash表示なら維持（実際はis_deletedが変わるので厳密にはリロードが安全だが、
-            // 「ゴミ箱へ」は一覧から消えるのが期待動作なのでfilterでOK）
-            return prev.filter(m => m.id !== id)
-        })
+            return m
+        }))
 
         try {
-            await window.electronAPI.moveToTrash(id)
-            // ゴミ箱操作等は整合性が重要なので、念のためバックグラウンドでリロードしても良いが、
-            // 操作感を優先してここではリロードしない。
-            // 必要なら別途ポーリングやイベントで同期。
+            await api.moveToTrash(id)
         } catch (error) {
             console.error('Failed to move to trash:', error)
             await loadMediaFiles()
         }
-    }, [loadMediaFiles, filterOptions.filterType])
+    }, [loadMediaFiles])
 
     // ソート設定保存
     useEffect(() => {
@@ -667,28 +664,28 @@ export function useLibrary() {
     }, [filterOptions.sortOrder, filterOptions.sortDirection])
 
     const restoreFromTrash = useCallback(async (id: number) => {
-        // Optimistic: Trash表示ならリストから消える
-        if (filterOptions.filterType === 'trash') {
-            setMediaFiles(prev => prev.filter(m => m.id !== id))
-        }
+        // Optimistic: is_deletedフラグを更新
+        setMediaFiles(prev => prev.map(m => {
+            if (m.id === id) {
+                return { ...m, is_deleted: false }
+            }
+            return m
+        }))
 
         try {
-            await window.electronAPI.restoreFromTrash(id)
-            // 通常リストに戻ったことを反映するにはリロードが必要だが、
-            // Trash画面での操作としては「消える」でOK。
-            // 完全に同期するにはリロード推奨だが、一旦このまま。
+            await api.restoreFromTrash(id)
         } catch (error) {
             console.error('Failed to restore from trash:', error)
             await loadMediaFiles()
         }
-    }, [loadMediaFiles, filterOptions.filterType])
+    }, [loadMediaFiles])
 
     const deletePermanently = useCallback(async (id: number) => {
         // Optimistic
         setMediaFiles(prev => prev.filter(m => m.id !== id))
 
         try {
-            await window.electronAPI.deletePermanently(id)
+            await api.deletePermanently(id)
         } catch (error) {
             console.error('Failed to delete permanently:', error)
             await loadMediaFiles()
@@ -701,7 +698,7 @@ export function useLibrary() {
 
         try {
             for (const id of ids) {
-                await window.electronAPI.moveToTrash(id)
+                await api.moveToTrash(id)
             }
         } catch (error) {
             console.error('Failed to move files to trash:', error)
@@ -717,7 +714,7 @@ export function useLibrary() {
 
         try {
             for (const id of ids) {
-                await window.electronAPI.restoreFromTrash(id)
+                await api.restoreFromTrash(id)
             }
         } catch (error) {
             console.error('Failed to restore files from trash:', error)
@@ -733,7 +730,7 @@ export function useLibrary() {
             if (activeRemoteLibrary) {
                 try {
                     for (const id of ids) {
-                        await (window.electronAPI as any).deleteRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id)
+                        await api.deleteRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id)
                     }
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
@@ -746,7 +743,7 @@ export function useLibrary() {
             }
 
             for (const id of ids) {
-                await window.electronAPI.deletePermanently(id)
+                await api.deletePermanently(id)
             }
         } catch (error) {
             console.error('Failed to delete files permanently:', error)
@@ -761,7 +758,7 @@ export function useLibrary() {
         try {
             if (activeRemoteLibrary) {
                 try {
-                    await (window.electronAPI as any).updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { description })
+                    await api.updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { description })
                     return
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
@@ -771,7 +768,7 @@ export function useLibrary() {
                     throw e
                 }
             }
-            await window.electronAPI.updateDescription(id, description)
+            await api.updateDescription(id, description)
         } catch (error) {
             console.error('Failed to update description:', error)
             await loadMediaFiles()
@@ -787,7 +784,7 @@ export function useLibrary() {
                 // Remote support for URL update (Check API availability or skip)
                 // Assuming similar to description
                 try {
-                    await (window.electronAPI as any).updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { url })
+                    await api.updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { url })
                     return
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
@@ -797,7 +794,7 @@ export function useLibrary() {
                     throw e
                 }
             }
-            await window.electronAPI.updateUrl(id, url)
+            await api.updateUrl(id, url)
         } catch (error) {
             console.error('Failed to update url:', error)
             await loadMediaFiles()
@@ -807,7 +804,7 @@ export function useLibrary() {
     // 再生日時更新
     const updateLastPlayed = useCallback(async (id: number) => {
         try {
-            await window.electronAPI.updateLastPlayed(id)
+            await api.updateLastPlayed(id)
             // ローカルステートを即座に更新して再読み込みを回避
             setMediaFiles(prev => prev.map(m => m.id === id ? { ...m, last_played_at: new Date().toISOString() } : m))
         } catch (error) {
@@ -827,7 +824,7 @@ export function useLibrary() {
         try {
             if (activeRemoteLibrary) {
                 // notificationId を渡して、バックエンドからそのIDで進捗イベントを送ってもらう
-                const res = await (window.electronAPI as any).uploadRemoteMedia(
+                const res = await api.uploadRemoteMedia(
                     activeRemoteLibrary.url,
                     activeRemoteLibrary.token,
                     filePaths,
@@ -843,7 +840,7 @@ export function useLibrary() {
                 return res.results || []
             }
 
-            const importedFiles = await window.electronAPI.importMedia(filePaths)
+            const importedFiles = await api.importMedia(filePaths)
             removeNotification(notificationId)
             addNotification({ type: 'success', title: 'インポート完了', message: `${filePaths.length}個のファイルを追加しました。` })
             await loadMediaFiles()
@@ -866,7 +863,7 @@ export function useLibrary() {
         try {
             if (activeRemoteLibrary) {
                 try {
-                    await (window.electronAPI as any).updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { rating })
+                    await api.updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { rating })
                     return
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
@@ -876,7 +873,7 @@ export function useLibrary() {
                     throw e
                 }
             }
-            await window.electronAPI.updateRating(id, rating)
+            await api.updateRating(id, rating)
         } catch (error) {
             console.error('Failed to update rating:', error)
             await loadMediaFiles()
@@ -891,7 +888,7 @@ export function useLibrary() {
         try {
             if (activeRemoteLibrary) {
                 try {
-                    await (window.electronAPI as any).renameRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, newName)
+                    await api.renameRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, newName)
                     return
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
@@ -901,7 +898,7 @@ export function useLibrary() {
                     throw e
                 }
             }
-            const updatedMedia = await window.electronAPI.renameMedia(id, newName)
+            const updatedMedia = await api.renameMedia(id, newName)
             if (updatedMedia) {
                 setMediaFiles(prev => prev.map(m => m.id === id ? updatedMedia : m))
             }
@@ -920,7 +917,7 @@ export function useLibrary() {
         try {
             if (activeRemoteLibrary) {
                 try {
-                    await (window.electronAPI as any).updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { artist })
+                    await api.updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { artist })
                     return
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
@@ -930,7 +927,7 @@ export function useLibrary() {
                     throw e
                 }
             }
-            await window.electronAPI.updateArtist(id, artist)
+            await api.updateArtist(id, artist)
         } catch (error) {
             console.error('Failed to update artist:', error)
             await loadMediaFiles()
@@ -1190,6 +1187,10 @@ export function useLibrary() {
         // ソート処理
         const effectiveSortOrder = filterOptions.filterType === 'random' ? 'random' : filterOptions.sortOrder
 
+        if (effectiveSortOrder === 'random') {
+            return shuffleArray(result, randomSeed)
+        }
+
         result.sort((a, b) => {
             let comparison = 0
             switch (effectiveSortOrder) {
@@ -1228,13 +1229,7 @@ export function useLibrary() {
                     const tagsB = (b.tags || []).map(t => t.name).sort().join(', ')
                     comparison = tagsA.localeCompare(tagsB, 'ja')
                     break
-                case 'random':
-                    const seedA = a.id + randomSeed
-                    const seedB = b.id + randomSeed
-                    const valA = Math.sin(seedA) * 10000 - Math.floor(Math.sin(seedA) * 10000)
-                    const valB = Math.sin(seedB) * 10000 - Math.floor(Math.sin(seedB) * 10000)
-                    comparison = valA - valB
-                    break
+
             }
             return filterOptions.sortDirection === 'asc' ? comparison : -comparison
         })
@@ -1254,7 +1249,7 @@ export function useLibrary() {
     // ライブラリ一覧読み込み
     const loadLibraries = useCallback(async () => {
         try {
-            const loadedLibraries = await window.electronAPI.getLibraries()
+            const loadedLibraries = await api.getLibraries()
             setLibraries(loadedLibraries)
         } catch (error) {
             console.error('Failed to load libraries:', error)
@@ -1269,8 +1264,8 @@ export function useLibrary() {
         }
 
         try {
-            await window.electronAPI.setActiveLibrary(libraryPath)
-            const library = await window.electronAPI.getActiveLibrary()
+            await api.setActiveLibrary(libraryPath)
+            const library = await api.getActiveLibrary()
             setActiveLibrary(library)
             setActiveRemoteLibrary(null)
             localStorage.removeItem('activeRemoteLibrary') // リモート状態をクリア
@@ -1321,7 +1316,7 @@ export function useLibrary() {
                 }
             }
 
-            const library = await window.electronAPI.getActiveLibrary()
+            const library = await api.getActiveLibrary()
             setActiveLibrary(library)
             setActiveRemoteLibrary(null)
         } catch (error) {
@@ -1351,7 +1346,7 @@ export function useLibrary() {
             return
         }
 
-        window.electronAPI.setActiveLibrary(lib.path).then(async () => {
+        api.setActiveLibrary(lib.path).then(async () => {
             setActiveLibrary(lib)
             setActiveRemoteLibrary(null)
             localStorage.removeItem('activeRemoteLibrary') // リモート状態をクリア
@@ -1362,7 +1357,7 @@ export function useLibrary() {
     // ライブラリ作成
     const createLibrary = useCallback(async (name: string, parentPath: string) => {
         try {
-            const library = await window.electronAPI.createLibrary(name, parentPath)
+            const library = await api.createLibrary(name, parentPath)
             setActiveLibrary(library)
             setActiveRemoteLibrary(null)
             localStorage.removeItem('activeRemoteLibrary')
@@ -1378,7 +1373,7 @@ export function useLibrary() {
     // 既存のライブラリを開く
     const openLibrary = useCallback(async () => {
         try {
-            const library = await window.electronAPI.openLibrary()
+            const library = await api.openLibrary()
             if (library) {
                 setActiveLibrary(library)
                 setActiveRemoteLibrary(null)
@@ -1425,6 +1420,20 @@ export function useLibrary() {
             setLoading(false)
         }
     }, [loadMediaFiles, loadTags, loadTagGroups, loadFolders])
+
+    // Auto-import completion listener
+    useEffect(() => {
+        if (!api.on) return
+
+        const removeListener = api.on('auto-import-complete', () => {
+            console.log('[useLibrary] Auto-import complete event received. Refreshing library...')
+            refreshAll()
+        })
+
+        return () => {
+            if (removeListener) removeListener()
+        }
+    }, [refreshAll])
 
     return useMemo(() => ({
         mediaFiles: filteredMediaFiles,
@@ -1473,7 +1482,7 @@ export function useLibrary() {
         updateDescription,
         setMediaFiles,
         addTagsToMedia,
-        checkImportDuplicates: (filePaths: string[]) => window.electronAPI.checkImportDuplicates(filePaths),
+        checkImportDuplicates: (filePaths: string[]) => api.checkImportDuplicates(filePaths),
         checkEntryDuplicates: async (mediaId: number) => {
             if (activeRemoteLibrary) {
                 try {
@@ -1501,7 +1510,7 @@ export function useLibrary() {
                     return []
                 }
             }
-            return window.electronAPI.checkEntryDuplicates(mediaId)
+            return api.checkEntryDuplicates(mediaId)
         },
         updateUrl
     }), [
@@ -1514,4 +1523,25 @@ export function useLibrary() {
         loadMediaFiles, loadFolders, renameFolder, activeRemoteLibrary, switchToRemoteLibrary,
         switchToLocalLibrary, openLibrary, myUserToken, updateDescription, updateUrl
     ])
+}
+
+// Seeded Random Number Generator
+function mulberry32(a: number) {
+    return function () {
+        var t = a += 0x6D2B79F5;
+        t = Math.imul(t ^ t >>> 15, t | 1);
+        t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    }
+}
+
+// Fisher-Yates Shuffle
+function shuffleArray<T>(array: T[], seed: number): T[] {
+    const rng = mulberry32(seed);
+    const newArray = [...array];
+    for (let i = newArray.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+    }
+    return newArray;
 }

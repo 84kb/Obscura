@@ -8,6 +8,8 @@ interface AuditLogModalProps {
     onClose: () => void
 }
 
+import { api } from '../api'
+
 const AuditLogModal: React.FC<AuditLogModalProps> = ({ libraryPath, libraryName, onClose }) => {
     const [logs, setLogs] = useState<AuditLogEntry[]>([])
     const [loading, setLoading] = useState(true)
@@ -16,7 +18,7 @@ const AuditLogModal: React.FC<AuditLogModalProps> = ({ libraryPath, libraryName,
     useEffect(() => {
         const fetchLogs = async () => {
             try {
-                const data = await window.electronAPI.getAuditLogs(libraryPath)
+                const data = await api.getAuditLogs(libraryPath)
                 setLogs(data)
             } catch (error) {
                 console.error('Failed to fetch audit logs:', error)

@@ -22,6 +22,7 @@ interface ContextMenuProps {
     remoteLibraries?: RemoteLibrary[]
     onAddToLibrary?: (libraryId: string) => void
     isRemote?: boolean
+    onRefreshMetadata?: () => void
 }
 
 export function ContextMenu({
@@ -43,7 +44,8 @@ export function ContextMenu({
     availableLibraries,
     remoteLibraries,
     onAddToLibrary,
-    isRemote
+    isRemote,
+    onRefreshMetadata
 }: ContextMenuProps) {
     const menuRef = useRef<HTMLDivElement>(null)
 
@@ -233,6 +235,19 @@ export function ContextMenu({
                 </svg>
                 <span>名前の変更</span>
             </div>
+
+            {
+                onRefreshMetadata && (
+                    <div className="context-menu-item" onClick={onRefreshMetadata}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M23 4v6h-6" />
+                            <path d="M1 20v-6h6" />
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                        </svg>
+                        <span>メタデータを再取得</span>
+                    </div>
+                )
+            }
 
             {
                 onExport && (

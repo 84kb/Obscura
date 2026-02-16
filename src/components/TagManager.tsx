@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Tag, TagGroup, MediaFile } from '../types'
+import { api } from '../api'
 import SelectionBox from './SelectionBox'
 import './TagManager.css'
 
@@ -52,7 +53,7 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
 
     const loadTagGroups = async () => {
         try {
-            const groups = await window.electronAPI.getTagGroups()
+            const groups = await api.getTagGroups()
             setTagGroups(groups)
         } catch (error) {
             console.error('Failed to load tag groups:', error)
@@ -70,7 +71,7 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
     const handleCreateGroup = async (e: React.MouseEvent) => {
         e.preventDefault()
         try {
-            const group = await window.electronAPI.createTagGroup("無題")
+            const group = await api.createTagGroup("無題")
             setTagGroups(prev => [...prev, group]) // 即時反映
             setEditingGroupId(group.id)
             setEditingGroupName(group.name)
@@ -82,7 +83,7 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
 
     const handleDeleteGroup = async (id: number) => {
         try {
-            await window.electronAPI.deleteTagGroup(id)
+            await api.deleteTagGroup(id)
             if (selectedGroupId === id) {
                 setSelectedGroupId('all')
             }
@@ -95,7 +96,7 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
     const handleRenameGroup = async (id: number, newName: string) => {
         if (newName.trim()) {
             try {
-                await window.electronAPI.renameTagGroup(id, newName.trim())
+                await api.renameTagGroup(id, newName.trim())
                 loadTagGroups()
             } catch (error) {
                 console.error('Failed to rename tag group:', error)
@@ -213,7 +214,7 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
         if (ids.length > 0) {
             try {
                 // 複数のタグを更新
-                await Promise.all(ids.map(id => window.electronAPI.updateTagGroup(id, groupId)))
+                await Promise.all(ids.map(id => api.updateTagGroup(id, groupId)))
 
                 if (onRefresh) {
                     onRefresh()

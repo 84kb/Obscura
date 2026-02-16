@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { Folder, Library, RemoteLibrary } from '../types'
+import { api } from '../api'
 
 export function useFolders(
     activeLibrary: Library | null,
@@ -37,7 +38,7 @@ export function useFolders(
             }
         } else {
             try {
-                const loadedFolders = await window.electronAPI.getFolders()
+                const loadedFolders = await api.getFolders()
                 setFolders(loadedFolders as Folder[])
             } catch (error) {
                 console.error('Failed to load folders:', error)
@@ -49,7 +50,7 @@ export function useFolders(
     const createFolder = useCallback(async (name: string, parentId?: number | null) => {
         if (!activeLibrary && !activeRemoteLibrary) return null
         try {
-            const newFolder = await window.electronAPI.createFolder(name, parentId)
+            const newFolder = await api.createFolder(name, parentId)
             await loadFolders()
             return newFolder
         } catch (error) {
@@ -61,7 +62,7 @@ export function useFolders(
     // フォルダー削除
     const deleteFolder = useCallback(async (id: number) => {
         try {
-            await window.electronAPI.deleteFolder(id)
+            await api.deleteFolder(id)
             await loadFolders()
         } catch (error) {
             console.error('Failed to delete folder:', error)
@@ -71,7 +72,7 @@ export function useFolders(
     // フォルダー名変更
     const renameFolder = useCallback(async (id: number, newName: string) => {
         try {
-            await window.electronAPI.renameFolder(id, newName)
+            await api.renameFolder(id, newName)
             await loadFolders()
         } catch (error) {
             console.error('Failed to rename folder:', error)

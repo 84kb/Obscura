@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { MediaFile, RemoteLibrary } from '../types'
 import { usePlayer } from '../hooks/usePlayer'
+import { api } from '../api'
 import './Player.css'
 import { toMediaUrl } from '../utils/fileUrl'
 import { useContext } from 'react'
@@ -127,7 +128,7 @@ export const Player: React.FC<PlayerProps> = ({
                 if (e.shiftKey) {
                     if (media.file_path) {
                         try {
-                            const success = await window.electronAPI.copyFileToClipboard(media.file_path)
+                            const success = await api.copyFileToClipboard(media.file_path)
                             console.log(success ? '[Player] File copied to clipboard' : '[Player] Failed to copy file')
                         } catch (err) {
                             console.error('[Player] Failed to copy file:', err)
@@ -139,7 +140,7 @@ export const Player: React.FC<PlayerProps> = ({
                     const dataUrl = captureCurrentFrame()
                     if (dataUrl) {
                         try {
-                            await window.electronAPI.copyFrameToClipboard(dataUrl)
+                            await api.copyFrameToClipboard(dataUrl)
                             console.log('[Player] Frame copied to clipboard')
                         } catch (err) {
                             console.error('[Player] Failed to copy frame:', err)
@@ -286,7 +287,7 @@ export const Player: React.FC<PlayerProps> = ({
 
     // Discord RPC Integration
     useEffect(() => {
-        if (!media || !window.electronAPI) return
+        if (!media) return
 
         const updateDiscord = () => {
             const el = videoRef.current || audioRef.current
@@ -302,7 +303,7 @@ export const Player: React.FC<PlayerProps> = ({
                 const remainingSec = (dur - curTime) / (rate || 1)
                 const endTimestamp = Math.floor(now + remainingSec * 1000)
 
-                window.electronAPI.updateDiscordActivity({
+                api.updateDiscordActivity({
                     details: media.file_name,
                     state: 'Playing',
                     endTimestamp: (dur && isFinite(endTimestamp)) ? endTimestamp : undefined,
@@ -312,7 +313,7 @@ export const Player: React.FC<PlayerProps> = ({
                     smallImageText: 'Playing'
                 })
             } else {
-                window.electronAPI.updateDiscordActivity({
+                api.updateDiscordActivity({
                     details: media.file_name,
                     state: 'Paused',
                     largeImageKey: 'app_icon',
@@ -431,7 +432,7 @@ export const Player: React.FC<PlayerProps> = ({
                 }
             } else {
                 // ローカル
-                await (window.electronAPI as any).addComment(media.id, commentText, currentTime)
+                await api.addComment(media.id, commentText, currentTime)
             }
 
             setCommentText('')
@@ -466,7 +467,7 @@ export const Player: React.FC<PlayerProps> = ({
     useEffect(() => {
         if (!media) return
 
-        const cleanup = window.electronAPI.onTriggerFrameCapture(async (action) => {
+        const cleanup = api.onTriggerFrameCapture(async (action: string) => {
             console.log('[Player] Frame capture trigger:', action)
             const dataUrl = captureCurrentFrame()
             if (!dataUrl) {
@@ -477,14 +478,14 @@ export const Player: React.FC<PlayerProps> = ({
             try {
                 if (action === 'copy-frame') {
                     // Electron IPCを使用してクリップボードにコピー（フォーカス問題を回避）
-                    await window.electronAPI.copyFrameToClipboard(dataUrl)
+                    await api.copyFrameToClipboard(dataUrl)
                     console.log('[Player] Frame copied to clipboard via Electron')
                 } else if (action === 'save-frame') {
                     // ファイルに保存
-                    await window.electronAPI.saveCapturedFrame(dataUrl)
+                    await api.saveCapturedFrame(dataUrl)
                 } else if (action === 'set-thumbnail') {
                     // サムネイルに設定
-                    await window.electronAPI.setCapturedThumbnail(media.id, dataUrl)
+                    await api.setCapturedThumbnail(media.id, dataUrl)
                     console.log('[Player] Thumbnail updated')
                 }
             } catch (error) {
@@ -506,7 +507,7 @@ export const Player: React.FC<PlayerProps> = ({
     const progress = duration > 0 ? (currentTime / duration) * 100 : 0
 
     // media:// プロトコルを使用 (httpの場合はそのまま)
-    const fileUrl = window.electronAPI ? toMediaUrl(media.file_path) : media.file_path
+    const fileUrl = toMediaUrl(media.file_path)
 
     const isVideo = media.file_type === 'video'
 
@@ -715,10 +716,21 @@ export const Player: React.FC<PlayerProps> = ({
                         </svg>
                     </button>
 
-                    <div className="volume-control-group">
+                    <div
+                        className="volume-control-group"
+                        onWheel={(e) => {
+                            const delta = e.deltaY < 0 ? 0.05 : -0.05
+                            const newVolume = Math.min(1, Math.max(0, volume + delta))
+                            changeVolume(newVolume)
+                        }}
+                    >
                         <button className="control-btn" onClick={toggleMute}>
                             {isMuted || volume === 0 ? (
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></svg>
+                            ) : volume < 0.33 ? (
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /></svg>
+                            ) : volume < 0.66 ? (
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /></svg>
                             ) : (
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" /></svg>
                             )}
@@ -727,8 +739,8 @@ export const Player: React.FC<PlayerProps> = ({
                             type="range"
                             min="0"
                             max="1"
-                            step="0.05"
-                            value={volume}
+                            step="0.01"
+                            value={volume ?? 1}
                             onChange={(e) => changeVolume(parseFloat(e.target.value))}
                             className="volume-slider"
                             style={{ backgroundSize: `${volume * 100}% 100%` }}
@@ -781,7 +793,7 @@ export const Player: React.FC<PlayerProps> = ({
                         min="0"
                         max={duration || 100}
                         step="any"
-                        value={currentTime}
+                        value={currentTime ?? 0}
                         onChange={(e) => seek(parseFloat(e.target.value))}
                         className="player-seek-slider"
                     />

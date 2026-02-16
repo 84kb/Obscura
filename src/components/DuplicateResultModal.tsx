@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react'
 import { MediaFile } from '../types'
 import { MediaCard } from './MediaCard'
+import { api } from '../api'
 import './DuplicateResultModal.css'
 
 interface DuplicateResultModalProps {
@@ -34,9 +35,7 @@ const DuplicateGroup = ({ group }: { group: MediaFile[] }) => {
                             onClick={() => {
                                 // 選択ロジックなどを入れるならここ
                                 // 現状は確認用なので、クリックしたらエクスプローラーで開くなどが便利かも
-                                if (window.electronAPI) {
-                                    window.electronAPI.showItemInFolder(media.file_path)
-                                }
+                                api.showItemInFolder(media.file_path)
                             }}
                             onDoubleClick={() => { }}
                             onContextMenu={() => { }}

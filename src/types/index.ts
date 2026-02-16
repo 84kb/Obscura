@@ -1,4 +1,5 @@
 export interface MediaFile {
+    uniqueId?: string
     id: number
     file_path: string
     file_name: string
@@ -272,6 +273,9 @@ export interface ElectronAPI {
     checkImportDuplicates: (filePaths: string[]) => Promise<{ newFile: any; existing: any }[]>
     checkEntryDuplicates: (mediaId: number) => Promise<{ newMedia: MediaFile; existingMedia: MediaFile }[]>
     findLibraryDuplicates: (criteria?: { name: boolean; size: boolean; duration: boolean; modified: boolean }) => Promise<{ [key: string]: MediaFile[] }[]>
+    scanFileSystemOrphans: () => Promise<any[]>
+    refreshMediaMetadata: (ids: number[]) => Promise<void>
+    deleteFileSystemFiles: (paths: string[]) => Promise<number>
 
     // キャプチャ
     onTriggerFrameCapture: (callback: (action: string) => void) => () => void
@@ -496,6 +500,9 @@ export interface AppSettings {
     viewMode: 'grid' | 'list'
     enableRichText: boolean
     pipControlMode: 'navigation' | 'skip'
+    autoHideSidebar: boolean
+    showInfoOverlay: boolean
+    showTitleOnHover: boolean
 }
 
 export type ItemInfoType = 'duration' | 'size' | 'tags' | 'rating' | 'modified' | 'created'

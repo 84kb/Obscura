@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { ClientConfig } from '../types'
+import { api } from '../api'
 
 export const useSettings = () => {
     const [clientConfig, setClientConfig] = useState<ClientConfig | null>(null)
@@ -9,7 +10,7 @@ export const useSettings = () => {
     const loadSettings = useCallback(async () => {
         try {
             setLoading(true)
-            const config = await window.electronAPI.getClientConfig()
+            const config = await api.getClientConfig()
             setClientConfig(config)
         } catch (err: any) {
             console.error('Failed to load settings:', err)
@@ -25,7 +26,7 @@ export const useSettings = () => {
 
     const updateClientConfig = useCallback(async (updates: Partial<ClientConfig>) => {
         try {
-            const newConfig = await window.electronAPI.updateClientConfig(updates)
+            const newConfig = await api.updateClientConfig(updates)
             setClientConfig(newConfig)
             return newConfig
         } catch (err: any) {

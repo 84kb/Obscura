@@ -4,6 +4,7 @@ import { MediaFile, ViewSettings, FilterOptions } from '../types'
 import { formatSize, formatDate } from '../utils/format'
 import { toMediaUrl } from '../utils/fileUrl'
 import { ShortcutContext, useShortcut } from '../contexts/ShortcutContext'
+import { api } from '../api'
 import './LibraryList.css'
 
 interface LibraryListProps {
@@ -357,7 +358,7 @@ export const LibraryList: React.FC<LibraryListProps> = ({
                         e.preventDefault()
                         const dragIds = isSelected ? context.selectedIds : [media.id]
                         const dragFiles = context.mediaFiles.filter(m => dragIds.includes(m.id)).map(m => m.file_path)
-                        window.electronAPI.startDrag(dragFiles)
+                        api.startDrag(dragFiles)
                     }}
                 />
             )

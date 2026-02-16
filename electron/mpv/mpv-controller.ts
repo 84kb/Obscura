@@ -40,7 +40,24 @@ export class MpvController extends EventEmitter {
     }
 
     private async spawnMpv() {
-        if (this.process) return
+        if (this.process) {
+            if (this.socket) return // Already connected and running
+
+            // Process exists but no socket (orphaned or failed connection). Try to connect again.
+            console.log('[MPV] Process exists but not connected. Retrying connection...')
+            try {
+                await this.connectToSocket()
+                return
+            } catch (e) {
+                console.warn('[MPV] Reconnection failed. Killing process and restarting.')
+                try {
+                    this.process.kill()
+                } catch (k) { /* ignore */ }
+                this.process = null
+                this.socket = null
+                // Fall through to spawn logic
+            }
+        }
 
         const args = [
             '--idle=yes',

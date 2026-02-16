@@ -74,7 +74,6 @@ try {
         // サムネイル生成
         generateThumbnail: (mediaId, filePath) => ipcRenderer.invoke('generate-thumbnail', mediaId, filePath),
 
-        // アクション
         moveToTrash: (id) => ipcRenderer.invoke('move-to-trash', id),
         restoreFromTrash: (id) => ipcRenderer.invoke('restore-from-trash', id),
         deletePermanently: (id) => ipcRenderer.invoke('delete-permanently', id),
@@ -84,7 +83,11 @@ try {
         importMedia: (filePaths) => ipcRenderer.invoke('import-media', filePaths),
         checkImportDuplicates: (filePaths) => ipcRenderer.invoke('check-import-duplicates', filePaths),
         checkEntryDuplicates: (mediaId) => ipcRenderer.invoke('check-entry-duplicates', mediaId),
-        findLibraryDuplicates: () => ipcRenderer.invoke('find-library-duplicates'),
+        checkEntryDuplicates: (mediaId) => ipcRenderer.invoke('check-entry-duplicates', mediaId),
+        findLibraryDuplicates: (criteria) => ipcRenderer.invoke('find-library-duplicates', criteria),
+        refreshMediaMetadata: (ids) => ipcRenderer.invoke('refresh-media-metadata', ids),
+        scanFileSystemOrphans: () => ipcRenderer.invoke('scan-filesystem-orphans'),
+        deleteFileSystemFiles: (paths) => ipcRenderer.invoke('delete-filesystem-files', paths),
 
         // コメント
         addComment: (mediaId, text, time) => ipcRenderer.invoke('add-comment', mediaId, text, time),
@@ -226,7 +229,17 @@ try {
                 // App.tsx は現状 removeListener していない（依存配列で再作成されるが...）
                 // 確認すると App.tsx には removeListener のロジックがない。
                 // 暫定対応として on を実装する。
-                const subscription = (_event, ...args) => callback(_event, ...args);
+                const subscription = (event, ...args) => {
+                    if (typeof callback === 'function') {
+                        try {
+                            // Defensive check for args
+                            const safeArgs = Array.isArray(args) ? args : [];
+                            callback(event, ...safeArgs);
+                        } catch (err) {
+                            console.error('[Preload] Error in event handler:', err);
+                        }
+                    }
+                };
                 ipcRenderer.on(channel, subscription);
 
                 // 解除用関数を返す（App.tsxが使えば使える）

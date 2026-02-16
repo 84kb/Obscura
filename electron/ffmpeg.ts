@@ -136,30 +136,42 @@ export async function getMediaMetadata(filePath: string): Promise<{ width?: numb
                     }
 
                     // タグ情報の収集 (formatとstreamの両方をチェック)
-                    let combinedTags: any = {}
-                    if (json.format && json.format.tags) {
-                        combinedTags = { ...combinedTags, ...json.format.tags }
-                    }
-                    if (json.streams) {
-                        json.streams.forEach((s: any) => {
-                            if (s.tags) {
-                                combinedTags = { ...combinedTags, ...s.tags }
+                    // 同一のタグ（大文字小文字無視）が複数ある場合、より長い文字列を持つ方を優先する
+                    const combinedTags: Record<string, string> = {}
+                    const addTags = (tags: any) => {
+                        if (!tags) return
+                        for (const [key, val] of Object.entries(tags)) {
+                            const lowKey = key.toLowerCase()
+                            const strVal = String(val)
+                            // 既存のタグより長い、または存在しない場合に更新
+                            if (!combinedTags[lowKey] || combinedTags[lowKey].length < strVal.length) {
+                                combinedTags[lowKey] = strVal
                             }
-                        })
+                        }
                     }
 
-                    // フォーマットタグからアーティスト/投稿者を取得
-                    artist = combinedTags.artist || combinedTags.ARTIST || combinedTags.Artist ||
-                        combinedTags.uploader || combinedTags.UPLOADER || combinedTags.Uploader ||
-                        combinedTags.performer || combinedTags.PERFORMER || combinedTags.Performer ||
-                        undefined
+                    if (json.format && json.format.tags) addTags(json.format.tags)
+                    if (json.streams) {
+                        json.streams.forEach((s: any) => addTags(s.tags))
+                    }
 
-                    description = combinedTags.description || combinedTags.DESCRIPTION || combinedTags.Description || undefined
+                    // 大文字小文字を区別せずにタグを取得するヘルパー
+                    const getTag = (keys: string[]): string | undefined => {
+                        for (const key of keys) {
+                            const val = combinedTags[key.toLowerCase()]
+                            if (val) return val.trim()
+                        }
+                        return undefined
+                    }
 
-                    // URL取得ロジック (User Request: Smart Niconico URL)
-                    const comment = combinedTags.comment || combinedTags.COMMENT || combinedTags.Comment
-                    let partId = combinedTags.Part_ID || combinedTags.part_id ||
-                        combinedTags.episode_id || combinedTags.EPISODE_ID
+                    // 優先度の高いタグからアーティスト/投稿者を取得
+                    artist = getTag(['artist', 'uploader', 'performer', 'composer'])
+                    description = getTag(['description', 'synopsis', 'comment'])
+
+                    // URL取得ロジック
+                    let comment = getTag(['comment', 'url']) // URLタグもチェック
+
+                    let partId = combinedTags.part_id || combinedTags.episode_id || combinedTags.title
 
                     // 1. Direct Part_ID check (already done above)
 
@@ -170,7 +182,6 @@ export async function getMediaMetadata(filePath: string): Promise<{ width?: numb
                             if (typeof val === 'string') {
                                 // Try parsing as JSON first
                                 try {
-                                    // Only try if it looks like JSON
                                     if (val.trim().startsWith('{')) {
                                         const parsed = JSON.parse(val)
                                         if (parsed && (parsed.Part_ID || parsed.part_id)) {
@@ -180,8 +191,6 @@ export async function getMediaMetadata(filePath: string): Promise<{ width?: numb
                                     }
                                 } catch (e) { }
 
-                                // Regex fallback
-                                // Look for "Part_ID":"sm12345" or similar
                                 const match = val.match(/["']?Part_ID["']?\s*[:=]\s*["']?([a-zA-Z0-9]+)["']?/i)
                                 if (match && match[1]) {
                                     partId = match[1]
@@ -202,9 +211,7 @@ export async function getMediaMetadata(filePath: string): Promise<{ width?: numb
                     }
 
                     // 4. Filename Fallback (LAST RESORT)
-                    // ファイル名に "sm123456" などが含まれている場合
                     if (!partId) {
-                        // filePathからファイル名を取得
                         const fileName = path.basename(filePath)
                         const match = fileName.match(/(sm|nm|so)\d+/i)
                         if (match && match[0]) {
@@ -212,15 +219,47 @@ export async function getMediaMetadata(filePath: string): Promise<{ width?: numb
                         }
                     }
 
-                    if (comment && comment.trim().startsWith('https://')) {
-                        // "https:// " で始まる場合はCommentをそのままURLとして使用
-                        url = comment
+                    // URL決定ロジック
+                    // Part_IDがある場合はニコニコ動画を優先するが、
+                    // Comment等に明示的なURLが含まれている場合はそれも考慮すべきか？
+                    // ユーザーの要望は「CommentにあるURLが取り込まれない」なので、Part_IDが無いケース、
+                    // または Part_ID よりも Comment の URL を優先したいケース等が考えられる。
+                    // ここでは「Part_IDがあればニコニコURL生成」しつつ、
+                    // 「Comment/DescriptionからURLが見つかればそれを優先」するように変更してみる？
+                    // いや、Part_IDがあるならそれはニコニコ動画のIDなので、ニコニコURLが正解の可能性が高い。
+                    // しかし、ユーザーが別のURLをコメントに入れている場合はそっちを優先したいかもしれない。
+                    // 安全策として、明示的なURLが見つかった場合はそれを優先し、なければPart_IDを使う順序にする。
+
+                    let foundUrl: string | undefined
+
+                    // 1. Comment / Description からURLを探す
+                    const textToSearch = [comment, description].filter(Boolean).join('\n')
+                    const urlMatch = textToSearch.match(/https?:\/\/[^\s]+/)
+                    if (urlMatch) {
+                        foundUrl = urlMatch[0]
+                    }
+
+                    if (foundUrl) {
+                        url = foundUrl
+                        // DescriptionやCommentがURLのみの場合は削除する（URLフィールドだけに表示させたいため）
+                        if (description && description.trim() === url) {
+                            description = undefined
+                        }
+                        if (comment && comment.trim() === url) {
+                            comment = undefined
+                        }
                     } else if (partId) {
-                        // それ以外の場合でPart_IDがあるならニコニコ動画のURLを生成
                         url = `https://www.nicovideo.jp/watch/${partId}`
-                    } else if (comment && (comment.startsWith('http://') || comment.startsWith('www.'))) {
-                        // その他のURLらしきもの
-                        url = comment
+                    }
+
+                    // User Request: If Description is missing (or same as comment/url), keep it empty.
+                    // If description is same as comment, presumably it's a fallback or duplicate tag.
+                    if (description && comment && description.trim() === comment.trim()) {
+                        description = undefined
+                    }
+                    // If description is just the URL, clear it
+                    if (description && url && description.trim() === url.trim()) {
+                        description = undefined
                     }
 
                     resolve({
@@ -230,7 +269,7 @@ export async function getMediaMetadata(filePath: string): Promise<{ width?: numb
                         framerate,
                         artist,
                         description,
-                        comment: (json.format && json.format.tags) ? (json.format.tags.comment || json.format.tags.COMMENT || json.format.tags.Comment) : undefined,
+                        comment,
                         url
                     })
                     return
@@ -319,7 +358,8 @@ export async function createThumbnail(sourcePath: string, destPath: string, mode
                 '-an',
                 '-vcodec', 'png',
                 '-map', '0:v',
-                '-map', '-0:V',
+                '-disposition:v', 'attached_pic',
+                '-c:v', 'png',
                 '-vframes', '1',
                 '-y',
                 destPath

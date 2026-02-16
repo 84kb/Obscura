@@ -489,12 +489,15 @@ app.whenReady().then(() => {
             startServer(config.port).catch(err => console.error('Failed to auto-start server:', err))
         }
 
+        console.log('[Main] BEFORE initDatabase')
         initDatabase()
+        console.log('[Main] AFTER initDatabase')
         // ウォッチャー初期化をDB初期化後に移動
         console.log('[Main] Updating watcher (after DB init)...')
         updateWatcher(getClientConfig(), (files) => {
             console.log('[Main] Auto-import notification:', files.length, 'files')
             mainWindow?.webContents.send('auto-import-complete', files)
+            mainWindow?.webContents.send('library-updated')
         })
 
         createWindow()
@@ -532,7 +535,7 @@ ipcMain.handle('copy-media-to-library', async (_event, mediaIds: number[], targe
         // ソースアイテム取得
         const itemsToTransfer: { sourcePath: string, meta: any }[] = []
         for (const id of mediaIds) {
-            const media = mediaDB.getMediaFileWithDetails(id)
+            const media = await mediaDB.getMediaFileWithDetails(id)
             if (media && !media.is_deleted && fs.existsSync(media.file_path)) {
                 itemsToTransfer.push({
                     sourcePath: media.file_path,
@@ -558,7 +561,9 @@ ipcMain.handle('copy-media-to-library', async (_event, mediaIds: number[], targe
             }
         }
 
-        await libInstance.importMediaBatch(itemsToTransfer, settings, onProgress)
+        // Type adaption: map to MediaFile[]
+        const mediaFilesToImport = itemsToTransfer.map(item => item.meta);
+        await libInstance.importMediaBatch(mediaFilesToImport, settings, onProgress)
 
         return { success: true }
     } catch (e: any) {
@@ -652,13 +657,18 @@ ipcMain.handle('scan-folder', async (_, folderPath: string) => {
                             options = {
                                 width: meta.width,
                                 height: meta.height,
-                                duration: meta.duration
+                                duration: meta.duration,
+                                // メタデータも含める
+                                url: meta.url,
+                                artist: meta.artist,
+                                description: meta.description,
+                                comment: meta.comment
                             }
                         } catch (e) {
                             console.error('Failed to get metadata:', e)
                         }
 
-                        const id = mediaDB.addMediaFile(filePath, file, 'video', options)
+                        const id = await mediaDB.addMediaFile(filePath, file, 'video', options)
                         mediaFiles.push({
                             id,
                             file_path: filePath,
@@ -675,7 +685,7 @@ ipcMain.handle('scan-folder', async (_, folderPath: string) => {
                     }
                     // 音声ファイル
                     else if (AUDIO_EXTENSIONS.includes(ext)) {
-                        const id = mediaDB.addMediaFile(filePath, file, 'audio', {})
+                        const id = await mediaDB.addMediaFile(filePath, file, 'audio', {})
                         mediaFiles.push({
                             id,
                             file_path: filePath,
@@ -696,6 +706,13 @@ ipcMain.handle('scan-folder', async (_, folderPath: string) => {
     }
 
     await scanDirectory(folderPath)
+
+    // Notify library update
+    const win = BrowserWindow.getFocusedWindow() || mainWindow
+    if (win && !win.isDestroyed()) {
+        win.webContents.send('library-updated')
+    }
+
     return mediaFiles
 })
 
@@ -708,6 +725,13 @@ ipcMain.handle('import-media', async (event, filePaths: string[]) => {
         if (win && !win.isDestroyed()) {
             win.webContents.send('import-progress', { id: sessionId, ...data })
         }
+    }).then((results) => {
+        if (win && !win.isDestroyed()) {
+            win.webContents.send('import-progress', { id: sessionId, step: 'Complete', percentage: 100, current: filePaths.length, total: filePaths.length, fileName: '' })
+            // Notify library update
+            win.webContents.send('library-updated')
+        }
+        return results
     })
 })
 
@@ -729,19 +753,35 @@ ipcMain.handle('find-library-duplicates', async (_, criteria) => {
     return mediaDB.findLibraryDuplicates(criteria)
 })
 
+ipcMain.handle('scan-filesystem-orphans', async () => {
+    console.log('[Main] Scanning file system metadata orphans...')
+    return (mediaDB as any).scanFileSystemOrphans()
+})
+
+ipcMain.handle('delete-filesystem-files', async (_, paths: string[]) => {
+    console.log(`[Main] Deleting ${paths.length} file system items...`)
+    let count = 0
+    for (const p of paths) {
+        if (await (mediaDB as any).deleteFileSystemPath(p)) {
+            count++
+        }
+    }
+    return count
+})
+
 ipcMain.handle('update-rating', async (_, mediaId: number, rating: number) => {
-    mediaDB.updateRating(mediaId, rating)
+    await mediaDB.updateRating(mediaId, rating)
 })
 
 ipcMain.handle('backfill-metadata', async () => {
-    const targets = mediaDB.getVideosMissingMetadata()
+    const targets = await mediaDB.getVideosMissingMetadata()
     console.log(`[Backfill] Found ${targets.length} videos missing metadata`)
 
     let count = 0
     for (const media of targets) {
         try {
             const meta = await getMediaMetadata(media.file_path)
-            mediaDB.updateVideoMetadata(media.id, meta.width || 0, meta.height || 0, meta.duration || 0)
+            await mediaDB.updateVideoMetadata(media.id, meta.width || 0, meta.height || 0, meta.duration || 0)
             count++
         } catch (e) {
             console.error(`[Backfill] Failed to update metadata for ${media.file_name}:`, e)
@@ -796,11 +836,11 @@ ipcMain.handle('create-tag', async (_, name: string) => {
 })
 
 ipcMain.handle('delete-tag', async (_, id: number) => {
-    tagDB.deleteTag(id)
+    await tagDB.deleteTag(id)
 })
 
 ipcMain.handle('add-tag-to-media', async (_, mediaId: number, tagId: number) => {
-    tagDB.addTagToMedia(mediaId, tagId)
+    await tagDB.addTagToMedia(mediaId, tagId)
 })
 
 ipcMain.handle('refresh-library', async (event) => {
@@ -819,15 +859,15 @@ ipcMain.handle('refresh-library', async (event) => {
 })
 
 ipcMain.handle('add-tags-to-media', async (_, mediaIds: number[], tagIds: number[]) => {
-    tagDB.addTagsToMedia(mediaIds, tagIds)
+    await tagDB.addTagsToMedia(mediaIds, tagIds)
 })
 
 ipcMain.handle('remove-tag-from-media', async (_, mediaId: number, tagId: number) => {
-    tagDB.removeTagFromMedia(mediaId, tagId)
+    await tagDB.removeTagFromMedia(mediaId, tagId)
 })
 
 ipcMain.handle('update-tag-group', async (_, tagId: number, groupId: number | null) => {
-    tagDB.updateTagGroup(tagId, groupId)
+    await tagDB.updateTagGroup(tagId, groupId)
 })
 
 // タググループ操作
@@ -840,11 +880,11 @@ ipcMain.handle('create-tag-group', async (_, name: string) => {
 })
 
 ipcMain.handle('delete-tag-group', async (_, id: number) => {
-    tagGroupDB.deleteTagGroup(id)
+    await tagGroupDB.deleteTagGroup(id)
 })
 
 ipcMain.handle('rename-tag-group', async (_, id: number, newName: string) => {
-    tagGroupDB.renameTagGroup(id, newName)
+    await tagGroupDB.renameTagGroup(id, newName)
 })
 
 // フォルダー操作
@@ -856,24 +896,24 @@ ipcMain.handle('create-folder', async (_, name: string, parentId?: number | null
     return folderDB.createFolder(name, parentId ?? null)
 })
 
-ipcMain.handle('delete-folder', (_event, id) => {
-    folderDB.deleteFolder(id)
+ipcMain.handle('delete-folder', async (_event, id) => {
+    await folderDB.deleteFolder(id)
 })
 
-ipcMain.handle('rename-folder', (_event, id, newName) => {
-    folderDB.renameFolder(id, newName)
+ipcMain.handle('rename-folder', async (_event, id, newName) => {
+    await folderDB.renameFolder(id, newName)
 })
 
 ipcMain.handle('add-folder-to-media', async (_, mediaId: number, folderId: number) => {
-    folderDB.addFolderToMedia(mediaId, folderId)
+    await folderDB.addFolderToMedia(mediaId, folderId)
 })
 
-ipcMain.handle('remove-folder-from-media', (_event, mediaId: number, folderId: number) => {
-    folderDB.removeFolderFromMedia(mediaId, folderId)
+ipcMain.handle('remove-folder-from-media', async (_event, mediaId: number, folderId: number) => {
+    await folderDB.removeFolderFromMedia(mediaId, folderId)
 })
 
-ipcMain.handle('update-folder-structure', (_event, updates: { id: number; parentId: number | null; orderIndex: number }[]) => {
-    folderDB.updateFolderStructure(updates)
+ipcMain.handle('update-folder-structure', async (_event, updates: { id: number; parentId: number | null; orderIndex: number }[]) => {
+    await folderDB.updateFolderStructure(updates)
 })
 
 
@@ -901,7 +941,7 @@ ipcMain.handle('generate-thumbnail', async (_event, mediaId: number, filePath: s
         const mode = config.thumbnailMode || 'speed'
         const success = await createThumbnail(filePath, thumbnailPath, mode)
         if (success) {
-            mediaDB.updateThumbnail(mediaId, thumbnailPath)
+            await mediaDB.updateThumbnail(mediaId, thumbnailPath)
             return thumbnailPath
         }
         return null
@@ -913,19 +953,25 @@ ipcMain.handle('generate-thumbnail', async (_event, mediaId: number, filePath: s
 
 // 新機能ハンドラー
 ipcMain.handle('move-to-trash', async (_, id: number) => {
-    mediaDB.moveToTrash(id)
+    console.log('[Main] move-to-trash called with id:', id)
+    const lib = getActiveMediaLibrary()
+    console.log('[Main] getActiveMediaLibrary() returned:', lib ? 'Library found' : 'null')
+    if (lib) {
+        await lib.moveToTrash(id)
+        console.log('[Main] moveToTrash completed for id:', id)
+    }
 })
 
 ipcMain.handle('restore-from-trash', async (_, id: number) => {
-    mediaDB.restoreFromTrash(id)
+    await mediaDB.restoreFromTrash(id)
 })
 
 ipcMain.handle('move-files-to-trash', async (_, ids: number[]) => {
-    mediaDB.moveMediaFilesToTrash(ids, true)
+    await mediaDB.moveMediaFilesToTrash(ids, true)
 })
 
 ipcMain.handle('restore-files-from-trash', async (_, ids: number[]) => {
-    mediaDB.moveMediaFilesToTrash(ids, false)
+    await mediaDB.moveMediaFilesToTrash(ids, false)
 })
 
 ipcMain.handle('delete-permanently', (_, id) => mediaDB.deleteMediaFilesPermanently([id]))
@@ -971,7 +1017,7 @@ ipcMain.handle('get-comments', (_event, mediaId) => {
 // プレビュー生成
 ipcMain.handle('generate-previews', async (_event, mediaId: number) => {
     try {
-        const media = mediaDB.get(mediaId)
+        const media = await mediaDB.get(mediaId)
         if (!media) throw new Error('Media not found')
 
         const interval = 1 // Eagleスタイル: 1秒間隔
@@ -1072,7 +1118,7 @@ ipcMain.handle('copy-to-clipboard', async (_event, text: string) => {
 // メディア名変更
 ipcMain.handle('rename-media', async (_event, mediaId: number, newName: string) => {
     try {
-        return mediaDB.updateFileName(mediaId, newName)
+        return await mediaDB.updateFileName(mediaId, newName)
     } catch (error) {
         console.error('Failed to rename media:', error)
         throw error
@@ -1082,7 +1128,7 @@ ipcMain.handle('rename-media', async (_event, mediaId: number, newName: string) 
 // 投稿者更新
 ipcMain.handle('update-artist', async (_event, mediaId: number, artist: string | null) => {
     try {
-        mediaDB.updateArtist(mediaId, artist)
+        await mediaDB.updateArtist(mediaId, artist)
     } catch (error) {
         console.error('Failed to update artist:', error)
     }
@@ -1091,7 +1137,7 @@ ipcMain.handle('update-artist', async (_event, mediaId: number, artist: string |
 // 説明更新
 ipcMain.handle('update-description', async (_event, mediaId: number, description: string | null) => {
     try {
-        mediaDB.updateDescription(mediaId, description)
+        await mediaDB.updateDescription(mediaId, description)
     } catch (error) {
         console.error('Failed to update description:', error)
     }
@@ -1100,7 +1146,7 @@ ipcMain.handle('update-description', async (_event, mediaId: number, description
 // URL更新
 ipcMain.handle('update-url', async (_event, mediaId: number, url: string | null) => {
     try {
-        mediaDB.updateUrl(mediaId, url)
+        await mediaDB.updateUrl(mediaId, url)
     } catch (error) {
         console.error('Failed to update url:', error)
     }
@@ -1111,6 +1157,15 @@ ipcMain.handle('update-media-relation', async (_event, childId: number, parentId
         return mediaDB.updateParentId(childId, parentId)
     } catch (error) {
         console.error('Failed to update media relation:', error)
+        throw error
+    }
+})
+
+ipcMain.handle('refresh-media-metadata', async (_event, ids: number[]) => {
+    try {
+        await mediaDB.refreshMetadataForMedia(ids)
+    } catch (error) {
+        console.error('Failed to refresh media metadata:', error)
         throw error
     }
 })
@@ -1186,7 +1241,7 @@ ipcMain.handle('set-captured-thumbnail', async (_event, mediaId: number, dataUrl
         const base64Data = dataUrl.replace(/^data:image\/\w+;base64,/, "")
         const buffer = Buffer.from(base64Data, 'base64')
 
-        const media = mediaDB.get(mediaId)
+        const media = await mediaDB.get(mediaId)
         if (!media) return null
 
         const thumbnailPath = await getThumbnailPath(library.path, mediaId, media.file_path)
@@ -1196,7 +1251,7 @@ ipcMain.handle('set-captured-thumbnail', async (_event, mediaId: number, dataUrl
         console.log(`[Thumbnail] Updated from capture: ${thumbnailPath}`)
 
         // データベース更新
-        mediaDB.updateThumbnail(mediaId, thumbnailPath)
+        await mediaDB.updateThumbnail(mediaId, thumbnailPath)
         return thumbnailPath
     } catch (error) {
         console.error('Failed to set captured thumbnail:', error)
@@ -1485,7 +1540,7 @@ ipcMain.handle('select-download-directory', async () => {
 // メディアのエクスポート（メタデータ埋め込み付き）
 ipcMain.handle('export-media', async (event, mediaId: number, options?: { notificationId?: string }) => {
     try {
-        const media = mediaDB.get(mediaId)
+        const media = await mediaDB.get(mediaId)
         if (!media) throw new Error('Media not found')
 
         // 元ファイルパス

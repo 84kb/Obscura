@@ -2,7 +2,7 @@ import { MediaFile, Tag, Folder, TagGroup, Library, MediaComment, ServerConfig, 
 
 declare global {
     interface Window {
-        electronAPI: ElectronAPI
+
     }
 }
 

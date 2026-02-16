@@ -13,7 +13,7 @@ import { ConfirmModal } from './components/ConfirmModal'
 import { SubfolderGrid } from './components/SubfolderGrid'
 import { ProfileSetupModal } from './components/ProfileSetupModal'
 import { useLibrary } from './hooks/useLibrary'
-import { MediaFile, AppSettings, RemoteLibrary, ViewSettings, defaultViewSettings, ElectronAPI, ClientConfig, SharedUser } from './types'
+import { MediaFile, AppSettings, RemoteLibrary, ViewSettings, defaultViewSettings, ClientConfig, SharedUser } from './types'
 import { MainHeader } from './components/MainHeader'
 import { useSocket } from './hooks/useSocket'
 import { useTheme } from './hooks/useTheme'
@@ -22,6 +22,7 @@ import { DuplicateModal } from './components/DuplicateModal'
 import { ShortcutProvider, useShortcut } from './contexts/ShortcutContext'
 import './styles/index.css'
 import './styles/drag-overlay.css'
+import { api } from './api'
 
 const DEFAULT_SETTINGS: AppSettings = {
     autoPlay: true,
@@ -29,7 +30,10 @@ const DEFAULT_SETTINGS: AppSettings = {
     gridSize: 4,
     viewMode: 'grid',
     enableRichText: false,
-    pipControlMode: 'navigation'
+    pipControlMode: 'navigation',
+    autoHideSidebar: false,
+    showInfoOverlay: false,
+    showTitleOnHover: true
 }
 
 
@@ -197,8 +201,7 @@ function AppContent() {
 
     // アップデート通知
     useEffect(() => {
-        if (!window.electronAPI) return
-        const removeListener = window.electronAPI.onUpdateStatus((data) => {
+        const removeListener = api.onUpdateStatus((data) => {
             if (data.status === 'update-downloaded') {
                 addNotification({
                     type: 'success',
@@ -218,18 +221,27 @@ function AppContent() {
         })
 
         // 汎用通知プログレスリスナー
-        let removeProgressListener: (() => void) | undefined
-        if ((window.electronAPI as any).on) {
-            removeProgressListener = (window.electronAPI as any).on('notification-progress', (data: any) => {
-                if (data.id && typeof data.progress === 'number') {
-                    updateProgress(data.id, data.progress)
-                }
-            })
-        }
+        const removeProgressListener = api.on('notification-progress', (_e: any, data: any) => {
+            // _e is event (if from electron), data is the payload.
+            // If api.on abstracts this, we need to be careful.
+            // ElectronAdapter.on uses api.on which returns unsubscribe.
+            // In ElectronAdapter: this.api.on(channel, func)
+            // Default electronAPI.on passes (event, ...args).
+            // So existing code: (data) => ... seems wrong if it receives event first?
+            // Line 223 original: window.electronAPI.on(..., (data: any) => ...)
+            // If original worked, maybe electronAPI.on stripped event?
+            // Let's assume api.on behaves same as window.electronAPI.on
+            // But let's check strict signature in preload vs adapter.
+            // If adapter just proxies: return this.api.on(channel, func)
+            // Then it behaves exactly as underlying.
+            if (data && data.id && typeof data.progress === 'number') {
+                updateProgress(data.id, data.progress)
+            }
+        })
 
         return () => {
-            if (removeListener && typeof removeListener === 'function') removeListener()
-            if (removeProgressListener && typeof removeProgressListener === 'function') removeProgressListener()
+            if (removeListener) removeListener()
+            if (removeProgressListener) removeProgressListener()
         }
     }, [addNotification, updateProgress])
 
@@ -239,14 +251,12 @@ function AppContent() {
 
     // Poll shared users
     useEffect(() => {
-        if (!window.electronAPI) return
-
         const fetchUsers = async () => {
             try {
-                const users = await window.electronAPI.getSharedUsers()
+                const users = await api.getSharedUsers()
                 setSharedUsers(users)
             } catch (e) {
-                console.error("Failed to fetch shared users:", e)
+                // console.error("Failed to fetch shared users:", e) // Suppress error if not supported
             }
         }
 
@@ -267,8 +277,6 @@ function AppContent() {
 
     // Discord RPC: Idle State Handling
     useEffect(() => {
-        if (!window.electronAPI) return
-
         if (!playingMedia) {
             const libName = activeRemoteLibrary
                 ? activeRemoteLibrary.name
@@ -276,9 +284,9 @@ function AppContent() {
 
             // ライブラリが開かれていない場合はクリア、開かれていればライブラリ名を表示
             if (!activeLibrary && !activeRemoteLibrary) {
-                window.electronAPI.clearDiscordActivity()
+                api.clearDiscordActivity().catch((_) => { })
             } else {
-                window.electronAPI.updateDiscordActivity({
+                api.updateDiscordActivity({
                     details: 'Browsing Library',
                     state: libName,
                     largeImageKey: 'app_icon',
@@ -306,16 +314,13 @@ function AppContent() {
     const [availableLibraries, setAvailableLibraries] = useState<{ name: string, path: string }[]>([])
 
     useEffect(() => {
-        if (window.electronAPI) {
-            window.electronAPI.getLibraries()
-                .then((libs: any) => setAvailableLibraries(libs))
-                .catch(console.error)
-        }
+        api.getLibraries()
+            .then((libs: any) => setAvailableLibraries(libs))
+            .catch(console.error)
     }, [])
 
     useEffect(() => {
-        const api = window.electronAPI as unknown as ElectronAPI
-        if (!api?.onRefreshProgress) return
+        if (!api.onRefreshProgress) return
         return api.onRefreshProgress((current: number, total: number) => {
             setRefreshProgress({ current, total })
         })
@@ -325,7 +330,7 @@ function AppContent() {
         setIsRefreshing(true)
         setRefreshProgress({ current: 0, total: 0 })
         try {
-            await (window.electronAPI as unknown as ElectronAPI).refreshLibrary()
+            await api.refreshLibrary()
         } catch (error) {
             console.error('Refresh failed:', error)
             alert('ライブラリの更新に失敗しました')
@@ -557,12 +562,13 @@ function AppContent() {
         }
 
         const handleAutoImportComplete = (_: any, files: string[]) => {
-            console.log('[App] Auto-import completed:', files.length)
+            const safeFiles = Array.isArray(files) ? files : []
+            console.log('[App] Auto-import completed:', safeFiles.length)
             refreshLibrary()
             addNotification({
                 type: 'success',
                 title: '自動インポート完了',
-                message: `${files.length} 件のファイルをインポートしました`,
+                message: `${safeFiles.length} 件のファイルをインポートしました`,
                 duration: 5000
             })
         }
@@ -586,29 +592,16 @@ function AppContent() {
         let unsubscribeAutoImportCollision: (() => void) | undefined
         let unsubscribeExportProgress: (() => void) | undefined
 
-        if (window.electronAPI && window.electronAPI.on) {
-            unsubscribeTrigger = window.electronAPI.on('trigger-import', handleTriggerImport) as any
-            unsubscribeAutoImport = window.electronAPI.on('auto-import-complete', handleAutoImportComplete) as any
-            unsubscribeAutoImportCollision = window.electronAPI.on('auto-import-collision', handleAutoImportCollision) as any
-            unsubscribeExportProgress = window.electronAPI.on('export-progress', (_e: any, data: { id: string, progress: number }) => {
-                // eはeventオブジェクトだが、preloadでどうラップしたかによる
-                // preloadの実装: callback(_event, ...args)
-                // dataは第一引数（event除く）
-
-                // preloadの実装を確認すると:
-                // callback(_event, ...args)
-                // App側の受け取り: (e, data) => ...
-                // もし data が直接来るなら (data) => ...
-
-                // preload:
-                // const subscription = (_event, ...args) => callback(_event, ...args);
-
-                // なので、第一引数は event object.
-                // data comes as second argument.
+        if (api && api.on) {
+            unsubscribeTrigger = api.on('trigger-import', (_e: any, filePaths: string[]) => handleTriggerImport(null, filePaths))
+            unsubscribeAutoImport = api.on('auto-import-complete', (_e: any, files: string[]) => handleAutoImportComplete(null, files))
+            unsubscribeAutoImportCollision = api.on('auto-import-collision', (_e: any, data: any) => handleAutoImportCollision(null, data))
+            unsubscribeExportProgress = api.on('export-progress', (_e: any, data: { id: string, progress: number }) => {
+                // data passed as second arg usually
                 if (data && data.id) {
                     updateProgress(data.id, data.progress)
                 }
-            }) as any
+            })
         }
 
         // クリーンアップ
@@ -709,7 +702,7 @@ function AppContent() {
     useEffect(() => {
         const loadRemoteLibraries = async () => {
             try {
-                const config = await (window.electronAPI as any).getClientConfig()
+                const config = await api.getClientConfig()
                 if (config && config.remoteLibraries) {
                     setRemoteLibraries(config.remoteLibraries)
                 }
@@ -1190,6 +1183,51 @@ function AppContent() {
         closeContextMenu()
     }
 
+    const handleRefreshMetadata = async () => {
+        const media = contextMenu?.media
+        closeContextMenu()
+        if (!media) return
+
+        let targetIds = [media.id]
+        if (selectedMediaIds.length > 0 && selectedMediaIds.includes(media.id)) {
+            targetIds = selectedMediaIds
+        }
+
+        const notificationId = addNotification({
+            type: 'progress',
+            title: 'メタデータ更新中',
+            message: `${targetIds.length} 件のファイルを更新しています...`,
+            progress: 0,
+            duration: 0
+        })
+
+        try {
+            if (activeRemoteLibrary) {
+                // Future: Remote API call
+                throw new Error('リモートライブラリの個別更新はまだサポートされていません')
+            } else {
+                await window.electronAPI.refreshMediaMetadata(targetIds)
+            }
+
+            removeNotification(notificationId)
+            addNotification({
+                type: 'success',
+                title: '更新完了',
+                message: 'メタデータを更新しました',
+                duration: 3000
+            })
+            refreshLibrary()
+        } catch (e: any) {
+            removeNotification(notificationId)
+            addNotification({
+                type: 'error',
+                title: '更新失敗',
+                message: e.message || String(e),
+                duration: 5000
+            })
+        }
+    }
+
 
 
 
@@ -1583,6 +1621,7 @@ function AppContent() {
                     onCopy={handleCopy}
                     onCopyPath={handleCopyPath}
                     onMoveToTrash={handleMoveToTrash}
+                    onRefreshMetadata={!activeRemoteLibrary ? handleRefreshMetadata : undefined}
                     onExport={!activeRemoteLibrary ? handleExport : undefined}
                     onDownload={activeRemoteLibrary ? async () => {
                         if (!contextMenu?.media || !window.electronAPI) return

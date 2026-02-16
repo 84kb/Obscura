@@ -5,14 +5,16 @@ import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
 import { Server as SocketIOServer } from 'socket.io'
 import { createServer } from 'http'
-import { libraryRegistry, libraryDB } from './database'
-import { sharedUserDB, auditLogDB, Permission, serverConfigDB } from './shared-library'
+import { libraryRegistry, libraryDB } from './database.ts'
+import { sharedUserDB, auditLogDB, Permission, serverConfigDB } from './shared-library.ts'
 import { validateUserToken, validateAccessToken } from './crypto-utils'
 import { logError, logWarning } from './error-logger'
 import fs from 'fs'
 import path from 'path'
 import multer from 'multer'
+
 import os from 'os'
+import { MediaFile, Tag, Folder } from '../src/types'
 
 // 拡張されたRequestインターフェース
 export interface AuthenticatedRequest extends Request {
@@ -194,15 +196,15 @@ export function startServer(port: number): Promise<void> {
                 })
             })
 
-            expressApp.get('/api/media', authMiddleware, requirePermission('READ_ONLY'), (req: AuthenticatedRequest, res: Response) => {
+            expressApp.get('/api/media', authMiddleware, requirePermission('READ_ONLY'), async (req: AuthenticatedRequest, res: Response) => {
                 try {
                     const page = parseInt(String(req.query.page || '1'))
                     const limit = parseInt(String(req.query.limit || '50'))
                     const search = req.query.search as string
-                    let media = library.getAllMediaFiles()
+                    let media = await library.getAllMediaFiles()
                     if (search) {
                         const lowerSearch = search.toLowerCase()
-                        media = media.filter(m => m.file_name.toLowerCase().includes(lowerSearch) || (m.description && m.description.toLowerCase().includes(lowerSearch)))
+                        media = media.filter((m: MediaFile) => m.file_name.toLowerCase().includes(lowerSearch) || (m.description && m.description.toLowerCase().includes(lowerSearch)))
                     }
                     const startIndex = (page - 1) * limit
                     res.json({
@@ -214,12 +216,12 @@ export function startServer(port: number): Promise<void> {
                 } catch (error) { res.status(500).json({ error: { code: 'SERVER_ERROR', message: 'エラーが発生しました' } }) }
             })
 
-            expressApp.get('/api/media/:id', authMiddleware, requirePermission('READ_ONLY'), (req: AuthenticatedRequest, res: Response) => {
+            expressApp.get('/api/media/:id', authMiddleware, requirePermission('READ_ONLY'), async (req: AuthenticatedRequest, res: Response) => {
                 try {
                     const { mediaId: id } = getSafeParams(req)
                     if (id === undefined || isNaN(Number(id))) return res.status(400).json({ error: { code: 'INVALID_INPUT', message: '有効なIDが必要です' } })
 
-                    const media = library.getMediaFileWithDetails(Number(id))
+                    const media = await library.getMediaFileWithDetails(Number(id))
                     if (!media) return res.status(404).json({ error: { code: 'RESOURCE_NOT_FOUND', message: '見つかりません' } })
                     res.json(media)
                 } catch (e) {
@@ -228,12 +230,12 @@ export function startServer(port: number): Promise<void> {
                 }
             })
 
-            expressApp.get('/api/media/:id/duplicates', authMiddleware, requirePermission('READ_ONLY'), (req: AuthenticatedRequest, res: Response) => {
+            expressApp.get('/api/media/:id/duplicates', authMiddleware, requirePermission('READ_ONLY'), async (req: AuthenticatedRequest, res: Response) => {
                 try {
                     const { mediaId: id } = getSafeParams(req)
                     if (id === undefined || isNaN(Number(id))) return res.status(400).json({ error: { code: 'INVALID_INPUT', message: '有効なIDが必要です' } })
 
-                    const duplicates = library.getDuplicatesForMedia(Number(id))
+                    const duplicates = await library.getDuplicatesForMedia(Number(id))
                     res.json(duplicates)
                 } catch (e) {
                     logError('api', `GET /api/media/${req.params.id}/duplicates error`, e)
@@ -241,14 +243,14 @@ export function startServer(port: number): Promise<void> {
                 }
             })
 
-            expressApp.post('/api/media/:id/comments', authMiddleware, requirePermission('READ_ONLY'), (req: AuthenticatedRequest, res: Response) => {
+            expressApp.post('/api/media/:id/comments', authMiddleware, requirePermission('READ_ONLY'), async (req: AuthenticatedRequest, res: Response) => {
                 try {
                     const { mediaId: id } = getSafeParams(req)
                     const { text, time } = req.body || {}
                     if (id === undefined || isNaN(Number(id)) || !text) return res.status(400).json({ error: { code: 'INVALID_INPUT', message: 'IDとテキストが必要です' } })
 
                     library.setCurrentOperator(req.user?.nickname || 'Remote User')
-                    const comment = library.addComment(Number(id), text, time, req.user?.nickname)
+                    const comment = await library.addComment(Number(id), text, time, req.user?.nickname || 'Guest')
                     res.status(201).json(comment)
                     if (io) io.emit(`media:comment:${String(id)}`, comment)
                 } catch (e) {
@@ -257,16 +259,16 @@ export function startServer(port: number): Promise<void> {
                 }
             })
 
-            expressApp.get('/api/tags', authMiddleware, requirePermission('READ_ONLY'), (_req, res) => {
-                res.json(library.getAllTags())
+            expressApp.get('/api/tags', authMiddleware, requirePermission('READ_ONLY'), async (_req, res) => {
+                res.json(await library.getAllTags())
             })
 
-            expressApp.get('/api/tag-groups', authMiddleware, requirePermission('READ_ONLY'), (_req, res) => {
-                res.json(library.getAllTagGroups())
+            expressApp.get('/api/tag-groups', authMiddleware, requirePermission('READ_ONLY'), async (_req, res) => {
+                res.json(await library.getAllTagGroups())
             })
 
-            expressApp.get('/api/folders', authMiddleware, requirePermission('READ_ONLY'), (_req, res) => {
-                res.json(library.getAllFolders())
+            expressApp.get('/api/folders', authMiddleware, requirePermission('READ_ONLY'), async (_req, res) => {
+                res.json(await library.getAllFolders())
             })
 
             expressApp.get('/api/profile', authMiddleware, (req: AuthenticatedRequest, res) => {
@@ -283,19 +285,19 @@ export function startServer(port: number): Promise<void> {
                 } catch (e) { res.status(500).send() }
             })
 
-            expressApp.get('/api/thumbnails/:id', authMiddleware, (req, res) => {
+            expressApp.get('/api/thumbnails/:id', authMiddleware, async (req, res) => {
                 const id = req.params.id ? parseInt(String(req.params.id)) : NaN
                 if (isNaN(id)) return res.status(400).send()
-                const media = library.get(id)
+                const media = await library.getMediaFileWithDetails(id)
                 if (!media || !media.thumbnail_path || !fs.existsSync(media.thumbnail_path)) return res.status(404).send()
                 res.sendFile(media.thumbnail_path)
             })
 
-            expressApp.get('/api/stream/:id', authMiddleware, (req: AuthenticatedRequest, res) => {
+            expressApp.get('/api/stream/:id', authMiddleware, async (req: AuthenticatedRequest, res) => {
                 try {
                     const id = req.params.id ? parseInt(String(req.params.id)) : NaN
                     if (isNaN(id)) return res.status(400).send()
-                    const media = library.get(id)
+                    const media = await library.getMediaFileWithDetails(id)
                     if (!media || !fs.existsSync(media.file_path)) return res.status(404).send()
                     const stat = fs.statSync(media.file_path); const fileSize = stat.size; const range = req.headers.range
                     const ext = path.extname(media.file_path).toLowerCase()
@@ -315,10 +317,10 @@ export function startServer(port: number): Promise<void> {
                 } catch (e) { if (!res.headersSent) res.status(500).send() }
             })
 
-            expressApp.get('/api/download/:id', authMiddleware, requirePermission('DOWNLOAD'), (req: AuthenticatedRequest, res) => {
+            expressApp.get('/api/download/:id', authMiddleware, requirePermission('DOWNLOAD'), async (req: AuthenticatedRequest, res) => {
                 const id = req.params.id ? parseInt(String(req.params.id)) : NaN
                 if (isNaN(id)) return res.status(400).send()
-                const media = library.get(id)
+                const media = await library.getMediaFileWithDetails(id)
                 if (!media || !fs.existsSync(media.file_path)) return res.status(404).send()
                 res.download(media.file_path, media.file_name)
             })
@@ -364,35 +366,35 @@ export function startServer(port: number): Promise<void> {
                     // メタデータの適用
                     if (imported.length > 0 && Object.keys(metadataMap).length > 0) {
                         console.log(`[Upload] Applying metadata for ${imported.length} files...`)
-                        const allTags = library.getAllTags()
-                        const allFolders = library.getAllFolders()
+                        const allTags = await library.getAllTags()
+                        const allFolders = await library.getAllFolders()
 
                         for (const media of imported) {
                             const meta = metadataMap[media.file_name]
                             if (meta) {
                                 // Rating
                                 if (typeof meta.rating === 'number') {
-                                    library.updateRating(media.id, meta.rating)
+                                    await library.updateRating(media.id, meta.rating)
                                 }
                                 // Description
                                 if (meta.description) {
-                                    library.updateDescription(media.id, meta.description)
+                                    await library.updateDescription(media.id, meta.description)
                                 }
                                 // Tags
                                 if (Array.isArray(meta.tags)) {
                                     const tagIds = []
                                     for (const tagName of meta.tags) {
                                         // 名前で検索、なければ作成
-                                        let tag = allTags.find(t => t.name === tagName)
+                                        let tag = allTags.find((t: Tag) => t.name === tagName)
                                         if (!tag) {
-                                            tag = library.createTag(tagName) // 同期的にタグ作成
+                                            tag = await library.createTag(tagName) // 同期的にタグ作成
                                             // キャッシュ更新（次のループ等のため）
                                             allTags.push(tag)
                                         }
                                         tagIds.push(tag.id)
                                     }
                                     if (tagIds.length > 0) {
-                                        library.addTagsToMedia([media.id], tagIds)
+                                        await library.addTagsToMedia([media.id], tagIds)
                                     }
                                 }
                                 // Folders
@@ -401,13 +403,13 @@ export function startServer(port: number): Promise<void> {
                                         // 名前で検索 (ルートフォルダのみ、または階層構造を表現するならパスで渡す必要があるが、
                                         // 現状の簡易実装ではフラットな名前マッチング、または既存フォルダへの割り当てを行う)
                                         // ここでは「同名のフォルダがあれば入れる、なければルートに作成して入れる」とする
-                                        let folder = allFolders.find(f => f.name === folderName)
+                                        let folder = allFolders.find((f: Folder) => f.name === folderName)
                                         if (!folder) {
-                                            folder = library.createFolder(folderName, null)
+                                            folder = await library.createFolder(folderName, null)
                                             allFolders.push(folder)
                                         }
                                         if (folder) {
-                                            library.addFolderToMedia(media.id, folder.id)
+                                            await library.addFolderToMedia(media.id, folder.id)
                                         }
                                     }
                                 }
@@ -432,27 +434,27 @@ export function startServer(port: number): Promise<void> {
                 }
             })
 
-            expressApp.put('/api/media/:id', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res) => {
+            expressApp.put('/api/media/:id', authMiddleware, requirePermission('EDIT'), async (req: AuthenticatedRequest, res) => {
                 try {
                     const id = req.params.id ? parseInt(String(req.params.id)) : NaN
                     if (isNaN(id)) return res.status(400).send()
                     const { rating, artist, description, fileName } = req.body
 
                     library.setCurrentOperator(req.user?.nickname || 'Remote User')
-                    if (rating !== undefined) library.updateRating(id, rating)
-                    if (artist !== undefined) library.updateArtist(id, artist)
-                    if (description !== undefined) library.updateDescription(id, description)
+                    if (rating !== undefined) await library.updateRating(id, rating)
+                    if (artist !== undefined) await library.updateArtist(id, artist)
+                    if (description !== undefined) await library.updateDescription(id, description)
 
                     if (fileName) {
                         // updateFileName 内で物理リネームとDB更新が行われる
-                        library.updateFileName(id, fileName)
+                        await library.updateFileName(id, fileName)
                     }
                     res.json({ success: true })
                     if (io) io.emit('library-updated')
                 } catch (e) { res.status(500).send() }
             })
 
-            expressApp.delete('/api/media/:id', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res) => {
+            expressApp.delete('/api/media/:id', authMiddleware, requirePermission('EDIT'), async (req: AuthenticatedRequest, res) => {
                 const id = req.params.id ? parseInt(String(req.params.id)) : NaN
                 if (isNaN(id)) return res.status(400).send()
 
@@ -463,10 +465,10 @@ export function startServer(port: number): Promise<void> {
                     if (!req.user || !req.user.permissions.includes('FULL')) {
                         return res.status(403).json({ error: { code: 'INSUFFICIENT_PERMISSION', message: '完全削除にはFULL権限が必要です' } })
                     }
-                    library.deleteMediaFilesPermanently([id])
+                    await library.deleteMediaFilesPermanently([id])
                 } else {
                     // ゴミ箱移動はEDIT権限でOK (requirePermissionでチェック済み)
-                    library.moveToTrash(id)
+                    await library.moveToTrash(id)
                 }
                 res.json({ success: true })
             })
@@ -474,17 +476,17 @@ export function startServer(port: number): Promise<void> {
 
             // --- タグ操作API (関係) ---
             // ※パラメータ衝突を防ぐため、具体的なパス (/api/tags/media) を変数パス (/api/tags/:id) より前に配置
-            expressApp.post('/api/tags/media', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res: Response) => {
+            expressApp.post('/api/tags/media', authMiddleware, requirePermission('EDIT'), async (req: AuthenticatedRequest, res: Response) => {
                 try {
                     const { mediaId, tagId, mediaIds, tagIds } = getSafeParams(req)
 
                     // 単体追加
                     if (mediaId !== undefined && tagId !== undefined) {
-                        library.addTagToMedia(Number(mediaId), Number(tagId))
+                        await library.addTagToMedia(Number(mediaId), Number(tagId))
                     }
                     // 一括追加
                     else if (mediaIds && tagIds && Array.isArray(mediaIds) && Array.isArray(tagIds)) {
-                        library.addTagsToMedia(mediaIds.map(Number), tagIds.map(Number))
+                        await library.addTagsToMedia(mediaIds.map(Number), tagIds.map(Number))
                     }
                     else {
                         return res.status(400).json({ error: { code: 'INVALID_INPUT', message: 'mediaId, tagId または mediaIds, tagIds が必要です' } })
@@ -499,7 +501,7 @@ export function startServer(port: number): Promise<void> {
                 }
             })
 
-            expressApp.delete('/api/tags/media', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res: Response) => {
+            expressApp.delete('/api/tags/media', authMiddleware, requirePermission('EDIT'), async (req: AuthenticatedRequest, res: Response) => {
                 try {
                     const { mediaId, tagId } = getSafeParams(req)
                     if (mediaId === undefined || tagId === undefined) {
@@ -507,7 +509,7 @@ export function startServer(port: number): Promise<void> {
                     }
 
                     library.setCurrentOperator(req.user?.nickname || 'Remote User')
-                    library.removeTagFromMedia(Number(mediaId), Number(tagId))
+                    await library.removeTagFromMedia(Number(mediaId), Number(tagId))
                     res.json({ success: true })
                     if (io) io.emit('library-updated')
                 } catch (e: any) {
@@ -517,13 +519,13 @@ export function startServer(port: number): Promise<void> {
             })
 
             // --- タグ基本API ---
-            expressApp.post('/api/tags', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res: Response) => {
+            expressApp.post('/api/tags', authMiddleware, requirePermission('EDIT'), async (req: AuthenticatedRequest, res: Response) => {
                 try {
                     const { name } = req.body || {}
                     if (!name) return res.status(400).json({ error: { code: 'INVALID_INPUT', message: '名前が必要です' } })
 
                     library.setCurrentOperator(req.user?.nickname || 'Remote User')
-                    const tag = library.createTag(name)
+                    const tag = await library.createTag(name)
                     res.status(201).json(tag)
                     if (io) io.emit('library-updated')
                 } catch (e: any) {
@@ -532,13 +534,13 @@ export function startServer(port: number): Promise<void> {
                 }
             })
 
-            expressApp.delete('/api/tags/:id', authMiddleware, requirePermission('EDIT'), (req: AuthenticatedRequest, res: Response) => {
+            expressApp.delete('/api/tags/:id', authMiddleware, requirePermission('EDIT'), async (req: AuthenticatedRequest, res: Response) => {
                 try {
                     const { mediaId: id } = getSafeParams(req)
                     if (id === undefined || isNaN(Number(id))) return res.status(400).json({ error: { code: 'INVALID_INPUT', message: '有効なIDが必要です' } })
 
                     library.setCurrentOperator(req.user?.nickname || 'Remote User')
-                    library.deleteTag(Number(id))
+                    await library.deleteTag(Number(id))
                     res.json({ success: true })
                     if (io) io.emit('library-updated')
                 } catch (e: any) {

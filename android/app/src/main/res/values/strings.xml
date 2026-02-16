@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Obscura</string>
+    <string name="title_activity_main">Obscura</string>
+    <string name="package_name">com.obscura.medialib</string>
+    <string name="custom_url_scheme">com.obscura.medialib</string>
+</resources>

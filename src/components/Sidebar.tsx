@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import AuditLogModal from './AuditLogModal'
 import { FilterOptions, Library, RemoteLibrary, Folder } from '../types'
+import { api } from '../api'
 import './Sidebar.css'
 
 import { ConfirmModal } from './ConfirmModal'
@@ -481,7 +482,7 @@ export function Sidebar({
 
         if (updates.length > 0) {
             console.log('[Sidebar] Sending updateFolderStructure:', updates)
-            await window.electronAPI.updateFolderStructure(updates)
+            await api.updateFolderStructure(updates)
             if (onRefreshFolders) {
                 onRefreshFolders()
             }

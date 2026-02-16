@@ -32,6 +32,7 @@ export function registerAudioHandlers() {
     })
 
     ipcMain.handle('audio:set-volume', async (_, volume: number) => {
+        await mpv.init()
         await mpv.setVolume(volume)
     })
 
@@ -74,11 +75,11 @@ export function setupAudioEvents(webContents: WebContents) {
         }
     })
 
-    mpv.on('end-file', () => {
-        if (!webContents.isDestroyed()) {
-            webContents.send('audio:ended')
-        }
-    })
+    // mpv.on('end-file', () => {
+    //     if (!webContents.isDestroyed()) {
+    //         webContents.send('audio:ended')
+    //     }
+    // })
 
     // Forward start/stop events if needed, but renderer mostly cares about playback state
 }

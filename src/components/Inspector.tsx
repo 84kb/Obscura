@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { MediaFile, Tag, Folder, MediaComment, SharedUser } from '../types'
 import './Inspector.css'
 import { toMediaUrl } from '../utils/fileUrl'
+import { api } from '../api'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { InspectorSection, InfoSectionContent, CommentSectionContent, PlaylistSectionContent, RelationSectionContent, MediaPicker } from './InspectorSections'
@@ -178,7 +179,7 @@ export function Inspector({
     useEffect(() => {
         if (media.length === 1) {
             const fetchComments = () => {
-                window.electronAPI.getComments(media[0].id).then(setComments).catch(console.error)
+                api.getComments(media[0].id).then(setComments).catch(console.error)
             }
             fetchComments()
             const interval = setInterval(fetchComments, 2000)
@@ -497,17 +498,17 @@ export function Inspector({
                                 <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17z"></path>
                             </svg>
                         </button>
-                        <button className="control-btn" onClick={() => window.electronAPI?.minimizeWindow()} title="最小化">
+                        <button className="control-btn" onClick={() => api.minimizeWindow()} title="最小化">
                             <svg viewBox="0 0 10 1" fill="currentColor" width="10" height="10">
                                 <rect width="10" height="1" y="4.5" />
                             </svg>
                         </button>
-                        <button className="control-btn" onClick={() => window.electronAPI?.maximizeWindow()} title="最大化">
+                        <button className="control-btn" onClick={() => api.maximizeWindow()} title="最大化">
                             <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1" width="10" height="10">
                                 <rect x="0.5" y="0.5" width="9" height="9" />
                             </svg>
                         </button>
-                        <button className="control-btn close-btn" onClick={() => window.electronAPI?.closeWindow()} title="閉じる">
+                        <button className="control-btn close-btn" onClick={() => api.closeWindow()} title="閉じる">
                             <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1" width="10" height="10">
                                 <path d="M1,1 L9,9 M9,1 L1,9" />
                             </svg>
@@ -575,17 +576,17 @@ export function Inspector({
                             <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17z"></path>
                         </svg>
                     </button>
-                    <button className="control-btn" onClick={() => window.electronAPI?.minimizeWindow()} title="最小化">
+                    <button className="control-btn" onClick={() => api.minimizeWindow()} title="最小化">
                         <svg viewBox="0 0 10 1" fill="currentColor" width="10" height="10">
                             <rect width="10" height="1" y="4.5" />
                         </svg>
                     </button>
-                    <button className="control-btn" onClick={() => window.electronAPI?.maximizeWindow()} title="最大化">
+                    <button className="control-btn" onClick={() => api.maximizeWindow()} title="最大化">
                         <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1" width="10" height="10">
                             <rect x="0.5" y="0.5" width="9" height="9" />
                         </svg>
                     </button>
-                    <button className="control-btn close-btn" onClick={() => window.electronAPI?.closeWindow()} title="閉じる">
+                    <button className="control-btn close-btn" onClick={() => api.closeWindow()} title="閉じる">
                         <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1" width="10" height="10">
                             <path d="M1,1 L9,9 M9,1 L1,9" />
                         </svg>
@@ -800,7 +801,7 @@ export function Inspector({
                                                             e.stopPropagation()
                                                             const href = (target as HTMLAnchorElement).href
                                                             if (href) {
-                                                                window.electronAPI.openExternal(href)
+                                                                api.openExternal(href)
                                                             }
                                                             return
                                                         }
@@ -904,7 +905,7 @@ export function Inspector({
                                                     className="url-action-btn"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        window.electronAPI.copyToClipboard(url)
+                                                        api.copyToClipboard(url)
                                                         addNotification({
                                                             type: 'success',
                                                             title: 'コピーしました',
@@ -922,7 +923,7 @@ export function Inspector({
                                                     className="url-action-btn"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        if (url) window.electronAPI.openExternal(url)
+                                                        if (url) api.openExternal(url)
                                                     }}
                                                     title="ブラウザで開く"
                                                     disabled={!url}

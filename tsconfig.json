@@ -30,5 +30,8 @@
         {
             "path": "./tsconfig.node.json"
         }
+    ],
+    "exclude": [
+        "src/mobile"
     ]
 }

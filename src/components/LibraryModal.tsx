@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { api } from '../api'
 import './LibraryModal.css'
 
 interface LibraryModalProps {
@@ -31,16 +32,18 @@ export function LibraryModal({ onClose, onCreateLibrary, onOpenLibrary }: Librar
         if (!libraryName.trim()) return
 
         // Electron APIの確認
+        /*
         if (!window.electronAPI) {
             setError('この機能はElectronアプリでのみ利用可能です。ブラウザではなく、Electronウィンドウを使用してください。')
             return
         }
+        */
 
         setIsCreating(true)
         setError(null)
         try {
             // エクスプローラーでフォルダー選択
-            const parentPath = await window.electronAPI.selectFolder()
+            const parentPath = await api.selectFolder()
             if (parentPath) {
                 await onCreateLibrary(libraryName.trim(), parentPath)
                 onClose()

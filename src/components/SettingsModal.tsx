@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useContext } from 'react'
+import { api } from '../api'
 import { AppSettings, Library, ClientConfig, AutoImportPath, Theme, ThemeColors } from '../types'
 import { ShortcutContext, ShortcutAction } from '../contexts/ShortcutContext'
 import { useTheme } from '../hooks/useTheme'
@@ -277,6 +278,7 @@ const SHORTCUT_CATEGORIES: Record<ShortcutCategory, ShortcutAction[]> = {
 export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsModalProps) {
     const [activeCategory, setActiveCategory] = useState<Category>('general')
     const [appVersion, setAppVersion] = useState<string>('Unknown')
+    const [searchQuery, setSearchQuery] = useState('')
 
     // ショートカット関連
     const shortcutContext = useContext(ShortcutContext)
@@ -308,9 +310,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }, [recordingAction, shortcutContext])
 
     useEffect(() => {
-        if (window.electronAPI && (window.electronAPI as any).getAppVersion) {
-            (window.electronAPI as any).getAppVersion().then((v: string) => setAppVersion(v))
-        }
+        api.getAppVersion().then((v: string) => setAppVersion(v))
     }, [])
 
     const categories: { id: Category; label: string; icon: JSX.Element; group: string }[] = [
@@ -361,9 +361,8 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
     // === テーマ設定 ===
     const updateClientConfig = useCallback(async (updates: Partial<ClientConfig>) => {
-        if (!window.electronAPI) return
         try {
-            const newConfig = await window.electronAPI.updateClientConfig(updates)
+            const newConfig = await api.updateClientConfig(updates)
             setClientConfig(newConfig)
         } catch (error) {
             console.error('Failed to update client config:', error)
@@ -415,17 +414,13 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     const [showTemplateModal, setShowTemplateModal] = useState(false)
 
     const handleCopyTemplate = (css: string) => {
-        if (window.electronAPI) {
-            window.electronAPI.copyToClipboard(css)
-            alert('テンプレートをクリップボードにコピーしました')
-        }
+        api.copyToClipboard(css)
+        alert('テンプレートをクリップボードにコピーしました')
     }
 
     useEffect(() => {
-        if (!window.electronAPI) return
-
         // アップデートステータスのリスナー登録
-        const unsubscribe = (window.electronAPI as any).onUpdateStatus((data: { status: string; info?: any }) => {
+        const unsubscribe = api.onUpdateStatus((data: { status: string; info?: any }) => {
             console.log('Update Status:', data)
             switch (data.status) {
                 case 'checking-for-update':
@@ -459,21 +454,46 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
         }
     }, [])
 
+    // === Import Settings State ===
+    const [availableLibraries, setAvailableLibraries] = useState<{ name: string; path: string }[]>([])
+
+    useEffect(() => {
+        if (activeCategory === 'import' && window.electronAPI) {
+            (window.electronAPI as any).getLibraries()
+                .then((libs: any[]) => setAvailableLibraries(libs))
+                .catch((e: any) => console.error('Failed to get libraries:', e))
+        }
+    }, [activeCategory])
+
+    // === Profile Settings State ===
+    const [nickname, setNickname] = useState('')
+    const [selectedIcon, setSelectedIcon] = useState('👤')
+    // デフォルトのアイコンオプション
+    const DEFAULT_ICONS = [
+        '👤', '😀', '😎', '🐱', '🐶', '🦊', '🐻', '🐼',
+        '🐸', '🦁', '🐯', '🐨', '🐰', '🦄', '🐉', '🌟'
+    ]
+
+    useEffect(() => {
+        if (activeCategory === 'profile' && clientConfig) {
+            setNickname(clientConfig.nickname || '')
+            setSelectedIcon(clientConfig.iconUrl || DEFAULT_ICONS[0])
+        }
+    }, [activeCategory, clientConfig])
+
     // === Media Engine Settings ===
     const [ffmpegInfo, setFfmpegInfo] = useState<{ version: string; path: string } | null>(null)
     const [ffmpegUpdateStatus, setFfmpegUpdateStatus] = useState<'idle' | 'checking' | 'up-to-date' | 'available' | 'updating' | 'error'>('idle')
     const [ffmpegUpdateProgress, setFfmpegUpdateProgress] = useState(0)
 
     useEffect(() => {
-        if (activeCategory === 'media-engine' && window.electronAPI && (window.electronAPI as any).getFFmpegInfo) {
-            (window.electronAPI as any).getFFmpegInfo().then((info: any) => setFfmpegInfo(info))
+        if (activeCategory === 'media-engine') {
+            api.getFFmpegInfo().then((info: any) => setFfmpegInfo(info))
         }
     }, [activeCategory])
 
     useEffect(() => {
-        if (!window.electronAPI || !(window.electronAPI as any).onFFmpegUpdateProgress) return
-
-        const removeListener = (window.electronAPI as any).onFFmpegUpdateProgress((progress: number) => {
+        const removeListener = api.onFFmpegUpdateProgress((progress: number) => {
             setFfmpegUpdateProgress(progress)
         })
         return () => {
@@ -482,10 +502,9 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }, [])
 
     const handleCheckFFmpegUpdate = async () => {
-        if (!window.electronAPI || !(window.electronAPI as any).checkFFmpegUpdate) return
         setFfmpegUpdateStatus('checking')
         try {
-            const result = await (window.electronAPI as any).checkFFmpegUpdate()
+            const result = await api.checkFFmpegUpdate()
             if (result.available) {
                 setFfmpegUpdateStatus('available')
             } else {
@@ -498,15 +517,14 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }
 
     const handleUpdateFFmpeg = async () => {
-        if (!window.electronAPI || !(window.electronAPI as any).updateFFmpeg) return
         setFfmpegUpdateStatus('updating')
         setFfmpegUpdateProgress(0)
         try {
             // Mock URL for now, or real one if implemented
-            await (window.electronAPI as any).updateFFmpeg('latest')
+            await api.updateFFmpeg('latest')
             setFfmpegUpdateStatus('idle')
             // Refresh info
-            const info = await (window.electronAPI as any).getFFmpegInfo()
+            const info = await api.getFFmpegInfo()
             setFfmpegInfo(info)
             alert('FFmpeg update completed!')
         } catch (e: any) {
@@ -791,8 +809,8 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                 </span>
                             </div>
                             <button className="btn btn-secondary btn-sm" onClick={() => {
-                                if (ffmpegInfo?.path && window.electronAPI) {
-                                    window.electronAPI.copyToClipboard(ffmpegInfo.path)
+                                if (ffmpegInfo?.path) {
+                                    api.copyToClipboard(ffmpegInfo.path)
                                     alert('パスをコピーしました')
                                 }
                             }}>
@@ -898,16 +916,16 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                         <div key={action} className="settings-row">
                                             <div className="settings-info">
                                                 <span className="settings-label">{SHORTCUT_LABELS[action] || action}</span>
-                                                {isDup && <span style={{ color: '#ef4444', fontSize: '11px', marginLeft: '8px' }}>⚠ 重複</span>}
+                                                {isDup && <span style={{ color: 'var(--accent)', fontSize: '11px', marginLeft: '8px' }}>⚠ 重複</span>}
                                             </div>
                                             <button
                                                 className={`btn ${recordingAction === action ? 'btn-danger' : 'btn-outline'} btn-sm`}
                                                 style={{
                                                     minWidth: '100px',
                                                     fontFamily: 'monospace',
-                                                    borderColor: isDup ? '#ef4444' : undefined,
-                                                    color: isDup ? '#ef4444' : undefined,
-                                                    backgroundColor: isDup ? 'rgba(239, 68, 68, 0.1)' : undefined
+                                                    borderColor: isDup ? 'var(--accent)' : undefined,
+                                                    color: isDup ? 'var(--accent)' : undefined,
+                                                    backgroundColor: isDup ? 'color-mix(in srgb, var(--accent), transparent 90%)' : undefined
                                                 }}
                                                 onClick={() => setRecordingAction(action as ShortcutAction)}
                                             >
@@ -948,7 +966,6 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }
 
     const handleCheckForUpdates = async () => {
-        if (!window.electronAPI) return
         setUpdateStatus('checking')
         try {
             // 15秒のタイムアウトを設定
@@ -957,7 +974,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
             )
 
             // アップデートチェック実行
-            const resultPromise = (window.electronAPI as any).checkForUpdates()
+            const resultPromise = api.checkForUpdates()
 
             // 競合
             const result: any = await Promise.race([resultPromise, timeoutPromise])
@@ -980,7 +997,6 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }
 
     const handleDownloadUpdate = async () => {
-        if (!window.electronAPI) return
         setUpdateStatus('downloading')
         // download-update IPC does not exist in preload yet?
         // Wait, autoUpdater.downloadUpdate() is needed.
@@ -988,7 +1004,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
         // For now, let's just use "checkForUpdates" triggering if autoDownload is true?
         // No, we set autoDownload=false. So we need an explicit download call.
         try {
-            await (window.electronAPI as any).downloadUpdate()
+            await api.downloadUpdate()
         } catch (e: any) {
             console.error('Download failed', e)
             setUpdateStatus('error')
@@ -997,38 +1013,37 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }
 
     const handleQuitAndInstall = async () => {
-        if (!window.electronAPI) return
-        await (window.electronAPI as any).quitAndInstall()
+        await api.quitAndInstall()
     }
 
     // データ読み込み
     useEffect(() => {
         const loadData = async () => {
-            if (activeCategory === 'network' && window.electronAPI) {
+            if (activeCategory === 'network') {
                 try {
-                    const config = await window.electronAPI.getServerConfig()
+                    const config = await api.getServerConfig()
                     setServerConfig(config)
-                    const running = await window.electronAPI.getServerStatus()
+                    const running = await api.getServerStatus()
                     setIsServerRunning(running)
-                    const users = await window.electronAPI.getSharedUsers()
+                    const users = await api.getSharedUsers()
                     setSharedUsers(users)
 
                     // クライアント設定も読み込む（リモートライブラリ一覧用）
-                    const cConfig = await (window.electronAPI as any).getClientConfig()
+                    const cConfig = await api.getClientConfig()
                     setClientConfig(cConfig)
 
                     // クライアント用トークン (自分のマシン用)
-                    const token = await window.electronAPI.generateUserToken()
+                    const token = await api.generateUserToken()
                     setMyUserToken(token)
                     // ライブラリ一覧を取得
-                    const libs = await window.electronAPI.getLibraries()
+                    const libs = await api.getLibraries()
                     setLibraries(libs)
                 } catch (e) {
                     console.error('Failed to load network settings:', e)
                 }
-            } else if ((activeCategory === 'general' || activeCategory === 'import') && window.electronAPI) {
+            } else if (activeCategory === 'general' || activeCategory === 'import') {
                 try {
-                    const config = await (window.electronAPI as any).getClientConfig()
+                    const config = await api.getClientConfig()
                     setClientConfig(config)
                 } catch (e) {
                     console.error('Failed to load client config:', e)
@@ -1039,17 +1054,16 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }, [activeCategory])
 
     const handleToggleServer = async () => {
-        if (!window.electronAPI) return
         try {
             if (isServerRunning) {
-                await window.electronAPI.stopServer()
+                await api.stopServer()
                 setIsServerRunning(false)
             } else {
-                await window.electronAPI.startServer()
+                await api.startServer()
                 setIsServerRunning(true)
             }
             // 設定更新
-            const config = await window.electronAPI.getServerConfig()
+            const config = await api.getServerConfig()
             setServerConfig(config)
         } catch (e) {
             console.error('Failed to toggle server:', e)
@@ -1062,44 +1076,42 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     const [newAllowedIP, setNewAllowedIP] = useState('')
 
     const handleAddIP = () => {
-        if (!newAllowedIP || !serverConfig || !window.electronAPI) return
+        if (!newAllowedIP || !serverConfig) return
         const currentIPs = serverConfig.allowedIPs || []
         if (currentIPs.includes(newAllowedIP)) return
 
         const newIPs = [...currentIPs, newAllowedIP]
         setServerConfig({ ...serverConfig, allowedIPs: newIPs })
-        window.electronAPI.updateServerConfig({ allowedIPs: newIPs })
+        api.updateServerConfig({ allowedIPs: newIPs })
         setNewAllowedIP('')
     }
 
     const handleDeleteIP = (ip: string) => {
-        if (!serverConfig || !window.electronAPI) return
+        if (!serverConfig) return
         const newIPs = (serverConfig.allowedIPs || []).filter((i: string) => i !== ip)
         setServerConfig({ ...serverConfig, allowedIPs: newIPs })
-        window.electronAPI.updateServerConfig({ allowedIPs: newIPs })
+        api.updateServerConfig({ allowedIPs: newIPs })
     }
 
     const handleSelectCert = async () => {
-        if (!window.electronAPI) return
-        const path = await (window.electronAPI as any).selectFile({
+        const path = await api.selectFile({
             title: 'SSL証明書 (CRT/PEM) を選択',
             filters: [{ name: 'Certificate', extensions: ['crt', 'pem', 'cer'] }]
         })
         if (path) {
             setServerConfig({ ...serverConfig, sslCertPath: path })
-            window.electronAPI.updateServerConfig({ sslCertPath: path })
+            api.updateServerConfig({ sslCertPath: path })
         }
     }
 
     const handleSelectKey = async () => {
-        if (!window.electronAPI) return
-        const path = await (window.electronAPI as any).selectFile({
+        const path = await api.selectFile({
             title: '秘密鍵 (KEY/PEM) を選択',
             filters: [{ name: 'Private Key', extensions: ['key', 'pem'] }]
         })
         if (path) {
             setServerConfig({ ...serverConfig, sslKeyPath: path })
-            window.electronAPI.updateServerConfig({ sslKeyPath: path })
+            api.updateServerConfig({ sslKeyPath: path })
         }
     }
 
@@ -1111,9 +1123,9 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }
 
     const handleAddUser = async () => {
-        if (!window.electronAPI || !inputUserToken.trim()) return
+        if (!inputUserToken.trim()) return
         try {
-            const user = await window.electronAPI.addSharedUser({
+            const user = await api.addSharedUser({
                 userToken: inputUserToken.trim(), // ユーザーが提供したトークン
                 nickname: '', // ユーザー側で設定するため空
                 permissions: ['READ_ONLY'], // デフォルト権限
@@ -1129,9 +1141,9 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }
 
     const handleDeleteUser = async (userId: string) => {
-        if (!window.electronAPI || !confirm('このユーザーを削除しますか？')) return
+        if (!confirm('このユーザーを削除しますか？')) return
         try {
-            await window.electronAPI.deleteSharedUser(userId)
+            await api.deleteSharedUser(userId)
             setSharedUsers(sharedUsers.filter(u => u.id !== userId))
         } catch (e) {
             console.error('Failed to delete user:', e)
@@ -1140,7 +1152,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
     const handleTogglePermission = async (userId: string, permission: any) => {
         const user = sharedUsers.find(u => u.id === userId)
-        if (!user || !window.electronAPI) return
+        if (!user) return
 
         let newPermissions: any[] = [...(user.permissions || [])]
         const allPermissions = ['READ_ONLY', 'DOWNLOAD', 'UPLOAD', 'EDIT', 'FULL']
@@ -1167,7 +1179,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
         newPermissions = Array.from(new Set(newPermissions))
 
         try {
-            await (window.electronAPI as any).updateSharedUser(userId, { permissions: newPermissions })
+            await api.updateSharedUser(userId, { permissions: newPermissions })
             setSharedUsers(sharedUsers.map(u =>
                 u.id === userId ? { ...u, permissions: newPermissions } : u
             ))
@@ -1234,7 +1246,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                 <code>{newAccessToken}</code>
                                 <button
                                     onClick={() => {
-                                        if (window.electronAPI) window.electronAPI.copyToClipboard(newAccessToken)
+                                        api.copyToClipboard(newAccessToken)
                                         setNewAccessToken(null)
                                     }}
                                     className="btn btn-outline btn-small"
@@ -1274,7 +1286,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                             <span className="token-label">ユーザートークン:</span>
                                             {visibleTokens[u.id] === 'user' && (
                                                 <button
-                                                    onClick={() => window.electronAPI?.copyToClipboard(u.userToken)}
+                                                    onClick={() => api.copyToClipboard(u.userToken)}
                                                     className="btn btn-outline btn-small"
                                                 >
                                                     コピー
@@ -1293,7 +1305,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                             <span className="token-label">アクセストークン:</span>
                                             {visibleTokens[u.id] === 'access' && (
                                                 <button
-                                                    onClick={() => window.electronAPI?.copyToClipboard(u.accessToken)}
+                                                    onClick={() => api.copyToClipboard(u.accessToken)}
                                                     className="btn btn-outline btn-small"
                                                 >
                                                     コピー
@@ -1307,7 +1319,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                             {visibleTokens[u.id] === 'access' ? u.accessToken : 'クリックして表示'}
                                         </div>
                                     </div>
-                                    <div style={{ fontSize: '10px', color: '#555', marginTop: '4px' }}>
+                                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
                                         ※ 接続時は「ユーザートークン:アクセストークン」形式で入力
                                     </div>
 
@@ -1331,7 +1343,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                             </div>
                         ))}
                     </div>    {sharedUsers.length === 0 && (
-                        <div style={{ padding: '16px', textAlign: 'center', color: '#666' }}>
+                        <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)' }}>
                             ユーザーがいません
                         </div>
                     )}
@@ -1361,21 +1373,21 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }
 
     const handleTestConnection = async () => {
-        if (!remoteUrl || !remoteKey || !window.electronAPI) return
+        if (!remoteUrl || !remoteKey) return
         setConnectionStatus('testing')
         setConnectionMsg('接続確認中...')
         try {
             const normalizedUrl = normalizeRemoteUrl(remoteUrl)
 
             // まず指定されたプロトコル（またはデフォルトのhttp://）で試行
-            let result = await (window.electronAPI as any).testConnection(normalizedUrl, remoteKey)
+            let result = await api.testConnection(normalizedUrl, remoteKey)
             let finalUrl = normalizedUrl
 
             // HTTPで失敗し、かつURLがhttp://で始まる場合はhttps://で再試行
             if (!result.success && normalizedUrl.startsWith('http://')) {
                 setConnectionMsg('HTTPS接続を試行中...')
                 const httpsUrl = normalizedUrl.replace('http://', 'https://')
-                const httpsResult = await (window.electronAPI as any).testConnection(httpsUrl, remoteKey)
+                const httpsResult = await api.testConnection(httpsUrl, remoteKey)
 
                 if (httpsResult.success) {
                     result = httpsResult
@@ -1386,7 +1398,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
             else if (!result.success && normalizedUrl.startsWith('https://')) {
                 setConnectionMsg('HTTP接続を試行中...')
                 const httpUrl = normalizedUrl.replace('https://', 'http://')
-                const httpResult = await (window.electronAPI as any).testConnection(httpUrl, remoteKey)
+                const httpResult = await api.testConnection(httpUrl, remoteKey)
 
                 if (httpResult.success) {
                     result = httpResult
@@ -1415,13 +1427,13 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }
 
     const handleAddRemoteLibrary = async () => {
-        if (connectionStatus !== 'success' || !window.electronAPI) return
+        if (connectionStatus !== 'success') return
         try {
             const name = remoteName.trim() || 'Remote Library'
             const normalizedUrl = normalizeRemoteUrl(remoteUrl)
-            await (window.electronAPI as any).addRemoteLibrary(name, normalizedUrl, remoteKey)
+            await api.addRemoteLibrary(name, normalizedUrl, remoteKey)
             // 設定を再読み込み
-            const cConfig = await (window.electronAPI as any).getClientConfig()
+            const cConfig = await api.getClientConfig()
             setClientConfig(cConfig)
             // フォームリセット
             setRemoteUrl('')
@@ -1436,12 +1448,12 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }
 
     const handleDeleteRemoteLibrary = async (lib: any) => {
-        if (!window.electronAPI || !confirm(`リモートライブラリ "${lib.name || lib.url}" を削除しますか？`)) return
+        if (!confirm(`リモートライブラリ "${lib.name || lib.url}" を削除しますか？`)) return
         try {
             // updateClientConfig でリストから除外して保存
             const currentLibs = clientConfig?.remoteLibraries || []
             const newLibs = currentLibs.filter((l: any) => l.id !== lib.id)
-            await (window.electronAPI as any).updateClientConfig({ remoteLibraries: newLibs })
+            await api.updateClientConfig({ remoteLibraries: newLibs })
             // local state update
             setClientConfig({ ...clientConfig, remoteLibraries: newLibs })
         } catch (e) {
@@ -1504,7 +1516,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                             onChange={(e) => {
                                                 const val = parseInt(e.target.value)
                                                 setServerConfig({ ...serverConfig, port: val })
-                                                if (window.electronAPI) window.electronAPI.updateServerConfig({ port: val })
+                                                api.updateServerConfig({ port: val })
                                             }}
                                             disabled={isServerRunning}
                                             className="settings-input"
@@ -1527,7 +1539,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                                 const val = e.target.value || undefined
                                                 const updates = { publishLibraryPath: val }
                                                 setServerConfig({ ...serverConfig, ...updates })
-                                                if (window.electronAPI) window.electronAPI.updateServerConfig(updates)
+                                                api.updateServerConfig(updates)
                                             }}
                                             className="settings-input"
                                             style={{ width: '200px', height: '32px' }}
@@ -1548,7 +1560,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
                         </section>
 
-                        <section className="settings-section" style={{ marginTop: '24px', borderTop: '1px solid #333', paddingTop: '16px' }}>
+                        <section className="settings-section" style={{ marginTop: '24px', borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
                             <h4 className="section-title">セキュリティ設定</h4>
 
 
@@ -1578,13 +1590,13 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     {serverConfig.allowedIPs && serverConfig.allowedIPs.length > 0 && (
                                         <div className="users-list" style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                             {serverConfig.allowedIPs.map((ip: string) => (
-                                                <div key={ip} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#27272a', padding: '8px 12px', borderRadius: '4px' }}>
+                                                <div key={ip} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--bg-dark)', padding: '8px 12px', borderRadius: '4px' }}>
                                                     <span style={{ fontFamily: 'monospace' }}>{ip}</span>
                                                     <button
                                                         onClick={() => handleDeleteIP(ip)}
                                                         className="icon-button delete"
                                                         title="削除"
-                                                        style={{ color: '#ef4444' }}
+                                                        style={{ color: 'var(--accent)' }}
                                                     >
                                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="18 6 6 18"></polyline><polyline points="6 6 18 18"></polyline></svg>
                                                     </button>
@@ -1611,7 +1623,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                             onChange={(e) => {
                                                 const val = e.target.checked
                                                 setServerConfig({ ...serverConfig, requireHttps: val })
-                                                window.electronAPI?.updateServerConfig({ requireHttps: val })
+                                                api.updateServerConfig({ requireHttps: val })
                                             }}
                                         />
                                         <span className="slider"></span>
@@ -1619,7 +1631,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                 </div>
 
                                 {serverConfig.requireHttps && (
-                                    <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px', paddingLeft: '16px', borderLeft: '2px solid #333' }}>
+                                    <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px', paddingLeft: '16px', borderLeft: '2px solid var(--border)' }}>
                                         <div style={{ width: '100%' }}>
                                             <label className="settings-label" style={{ fontSize: '12px', marginBottom: '4px', display: 'block' }}>SSL証明書 (.crt / .pem)</label>
                                             <div style={{ display: 'flex', gap: '8px' }}>
@@ -1648,7 +1660,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                                 <button className="btn btn-outline btn-small" onClick={handleSelectKey}>選択</button>
                                             </div>
                                         </div>
-                                        <p style={{ fontSize: '11px', color: '#eab308', marginTop: '4px' }}>
+                                        <p style={{ fontSize: '11px', color: 'var(--accent)', marginTop: '4px' }}>
                                             ※ 設定変更後はサーバーの再起動が必要です。
                                         </p>
                                     </div>
@@ -1681,8 +1693,8 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                         <button
                                             className="btn btn-outline btn-small"
                                             onClick={() => {
-                                                if (window.electronAPI && myUserToken) {
-                                                    window.electronAPI.copyToClipboard(myUserToken)
+                                                if (myUserToken) {
+                                                    api.copyToClipboard(myUserToken)
                                                     alert('コピーしました')
                                                 }
                                             }}
@@ -1773,11 +1785,11 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                 {clientConfig?.remoteLibraries && clientConfig.remoteLibraries.length > 0 ? (
                                     <div className="users-table" style={{ width: '100%' }}>
                                         {clientConfig.remoteLibraries.map((lib: any) => (
-                                            <div key={lib.id} className="settings-row" style={{ borderBottom: '1px solid #333', padding: '12px 0' }}>
+                                            <div key={lib.id} className="settings-row" style={{ borderBottom: '1px solid var(--border)', padding: '12px 0' }}>
                                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                                    <span style={{ fontWeight: 'bold', color: '#fff' }}>{lib.name || 'Remote Library'}</span>
-                                                    <span style={{ fontSize: '12px', color: '#888' }}>{lib.url}</span>
-                                                    <span style={{ fontSize: '11px', color: '#555' }}>Last connected: {new Date(lib.lastConnectedAt).toLocaleString()}</span>
+                                                    <span style={{ fontWeight: 'bold', color: 'var(--text-main)' }}>{lib.name || 'Remote Library'}</span>
+                                                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{lib.url}</span>
+                                                    <span style={{ fontSize: '11px', color: 'color-mix(in srgb, var(--text-muted), transparent 40%)' }}>Last connected: {new Date(lib.lastConnectedAt).toLocaleString()}</span>
                                                 </div>
                                                 <button
                                                     className="icon-button delete"
@@ -1810,7 +1822,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                 <div className="settings-card">
                     <div className="settings-row">
                         <div className="settings-info">
-                            <span className="settings-label">拡大中の画像 <span className="help-icon">?</span></span>
+                            <span className="settings-label">拡大中の画像</span>
                         </div>
                         <div className="radio-group">
                             <label className="radio-item">
@@ -1847,7 +1859,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                     <div className="settings-row">
                         <div className="settings-info">
                             <span className="settings-label">PiP 操作モード</span>
-                            <span className="settings-desc">ピクチャーインピクチャー画面のボタン配置</span>
+                            <span className="settings-description">ピクチャーインピクチャー画面のボタン配置</span>
                         </div>
                         <div className="radio-group" style={{ display: 'flex', gap: '16px' }}>
                             <label className="radio-item">
@@ -1870,99 +1882,52 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                             </label>
                         </div>
                     </div>
-
-                    <div className="settings-row">
-                        <div className="settings-info">
-                            <span className="settings-label">既定の画像サイズ</span>
-                        </div>
-                        <div className="radio-group">
-                            <label className="radio-item">
-                                <input type="radio" name="size" defaultChecked />
-                                <span className="radio-dot"></span>
-                                <span className="radio-label">自動</span>
-                            </label>
-                            <label className="radio-item">
-                                <input type="radio" name="size" />
-                                <span className="radio-dot"></span>
-                                <span className="radio-label">オリジナル サイズ</span>
-                            </label>
-                        </div>
-                    </div>
                 </div>
             </section>
 
             <section className="settings-section">
-                <h4 className="section-title">ビデオ</h4>
+                <h4 className="section-title">外観・挙動</h4>
                 <div className="settings-card">
                     <div className="settings-row">
                         <div className="settings-info">
-                            <span className="settings-label">垂直スクロール</span>
+                            <span className="settings-label">サイドバーを自動的に隠す</span>
+                            <span className="settings-description">
+                                メディア閲覧中、マウスが離れてから一定時間後にサイドバーを非表示にします。
+                            </span>
                         </div>
-                        <div className="radio-group">
-                            <label className="radio-item">
-                                <input type="radio" name="vscroll" defaultChecked />
-                                <span className="radio-dot"></span>
-                                <span className="radio-label">プログレス コントロール</span>
-                            </label>
-                            <label className="radio-item">
-                                <input type="radio" name="vscroll" />
-                                <span className="radio-dot"></span>
-                                <span className="radio-label">ボリューム コントロール</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    <div className="settings-row-checkbox">
-                        <label className="checkbox-item">
-                            <input type="checkbox" defaultChecked />
-                            <span className="checkbox-box"></span>
-                            <span className="checkbox-label">ホバー時にプレビューする <span className="help-icon">?</span></span>
-                        </label>
-                        <label className="checkbox-item">
-                            <input type="checkbox" checked={settings.allowUpscale} onChange={() => handleToggle('allowUpscale')} />
-                            <span className="checkbox-box"></span>
-                            <span className="checkbox-label">画面を拡大して表示する</span>
-                        </label>
-                        <label className="checkbox-item">
-                            <input type="checkbox" checked={settings.autoPlay} onChange={() => handleToggle('autoPlay')} />
-                            <span className="checkbox-box"></span>
-                            <span className="checkbox-label">自動再生する</span>
-                        </label>
-                        <label className="checkbox-item">
-                            <input type="checkbox" />
-                            <span className="checkbox-box"></span>
-                            <span className="checkbox-label">前回の再生位置を記憶する</span>
-                        </label>
-                    </div>
-                </div>
-            </section>
-
-            <section className="settings-section">
-                <h4 className="section-title">インスペクター</h4>
-                <div className="settings-card">
-                    <div className="settings-row-checkbox">
-                        <label className="checkbox-item">
+                        <label className="toggle-switch">
                             <input
                                 type="checkbox"
-                                checked={settings.enableRichText}
-                                onChange={() => handleToggle('enableRichText')}
+                                checked={settings.autoHideSidebar}
+                                onChange={() => handleToggle('autoHideSidebar')}
                             />
-                            <span className="checkbox-box"></span>
-                            <span className="checkbox-label">説明欄のリッチテキスト (HTML) 有効化</span>
+                            <span className="slider"></span>
                         </label>
                     </div>
-                </div>
-            </section>
 
-            <section className="settings-section">
-                <h4 className="section-title">システム</h4>
-                <div className="settings-card">
+                    <div className="settings-row">
+                        <div className="settings-info">
+                            <span className="settings-label">メディア情報を常に表示</span>
+                            <span className="settings-description">
+                                ビューアー下部にタイトルや評価などの情報を常に表示します。
+                            </span>
+                        </div>
+                        <label className="toggle-switch">
+                            <input
+                                type="checkbox"
+                                checked={settings.showInfoOverlay}
+                                onChange={() => handleToggle('showInfoOverlay')}
+                            />
+                            <span className="slider"></span>
+                        </label>
+                    </div>
+
                     <div className="settings-row">
                         <div className="settings-info">
                             <span className="settings-label">GPUハードウェアアクセラレーション</span>
                             <span className="settings-description">
                                 多くの環境でパフォーマンスが向上しますが、無効にすることで不具合が解消される場合があります。
-                                <span style={{ color: 'var(--accent)', display: 'block', marginTop: '4px' }}>※変更を適用するには再起動が必要です。</span>
+                                <span className="settings-warning-text" style={{ color: 'var(--accent)', display: 'block', marginTop: '4px' }}>※変更を適用するには再起動が必要です。</span>
                             </span>
                         </div>
                         <label className="toggle-switch">
@@ -1971,7 +1936,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                 checked={clientConfig?.enableGPUAcceleration ?? true}
                                 onChange={(e) => updateClientConfig({ enableGPUAcceleration: e.target.checked })}
                             />
-                            <span className="toggle-slider"></span>
+                            <span className="slider"></span>
                         </label>
                     </div>
                 </div>
@@ -1991,51 +1956,67 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         <p className="settings-description" style={{ marginBottom: '16px' }}>
                             以下のエンドポイントを使用して、ライブラリのデータに外部からアクセスできます。<br />
                             <strong>Base URL:</strong> <code>{apiBaseUrl}</code><br />
-                            アクセスには以下のヘッダーが必要です。<br />
-                            <code>Authorization: Bearer [Access Token]</code><br />
-                            <code>X-User-Token: [User Token]</code>
+                            <strong>認証:</strong> ヘッダー <code>Authorization: Bearer [YOUR_HOST_SECRET]</code> を使用してください。
                         </p>
 
                         <div className="api-list">
-                            {API_ENDPOINTS.map((api) => {
-                                const apiId = `${api.method}:${api.path}`
+                            {API_ENDPOINTS.map(api => {
+                                const apiId = `${api.method}-${api.path}`
                                 return (
-                                    <div key={apiId} className={`api-item ${openApiIds.includes(apiId) ? 'open' : ''}`}>
+                                    <div key={apiId} className="api-item" style={{ borderBottom: '1px solid var(--border)', paddingBottom: '12px', marginBottom: '12px' }}>
                                         <div
                                             className="api-header"
                                             onClick={() => toggleApi(apiId)}
                                         >
-                                            <span className={`method-badge ${api.method.toLowerCase()}`}>{api.method}</span>
-                                            <span className="api-path">{api.path}</span>
+                                            <div className="api-method-path">
+                                                <span className={`api-method ${api.method.toLowerCase()}`}>{api.method}</span>
+                                                <span className="api-path">{api.path}</span>
+                                            </div>
                                             <span className="api-label">{api.label}</span>
                                             <svg
-                                                width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                                                className={`api-arrow ${openApiIds.includes(apiId) ? 'open' : ''}`}
+                                                width="16"
+                                                height="16"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                strokeWidth="2"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                style={{ transition: 'transform 0.2s', transform: openApiIds.includes(apiId) ? 'rotate(180deg)' : 'rotate(0)' }}
                                             >
                                                 <polyline points="6 9 12 15 18 9"></polyline>
                                             </svg>
                                         </div>
 
                                         {openApiIds.includes(apiId) && (
-                                            <div className="api-details">
-                                                {api.description && <p style={{ marginBottom: '8px' }}>{api.description}</p>}
-                                                {api.permission && <div style={{ marginBottom: '8px' }}>
-                                                    <span style={{ color: '#aaa' }}>必要な権限: </span>
-                                                    <code style={{ backgroundColor: '#333', padding: '2px 4px', borderRadius: '4px' }}>{api.permission}</code>
-                                                </div>}
+                                            <div className="api-details" style={{ marginTop: '12px', padding: '12px', background: 'var(--bg-dark)', borderRadius: '4px' }}>
+                                                {api.description && <p style={{ marginBottom: '8px', color: 'var(--text-muted)' }}>{api.description}</p>}
+                                                {api.permission && (
+                                                    <div style={{ marginBottom: '8px' }}>
+                                                        <span style={{ color: 'var(--text-muted)' }}>必要な権限: </span>
+                                                        <code style={{ backgroundColor: 'var(--bg-hover)', padding: '2px 4px', borderRadius: '4px' }}>{api.permission}</code>
+                                                    </div>
+                                                )}
                                                 {api.params && api.params.length > 0 && (
-                                                    <div style={{ marginTop: '8px' }}>
-                                                        <strong style={{ display: 'block', marginBottom: '4px', color: '#aaa' }}>Parameters:</strong>
+                                                    <div style={{ marginTop: '12px' }}>
+                                                        <strong style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)', fontSize: '12px' }}>Parameters:</strong>
                                                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                                                            <thead>
+                                                                <tr style={{ textAlign: 'left', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
+                                                                    <th style={{ padding: '4px' }}>Name</th>
+                                                                    <th style={{ padding: '4px' }}>Type</th>
+                                                                    <th style={{ padding: '4px' }}>Description</th>
+                                                                </tr>
+                                                            </thead>
                                                             <tbody>
                                                                 {api.params.map(p => (
-                                                                    <tr key={p.name}>
-                                                                        <td className="param-name">
+                                                                    <tr key={p.name} style={{ borderBottom: '1px solid var(--border)' }}>
+                                                                        <td style={{ padding: '4px', color: 'var(--primary-light)' }}>
                                                                             {p.name}
-                                                                            {p.required && <span className="required">*</span>}
+                                                                            {p.required && <span style={{ color: 'var(--accent)', marginLeft: '2px' }}>*</span>}
                                                                         </td>
-                                                                        <td className="param-type">{p.type}</td>
-                                                                        <td className="param-desc">{p.desc}</td>
+                                                                        <td style={{ padding: '4px', opacity: 0.7 }}>{p.type}</td>
+                                                                        <td style={{ padding: '4px', opacity: 0.9 }}>{p.desc}</td>
                                                                     </tr>
                                                                 ))}
                                                             </tbody>
@@ -2055,10 +2036,9 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }
 
     const handleSelectDownloadPath = async () => {
-        if (!window.electronAPI) return
-        const path = await (window.electronAPI as any).selectDownloadDirectory()
+        const path = await api.selectDownloadDirectory()
         if (path) {
-            const newConfig = await (window.electronAPI as any).updateClientConfig({ downloadPath: path })
+            const newConfig = await api.updateClientConfig({ downloadPath: path })
             setClientConfig(newConfig)
         }
     }
@@ -2074,7 +2054,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                             <span className="settings-description">
                                 現在のバージョン: v{appVersion}
                                 {updateInfo?.version && (
-                                    <span style={{ marginLeft: '10px' }}>
+                                    <span style={{ marginLeft: '10px', color: 'var(--primary-light)' }}>
                                         (最新: v{updateInfo.version})
                                     </span>
                                 )}
@@ -2082,72 +2062,71 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         </div>
 
                         <div style={{ width: '100%' }}>
-                            {updateStatus === 'idle' && (
-                                <button className="btn btn-outline btn-small" onClick={handleCheckForUpdates}>
-                                    アップデートを確認
-                                </button>
-                            )}
                             {updateStatus === 'checking' && (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#aaa' }}>
-                                    <div className="spinner" style={{ width: '16px', height: '16px', border: '2px solid #aaa', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-                                    確認中...
+                                <div className="status-indicator">
+                                    <div className="spinner"></div>
+                                    <span>更新を確認中...</span>
                                 </div>
                             )}
-                            {updateStatus === 'available' && (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                    <div style={{ color: '#4ade80' }}>
-                                        新しいバージョンが利用可能です (v{updateInfo?.version})
-                                    </div>
-                                    <button className="btn btn-primary" onClick={handleDownloadUpdate}>
-                                        ダウンロード開始
-                                    </button>
-                                </div>
-                            )}
-                            {updateStatus === 'not-available' && (
-                                <div style={{ color: '#aaa' }}>
-                                    最新バージョンを使用しています。
-                                </div>
-                            )}
+
                             {updateStatus === 'downloading' && (
-                                <div style={{ width: '100%' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '12px' }}>
+                                <div className="download-progress-container" style={{ width: '100%' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '12px' }}>
                                         <span>ダウンロード中...</span>
                                         <span>{Math.round(downloadProgress)}%</span>
                                     </div>
-                                    <div style={{ width: '100%', height: '4px', backgroundColor: '#333', borderRadius: '2px' }}>
-                                        <div style={{ width: `${downloadProgress}%`, height: '100%', backgroundColor: '#0ea5e9', borderRadius: '2px', transition: 'width 0.2s' }}></div>
+                                    <div className="progress-bar-track" style={{ height: '6px', background: 'var(--bg-dark)', borderRadius: '3px' }}>
+                                        <div
+                                            className="progress-bar-fill"
+                                            style={{
+                                                width: `${downloadProgress}%`,
+                                                height: '100%',
+                                                background: 'var(--primary)',
+                                                borderRadius: '3px',
+                                                transition: 'width 0.3s'
+                                            }}
+                                        ></div>
                                     </div>
                                 </div>
                             )}
-                            {updateStatus === 'downloaded' && (
-                                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                    <span style={{ color: '#4ade80' }}>ダウンロード完了！</span>
-                                    <button className="btn btn-primary" onClick={handleQuitAndInstall}>
+
+                            <div className="button-group" style={{ display: 'flex', gap: '12px', marginTop: '4px' }}>
+                                {updateStatus === 'idle' && (
+                                    <button className="btn-save" onClick={handleCheckForUpdates}>
+                                        更新を確認
+                                    </button>
+                                )}
+
+                                {updateStatus === 'available' && (
+                                    <button className="btn-save" onClick={handleDownloadUpdate}>
+                                        アップデートをダウンロード
+                                    </button>
+                                )}
+
+                                {updateStatus === 'downloaded' && (
+                                    <button className="btn-save" onClick={handleQuitAndInstall}>
                                         再起動してインストール
                                     </button>
-                                </div>
-                            )}
-                            {updateStatus === 'error' && (
-                                <div style={{ color: '#ef4444' }}>
-                                    エラーが発生しました: {typeof updateInfo === 'string' ? updateInfo : '不明なエラー'}
-                                </div>
-                            )}
+                                )}
+
+                                {updateStatus === 'not-available' && (
+                                    <span className="settings-description" style={{ color: 'var(--primary-light)' }}>
+                                        最新のバージョンを使用しています。
+                                    </span>
+                                )}
+
+                                {updateStatus === 'error' && (
+                                    <div style={{ color: 'var(--accent)', fontSize: '13px' }}>
+                                        エラーが発生しました: {typeof updateInfo === 'string' ? updateInfo : '不明なエラー'}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
             </section>
         )
     }
-
-    const [availableLibraries, setAvailableLibraries] = useState<{ name: string; path: string }[]>([])
-
-    useEffect(() => {
-        if (activeCategory === 'import' && window.electronAPI) {
-            (window.electronAPI as any).getLibraries()
-                .then((libs: any[]) => setAvailableLibraries(libs))
-                .catch((e: any) => console.error('Failed to get libraries:', e))
-        }
-    }, [activeCategory])
 
     const handleAddWatchPath = async () => {
         if (!window.electronAPI) return
@@ -2227,7 +2206,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     value={clientConfig.downloadPath || ''}
                                     readOnly
                                     className="settings-input"
-                                    style={{ flex: 1, color: '#aaa', cursor: 'not-allowed' }}
+                                    style={{ flex: 1, color: 'var(--text-muted)', cursor: 'not-allowed' }}
                                 />
                                 <button className="btn btn-outline btn-small" onClick={handleSelectDownloadPath}>
                                     変更
@@ -2269,7 +2248,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                             </label>
                         </div>
 
-                        <div className="settings-divider" style={{ margin: '16px 0', borderBottom: '1px solid #3a3a3c' }}></div>
+                        <div className="settings-divider" style={{ margin: '16px 0', borderBottom: '1px solid var(--border)' }}></div>
 
                         <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span className="settings-label" style={{ fontSize: '13px' }}>監視フォルダ設定</span>
@@ -2308,7 +2287,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                                     ))}
                                                 </select>
                                             </div>
-                                            <div style={{ fontSize: '11px', color: '#aaa', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.path}>
+                                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.path}>
                                                 {p.path}
                                             </div>
                                         </div>
@@ -2318,7 +2297,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                             style={{
                                                 background: 'transparent',
                                                 border: 'none',
-                                                color: '#ef4444',
+                                                color: 'var(--accent)',
                                                 cursor: 'pointer',
                                                 padding: '4px'
                                             }}
@@ -2444,21 +2423,6 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
     // ... (renderNetworkSettingsなど)
 
-    // === Profile Settings ===
-    const [nickname, setNickname] = useState('')
-    const [selectedIcon, setSelectedIcon] = useState('👤')
-    // デフォルトのアイコンオプション
-    const DEFAULT_ICONS = [
-        '👤', '😀', '😎', '🐱', '🐶', '🦊', '🐻', '🐼',
-        '🐸', '🦁', '🐯', '🐨', '🐰', '🦄', '🐉', '🌟'
-    ]
-
-    useEffect(() => {
-        if (activeCategory === 'profile' && clientConfig) {
-            setNickname(clientConfig.nickname || '')
-            setSelectedIcon(clientConfig.iconUrl || DEFAULT_ICONS[0])
-        }
-    }, [activeCategory, clientConfig])
 
     const handleSaveProfile = async () => {
         if (!window.electronAPI) return
@@ -2519,8 +2483,8 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                             display: 'flex',
                                             alignItems: 'center',
                                             justifyContent: 'center',
-                                            background: selectedIcon === icon ? 'var(--primary)' : '#27272a',
-                                            border: selectedIcon === icon ? '1px solid var(--primary-light)' : '1px solid #3f3f46',
+                                            background: selectedIcon === icon ? 'var(--primary)' : 'var(--bg-dark)',
+                                            border: selectedIcon === icon ? '1px solid var(--primary-light)' : '1px solid var(--border)',
                                             borderRadius: '8px',
                                             cursor: 'pointer',
                                             transition: 'all 0.2s'
@@ -2537,17 +2501,19 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                                 <div style={{
                                     width: '48px', height: '48px',
-                                    background: '#27272a',
+                                    background: 'var(--bg-dark)',
                                     borderRadius: '50%',
                                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                                     fontSize: '24px',
-                                    border: '2px solid #3f3f46'
+                                    border: '2px solid var(--border)'
                                 }}>
                                     {selectedIcon}
                                 </div>
                                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                                     <span style={{ fontWeight: 'bold', fontSize: '16px' }}>{nickname || '（未設定）'}</span>
-                                    <span style={{ fontSize: '12px', color: '#888' }}>プレビュー</span>
+                                    <div style={{ padding: '8px 12px', backgroundColor: 'var(--bg-dark)', borderRadius: '4px' }}>
+                                        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>プレビュー</span>
+                                    </div>
                                 </div>
                             </div>
                             <div style={{ flex: 1 }}></div>
@@ -2565,28 +2531,33 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
         <div className="settings-modal-overlay" onClick={onClose}>
             <div className="settings-modal-container" onClick={e => e.stopPropagation()}>
                 <div className="settings-modal-sidebar">
-                    <div className="sidebar-header">
+                    <div className="settings-sidebar-header">
                         <h2>環境設定</h2>
                     </div>
-                    <nav className="sidebar-nav">
-                        {categories.map((cat, index) => {
-                            const showGroupAttr = index === 0 || categories[index - 1].group !== cat.group
+                    <div className="settings-sidebar-search">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        <input
+                            type="text"
+                            placeholder="設定を検索..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                    </div>
+                    <nav className="settings-sidebar-nav">
+                        {categories.filter(c =>
+                            c.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                            c.group.toLowerCase().includes(searchQuery.toLowerCase())
+                        ).map((cat, index, filtered) => {
+                            const showGroupAttr = index === 0 || filtered[index - 1].group !== cat.group
                             return (
                                 <div key={cat.id} style={{ display: 'contents' }}>
                                     {showGroupAttr && (
-                                        <div className="nav-group-title" style={{
-                                            fontSize: '11px',
-                                            fontWeight: 600,
-                                            color: '#666',
-                                            padding: '16px 12px 6px',
-                                            textTransform: 'uppercase',
-                                            letterSpacing: '0.05em'
-                                        }}>
+                                        <div className="settings-nav-group-title">
                                             {cat.group}
                                         </div>
                                     )}
                                     <button
-                                        className={`nav-item ${activeCategory === cat.id ? 'active' : ''}`}
+                                        className={`settings-nav-item ${activeCategory === cat.id ? 'active' : ''}`}
                                         onClick={() => setActiveCategory(cat.id)}
                                     >
                                         {cat.icon}
@@ -2600,13 +2571,13 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
                 <div className="settings-modal-main">
                     <header className="settings-header">
-                        <span className="category-title">{categories.find(c => c.id === activeCategory)?.label || ''}</span>
-                        <button className="close-btn" onClick={onClose}>
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="6"></line></svg>
+                        <span className="settings-category-title">{categories.find(c => c.id === activeCategory)?.label || ''}</span>
+                        <button className="settings-close-btn" onClick={onClose}>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="18" x2="18" y2="6"></line></svg>
                         </button>
                     </header>
 
-                    <div className="main-content">
+                    <div className="settings-main-content">
                         {activeCategory === 'general' ? renderGeneralSettings() :
                             activeCategory === 'profile' ? renderProfileSettings() :
                                 activeCategory === 'theme' ? renderThemeSettings() :
@@ -2623,7 +2594,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                                             )}
                     </div>
 
-                    <footer className="main-footer">
+                    <footer className="settings-main-footer">
                         <button className="btn-save" onClick={onClose}>閉じる</button>
                     </footer>
                 </div>
@@ -2634,16 +2605,11 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
 const AudioSettings = ({ clientConfig, setClientConfig }: { clientConfig: ClientConfig, setClientConfig: (config: ClientConfig) => void }) => {
     const [audioDevices, setAudioDevices] = useState<{ name: string, description: string }[]>([])
-    const [loadingDevices, setLoadingDevices] = useState(false)
 
     useEffect(() => {
-        if (window.electronAPI) {
-            setLoadingDevices(true)
-            window.electronAPI.getAudioDevices()
-                .then(devices => setAudioDevices(devices))
-                .catch(console.error)
-                .finally(() => setLoadingDevices(false))
-        }
+        api.getAudioDevices()
+            .then(devices => setAudioDevices(devices))
+            .catch(console.error)
     }, [])
 
     const useMpvAudio = clientConfig?.useMpvAudio || false
@@ -2652,17 +2618,16 @@ const AudioSettings = ({ clientConfig, setClientConfig }: { clientConfig: Client
     const currentDevice = clientConfig?.audioDevice || 'auto'
 
     const updateConfig = async (update: Partial<ClientConfig>) => {
-        if (!window.electronAPI) return
         try {
-            await window.electronAPI.updateClientConfig(update)
+            await api.updateClientConfig(update)
             setClientConfig({ ...clientConfig, ...update })
 
             // Trigger backend updates if needed
             if (update.audioDevice) {
-                await window.electronAPI.setAudioDevice(update.audioDevice)
+                await api.setAudioDevice(update.audioDevice)
             }
             if (update.exclusiveMode !== undefined) {
-                await window.electronAPI.setExclusiveMode(update.exclusiveMode)
+                await api.setExclusiveMode(update.exclusiveMode)
             }
         } catch (e) {
             console.error(e)
@@ -2723,7 +2688,7 @@ const AudioSettings = ({ clientConfig, setClientConfig }: { clientConfig: Client
                             <div className="settings-info">
                                 <span className="settings-label">WASAPI 排他モード (Exclusive Mode)</span>
                                 <span className="settings-description">
-                                    <span style={{ color: '#ffaa00', fontWeight: 'bold' }}>⚠ 実験的機能</span><br />
+                                    <span style={{ color: 'var(--accent)', fontWeight: 'bold' }}>⚠ 実験的機能</span><br />
                                     システムミキサーをバイパスし、ビットパーフェクトな再生を行います。<br />
                                     有効にすると、他のアプリケーションの音声は再生されなくなります。
                                 </span>
@@ -2743,7 +2708,7 @@ const AudioSettings = ({ clientConfig, setClientConfig }: { clientConfig: Client
                             <div className="settings-info">
                                 <span className="settings-label">動画ファイルでも使用する (音声のみ)</span>
                                 <span className="settings-description">
-                                    <span style={{ color: '#ff4444', fontWeight: 'bold' }}>⚠ 画面は真っ暗になります</span><br />
+                                    <span style={{ color: 'var(--accent)', fontWeight: 'bold' }}>⚠ 画面は真っ暗になります</span><br />
                                     MP4などの動画ファイルでも高音質再生を行いますが、<br />映像は表示されません。
                                 </span>
                             </div>

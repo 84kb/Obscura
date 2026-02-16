@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { FilterOptions, ViewSettings, Tag, TagGroup, MediaFile, Folder, ItemInfoType, ElectronAPI } from '../types'
+import { FilterOptions, ViewSettings, Tag, TagGroup, MediaFile, Folder, ItemInfoType } from '../types'
+import { api } from '../api'
 import { useDelayUnmount } from '../hooks/useDelayUnmount'
 import { TagFilterDropdown } from './TagFilterDropdown'
 import { FolderFilterDropdown } from './FolderFilterDropdown'
@@ -29,6 +30,7 @@ interface MainHeaderProps {
     onReload: () => void
 }
 
+import { FileSystemCleanupModal } from './FileSystemCleanupModal'
 import { DuplicateResolutionModal } from './DuplicateResolutionModal'
 import { DuplicateSearchModal } from './DuplicateSearchModal'
 
@@ -83,9 +85,24 @@ export function MainHeader({
     const [isDuplicateSearchOpen, setIsDuplicateSearchOpen] = useState(false)
     const [duplicateResults, setDuplicateResults] = useState<{ [key: string]: MediaFile[] }[] | null>(null)
 
+    // File System Cleanup
+    const [isFileSystemCleanupOpen, setIsFileSystemCleanupOpen] = useState(false)
+    const [filesystemOrphans, setFilesystemOrphans] = useState<any[]>([])
+
     const handleConfirmRefresh = () => {
         setIsRefreshModalOpen(false)
         onRefreshLibrary()
+    }
+
+    const handleFileSystemScan = async () => {
+        try {
+            const orphans = await api.scanFileSystemOrphans()
+            setFilesystemOrphans(orphans)
+            setIsFileSystemCleanupOpen(true)
+        } catch (e) {
+            console.error('Failed to scan filesystem orphans:', e)
+            alert('スキャンに失敗しました')
+        }
     }
 
     // 外部クリックで閉じる
@@ -123,6 +140,7 @@ export function MainHeader({
         return () => document.removeEventListener('mousedown', handleClickOutside)
     }, [])
 
+
     // 選択されたタグ名を取得
     const getSelectedTagNames = () => {
         if (filterOptions.selectedTags.length === 0) return null
@@ -141,7 +159,7 @@ export function MainHeader({
 
         // サムネイルモード変更時はバックエンドの設定も更新する
         if (key === 'thumbnailMode') {
-            (window.electronAPI as unknown as ElectronAPI).updateClientConfig({ thumbnailMode: value as 'speed' | 'quality' })
+            api.updateClientConfig({ thumbnailMode: value as 'speed' | 'quality' })
         }
     }
 
@@ -825,11 +843,11 @@ export function MainHeader({
                 <DuplicateSearchModal
                     onClose={() => setIsDuplicateSearchOpen(false)}
                     onSearch={async (criteria) => {
-                        setIsDuplicateSearchOpen(false)
                         try {
-                            const duplicates = await (window.electronAPI as unknown as ElectronAPI).findLibraryDuplicates(criteria)
+                            const duplicates = await api.findLibraryDuplicates(criteria)
                             if (duplicates && duplicates.length > 0) {
                                 setDuplicateResults(duplicates)
+                                setIsDuplicateSearchOpen(false)
                             } else {
                                 alert('重複ファイルは見つかりませんでした。')
                             }
@@ -837,6 +855,17 @@ export function MainHeader({
                             console.error(e)
                             alert('エラーが発生しました')
                         }
+                    }}
+                    onFileSystemScan={handleFileSystemScan}
+                />
+            )}
+
+            {isFileSystemCleanupOpen && (
+                <FileSystemCleanupModal
+                    orphans={filesystemOrphans}
+                    onClose={() => setIsFileSystemCleanupOpen(false)}
+                    onDeleted={() => {
+                        handleFileSystemScan() // Re-scan to show updated list
                     }}
                 />
             )}

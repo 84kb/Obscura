@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { Tag, TagGroup, Library, RemoteLibrary } from '../types'
 import { useNotification } from '../contexts/NotificationContext'
+import { api } from '../api'
 
 export function useTags(
     activeLibrary: Library | null,
@@ -40,7 +41,7 @@ export function useTags(
             }
         } else {
             try {
-                const loadedTags = await window.electronAPI.getTags()
+                const loadedTags = await api.getTags()
                 setTags(loadedTags as Tag[])
             } catch (error) {
                 console.error('Failed to load tags:', error)
@@ -78,7 +79,7 @@ export function useTags(
             return
         }
         try {
-            const loadedGroups = await window.electronAPI.getTagGroups()
+            const loadedGroups = await api.getTagGroups()
             setTagGroups(loadedGroups as TagGroup[])
         } catch (error) {
             console.error('Failed to load tag groups:', error)
@@ -91,7 +92,7 @@ export function useTags(
         try {
             if (activeRemoteLibrary) {
                 try {
-                    const newTag = await window.electronAPI.createRemoteTag(activeRemoteLibrary.url, activeRemoteLibrary.token, name)
+                    const newTag = await api.createRemoteTag(activeRemoteLibrary.url, activeRemoteLibrary.token, name)
                     await loadTags()
                     return newTag
                 } catch (e: any) {
@@ -101,7 +102,7 @@ export function useTags(
                     throw e
                 }
             }
-            const newTag = await window.electronAPI.createTag(name)
+            const newTag = await api.createTag(name)
             await loadTags()
             return newTag
         } catch (error) {
@@ -115,7 +116,7 @@ export function useTags(
         try {
             if (activeRemoteLibrary) {
                 try {
-                    await window.electronAPI.deleteRemoteTag(activeRemoteLibrary.url, activeRemoteLibrary.token, id)
+                    await api.deleteRemoteTag(activeRemoteLibrary.url, activeRemoteLibrary.token, id)
                     await loadTags()
                     return
                 } catch (e: any) {
@@ -125,7 +126,7 @@ export function useTags(
                     throw e
                 }
             }
-            await window.electronAPI.deleteTag(id)
+            await api.deleteTag(id)
             await loadTags()
         } catch (error) {
             console.error('Failed to delete tag:', error)

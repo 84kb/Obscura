@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { MediaFile, Tag, Folder, FilterOptions, Library, RemoteLibrary } from '../types'
 import { useNotification } from '../contexts/NotificationContext'
+import { api } from '../api'
 
 export function useMediaFiles(
     activeLibrary: Library | null,
@@ -93,7 +94,7 @@ export function useMediaFiles(
                 }
 
                 const targetPage = reset ? 1 : page + 1
-                const result = await window.electronAPI.getMediaFiles(targetPage, LIMIT, filterOptions)
+                const result = await api.getMediaFiles(targetPage, LIMIT, filterOptions)
 
                 if (reset) {
                     setMediaFiles(result.media)
@@ -166,7 +167,7 @@ export function useMediaFiles(
                 })
 
                 // uploadRemoteMedia IPC
-                await window.electronAPI.uploadRemoteMedia(
+                await api.uploadRemoteMedia(
                     activeRemoteLibrary.url,
                     activeRemoteLibrary.token,
                     filePaths,
@@ -184,7 +185,7 @@ export function useMediaFiles(
         } else {
             // Local Import
             try {
-                const imported = await window.electronAPI.importMedia(filePaths)
+                const imported = await api.importMedia(filePaths)
                 await loadMediaFiles()
                 return imported
             } catch (error) {
@@ -212,7 +213,7 @@ export function useMediaFiles(
         try {
             if (activeRemoteLibrary) {
                 try {
-                    await window.electronAPI.addRemoteTagToMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, mediaId, tagId)
+                    await api.addRemoteTagToMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, mediaId, tagId)
                     return
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
@@ -222,7 +223,7 @@ export function useMediaFiles(
                     throw e
                 }
             }
-            await window.electronAPI.addTagToMedia(mediaId, tagId)
+            await api.addTagToMedia(mediaId, tagId)
             await loadMediaFiles()
         } catch (error) {
             console.error('Failed to add tag to media:', error)
@@ -243,7 +244,7 @@ export function useMediaFiles(
         try {
             if (activeRemoteLibrary) {
                 try {
-                    await window.electronAPI.removeRemoteTagFromMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, mediaId, tagId)
+                    await api.removeRemoteTagFromMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, mediaId, tagId)
                     return
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
@@ -253,7 +254,7 @@ export function useMediaFiles(
                     throw e
                 }
             }
-            await window.electronAPI.removeTagFromMedia(mediaId, tagId)
+            await api.removeTagFromMedia(mediaId, tagId)
         } catch (error) {
             console.error('Failed to remove tag from media:', error)
             await loadMediaFiles()
@@ -278,7 +279,7 @@ export function useMediaFiles(
         try {
             if (activeRemoteLibrary) {
                 try {
-                    await window.electronAPI.addRemoteTagsToMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, mediaIds, tagIds)
+                    await api.addRemoteTagsToMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, mediaIds, tagIds)
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
                         addNotification({ type: 'error', title: '権限不足', message: 'タグ一括追加の権限がありません。' })
@@ -288,7 +289,7 @@ export function useMediaFiles(
                 }
                 return
             }
-            await window.electronAPI.addTagsToMedia(mediaIds, tagIds)
+            await api.addTagsToMedia(mediaIds, tagIds)
             await loadMediaFiles()
         } catch (error) {
             console.error('Failed to add tags to media:', error)
@@ -311,7 +312,7 @@ export function useMediaFiles(
         }))
 
         try {
-            await window.electronAPI.addFolderToMedia(mediaId, folderId)
+            await api.addFolderToMedia(mediaId, folderId)
             await loadMediaFiles()
         } catch (error) {
             console.error('Failed to add folder to media:', error)
@@ -330,7 +331,7 @@ export function useMediaFiles(
         }))
 
         try {
-            await window.electronAPI.removeFolderFromMedia(mediaId, folderId)
+            await api.removeFolderFromMedia(mediaId, folderId)
         } catch (error) {
             console.error('Failed to remove folder from media:', error)
             await loadMediaFiles()
@@ -339,42 +340,45 @@ export function useMediaFiles(
 
     // ゴミ箱操作
     const moveToTrash = useCallback(async (id: number) => {
-        // Optimistic Update
-        setMediaFiles(prev => {
-            if (filterOptions.filterType !== 'trash') {
-                return prev.filter(m => m.id !== id)
+        // Optimistic Update: is_deletedフラグを更新
+        setMediaFiles(prev => prev.map(m => {
+            if (m.id === id) {
+                return { ...m, is_deleted: true }
             }
-            return prev.filter(m => m.id !== id)
-        })
+            return m
+        }))
 
         try {
-            await window.electronAPI.moveToTrash(id)
+            await api.moveToTrash(id)
         } catch (error) {
             console.error('Failed to move to trash:', error)
             await loadMediaFiles()
         }
-    }, [loadMediaFiles, filterOptions.filterType])
+    }, [loadMediaFiles])
 
     const restoreFromTrash = useCallback(async (id: number) => {
-        // Optimistic
-        if (filterOptions.filterType === 'trash') {
-            setMediaFiles(prev => prev.filter(m => m.id !== id))
-        }
+        // Optimistic: is_deletedフラグを更新
+        setMediaFiles(prev => prev.map(m => {
+            if (m.id === id) {
+                return { ...m, is_deleted: false }
+            }
+            return m
+        }))
 
         try {
-            await window.electronAPI.restoreFromTrash(id)
+            await api.restoreFromTrash(id)
         } catch (error) {
             console.error('Failed to restore from trash:', error)
             await loadMediaFiles()
         }
-    }, [loadMediaFiles, filterOptions.filterType])
+    }, [loadMediaFiles])
 
     const deletePermanently = useCallback(async (id: number) => {
         // Optimistic
         setMediaFiles(prev => prev.filter(m => m.id !== id))
 
         try {
-            await window.electronAPI.deletePermanently(id)
+            await api.deletePermanently(id)
         } catch (error) {
             console.error('Failed to delete permanently:', error)
             await loadMediaFiles()
@@ -387,7 +391,7 @@ export function useMediaFiles(
 
         try {
             for (const id of ids) {
-                await window.electronAPI.moveToTrash(id)
+                await api.moveToTrash(id)
             }
         } catch (error) {
             console.error('Failed to move files to trash:', error)
@@ -403,7 +407,7 @@ export function useMediaFiles(
 
         try {
             for (const id of ids) {
-                await window.electronAPI.restoreFromTrash(id)
+                await api.restoreFromTrash(id)
             }
         } catch (error) {
             console.error('Failed to restore files from trash:', error)
@@ -419,7 +423,7 @@ export function useMediaFiles(
             if (activeRemoteLibrary) {
                 try {
                     for (const id of ids) {
-                        await window.electronAPI.deleteRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id)
+                        await api.deleteRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id)
                     }
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
@@ -432,7 +436,7 @@ export function useMediaFiles(
             }
 
             for (const id of ids) {
-                await window.electronAPI.deletePermanently(id)
+                await api.deletePermanently(id)
             }
         } catch (error) {
             console.error('Failed to delete files permanently:', error)
@@ -447,7 +451,7 @@ export function useMediaFiles(
         try {
             if (activeRemoteLibrary) {
                 try {
-                    await window.electronAPI.updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { description })
+                    await api.updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { description })
                     return
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
@@ -457,7 +461,7 @@ export function useMediaFiles(
                     throw e
                 }
             }
-            await window.electronAPI.updateDescription(id, description)
+            await api.updateDescription(id, description)
         } catch (error) {
             console.error('Failed to update description:', error)
             await loadMediaFiles()
@@ -467,7 +471,7 @@ export function useMediaFiles(
     // 再生日時更新
     const updateLastPlayed = useCallback(async (id: number) => {
         try {
-            await window.electronAPI.updateLastPlayed(id)
+            await api.updateLastPlayed(id)
             // ローカルステートを即座に更新して再読み込みを回避
             setMediaFiles(prev => prev.map(m => m.id === id ? { ...m, last_played_at: new Date().toISOString() } : m))
         } catch (error) {
@@ -483,7 +487,7 @@ export function useMediaFiles(
         try {
             if (activeRemoteLibrary) {
                 try {
-                    await window.electronAPI.updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { rating })
+                    await api.updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { rating })
                     return
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
@@ -493,7 +497,7 @@ export function useMediaFiles(
                     throw e
                 }
             }
-            await window.electronAPI.updateRating(id, rating)
+            await api.updateRating(id, rating)
         } catch (error) {
             console.error('Failed to update rating:', error)
             await loadMediaFiles()
@@ -508,7 +512,7 @@ export function useMediaFiles(
         try {
             if (activeRemoteLibrary) {
                 try {
-                    await window.electronAPI.updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { artist })
+                    await api.updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { artist })
                     return
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
@@ -519,7 +523,7 @@ export function useMediaFiles(
                 }
             }
             // artist カラムを更新
-            await window.electronAPI.updateArtist(id, artist)
+            await api.updateArtist(id, artist)
             // 関連付けの一貫性のため再読み込み推奨
             await loadMediaFiles()
         } catch (error) {
@@ -538,7 +542,7 @@ export function useMediaFiles(
         } : m))
 
         try {
-            await window.electronAPI.renameMedia(id, newName)
+            await api.renameMedia(id, newName)
             await loadMediaFiles() // パスが変わるためリロード必須
         } catch (error) {
             console.error('Failed to rename media:', error)
