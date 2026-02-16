@@ -467,17 +467,18 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
     // === Profile Settings State ===
     const [nickname, setNickname] = useState('')
-    const [selectedIcon, setSelectedIcon] = useState('👤')
-    // デフォルトのアイコンオプション
-    const DEFAULT_ICONS = [
-        '👤', '😀', '😎', '🐱', '🐶', '🦊', '🐻', '🐼',
-        '🐸', '🦁', '🐯', '🐨', '🐰', '🦄', '🐉', '🌟'
-    ]
+    const [selectedIcon, setSelectedIcon] = useState('')
 
     useEffect(() => {
         if (activeCategory === 'profile' && clientConfig) {
             setNickname(clientConfig.nickname || '')
-            setSelectedIcon(clientConfig.iconUrl || DEFAULT_ICONS[0])
+            const icon = clientConfig.iconUrl || ''
+            // 絵文字なら空文字にする（撤廃）
+            if (icon && !icon.startsWith('data:') && !icon.startsWith('http') && !icon.startsWith('/api')) {
+                setSelectedIcon('')
+            } else {
+                setSelectedIcon(icon)
+            }
         }
     }, [activeCategory, clientConfig])
 
@@ -1711,71 +1712,74 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                     <>
                         <section className="settings-section">
                             <h4 className="section-title">リモートライブラリへの接続</h4>
-                            <div className="settings-card">
+                            <div className="settings-card" style={{ marginBottom: '16px' }}>
                                 <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '12px' }}>
+                                    <div className="settings-info">
+                                        <span className="settings-label">新しいリモートライブラリを追加</span>
+                                        <span className="settings-description">
+                                            ホストのURLとアクセストークンを入力してください。
+                                        </span>
+                                    </div>
+
                                     <div style={{ width: '100%' }}>
-                                        <label className="settings-label" style={{ marginBottom: '8px', display: 'block' }}>ホスト URL</label>
+                                        <label className="settings-label" style={{ marginBottom: '8px', display: 'block' }}>ホストURL</label>
                                         <input
                                             type="text"
-                                            placeholder="http://192.168.1.10:8765"
+                                            placeholder="例: http://192.168.1.10:3000"
                                             value={remoteUrl}
                                             onChange={e => setRemoteUrl(e.target.value)}
                                             className="settings-input"
                                             style={{ width: '100%' }}
                                         />
                                     </div>
+
                                     <div style={{ width: '100%' }}>
-                                        <label className="settings-label" style={{ marginBottom: '8px', display: 'block' }}>アクセストークン (Access Token)</label>
+                                        <label className="settings-label" style={{ marginBottom: '8px', display: 'block' }}>アクセストークン</label>
                                         <input
                                             type="password"
-                                            placeholder="Paste access token here"
+                                            placeholder="公開設定で生成されたキー"
                                             value={remoteKey}
                                             onChange={e => setRemoteKey(e.target.value)}
                                             className="settings-input"
                                             style={{ width: '100%' }}
                                         />
                                     </div>
-                                    <div style={{ width: '100%' }}>
-                                        <label className="settings-label" style={{ marginBottom: '8px', display: 'block' }}>ライブラリ名</label>
-                                        <input
-                                            type="text"
-                                            placeholder="例: 私のライブラリ (接続成功時に自動入力されます)"
-                                            value={remoteName}
-                                            onChange={e => setRemoteName(e.target.value)}
-                                            className="settings-input"
-                                            style={{ width: '100%' }}
-                                        />
-                                    </div>
 
-                                    <div style={{ display: 'flex', gap: '12px', marginTop: '8px', alignItems: 'center' }}>
+                                    <div style={{ display: 'flex', gap: '8px', width: '100%', marginTop: '8px', alignItems: 'center' }}>
                                         <button
-                                            className="btn btn-outline btn-small"
+                                            className={`btn ${connectionStatus === 'testing' ? '' : 'btn-outline'}`}
                                             onClick={handleTestConnection}
-                                            disabled={!remoteUrl || !remoteKey || connectionStatus === 'testing'}
+                                            disabled={connectionStatus === 'testing' || !remoteUrl || !remoteKey}
                                         >
-                                            {connectionStatus === 'testing' ? '確認中...' : '接続テスト'}
+                                            {connectionStatus === 'testing' ? '接続確認中...' : '接続テスト'}
                                         </button>
 
-                                        {connectionStatus === 'success' && (
-                                            <button
-                                                className="settings-button primary"
-                                                onClick={handleAddRemoteLibrary}
-                                                style={{ backgroundColor: '#0ea5e9', border: 'none' }}
-                                            >
-                                                保存して追加
-                                            </button>
-                                        )}
-
-                                        {connectionMsg && (
-                                            <span style={{
-                                                fontSize: '13px',
-                                                color: connectionStatus === 'success' ? '#4ade80' : connectionStatus === 'error' ? '#ef4444' : '#aaa'
-                                            }}>
-                                                {connectionMsg}
-                                            </span>
+                                        {connectionStatus !== 'idle' && (
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                <div style={{
+                                                    width: '8px', height: '8px', borderRadius: '50%',
+                                                    backgroundColor:
+                                                        connectionStatus === 'success' ? '#4caf50' :
+                                                            connectionStatus === 'error' ? '#f44336' : '#999'
+                                                }}></div>
+                                                <span style={{ fontSize: '13px', color: connectionStatus === 'error' ? '#f44336' : 'var(--text-main)' }}>
+                                                    {connectionMsg}
+                                                    {connectionStatus === 'success' && remoteName && (
+                                                        <span style={{ marginLeft: '8px', opacity: 0.8 }}>(ライブラリ: {remoteName})</span>
+                                                    )}
+                                                </span>
+                                            </div>
                                         )}
                                     </div>
                                 </div>
+
+                                {connectionStatus === 'success' && (
+                                    <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end' }}>
+                                        <button className="btn btn-primary" onClick={handleAddRemoteLibrary}>
+                                            このライブラリを追加
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         </section>
 
@@ -2536,36 +2540,14 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
                         <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '12px', marginTop: '16px' }}>
                             <label className="settings-label">アイコン</label>
-                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                                {DEFAULT_ICONS.map(icon => (
-                                    <button
-                                        key={icon}
-                                        type="button"
-                                        style={{
-                                            fontSize: '24px',
-                                            width: '40px',
-                                            height: '40px',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            background: selectedIcon === icon ? 'var(--primary)' : 'var(--bg-dark)',
-                                            border: selectedIcon === icon ? '1px solid var(--primary-light)' : '1px solid var(--border)',
-                                            borderRadius: '8px',
-                                            cursor: 'pointer',
-                                            transition: 'all 0.2s'
-                                        }}
-                                        onClick={() => setSelectedIcon(icon)}
-                                    >
-                                        {icon}
-                                    </button>
-                                ))}
-                                <div style={{ width: '1px', height: '32px', background: 'var(--border)', margin: '0 8px' }}></div>
+                            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                                 <button
                                     type="button"
                                     className="btn btn-secondary"
                                     onClick={() => fileInputRef.current?.click()}
-                                    style={{ height: '40px', padding: '0 12px' }}
+                                    style={{ height: '40px', padding: '0 16px', display: 'flex', alignItems: 'center', gap: '8px' }}
                                 >
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
                                     画像を選択...
                                 </button>
                                 <input
@@ -2575,13 +2557,23 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     style={{ display: 'none' }}
                                     onChange={handleFileSelect}
                                 />
+                                {selectedIcon && (selectedIcon.startsWith('data:') || selectedIcon.startsWith('/api') || selectedIcon.startsWith('http')) && (
+                                    <button
+                                        type="button"
+                                        className="btn btn-outline btn-small"
+                                        onClick={() => setSelectedIcon('')}
+                                        style={{ color: 'var(--accent)' }}
+                                    >
+                                        削除
+                                    </button>
+                                )}
                             </div>
                         </div>
 
                         <div className="settings-row" style={{ marginTop: '24px', justifyContent: 'flex-start', gap: '16px', borderTop: '1px solid #333', paddingTop: '16px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                                 <div style={{
-                                    width: '48px', height: '48px',
+                                    width: '64px', height: '64px',
                                     background: 'var(--bg-dark)',
                                     borderRadius: '50%',
                                     display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -2589,17 +2581,30 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     border: '2px solid var(--border)',
                                     overflow: 'hidden'
                                 }}>
-                                    {selectedIcon && selectedIcon.startsWith('http') || selectedIcon.startsWith('data:') || selectedIcon.startsWith('/api') ? (
+                                    {selectedIcon && (selectedIcon.startsWith('http') || selectedIcon.startsWith('data:') || selectedIcon.startsWith('/api')) ? (
                                         <img src={selectedIcon} alt="icon" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                     ) : (
-                                        selectedIcon
+                                        <div style={{
+                                            width: '100%', height: '100%',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                            backgroundColor: nickname ? (
+                                                (() => {
+                                                    const colors = ['#ff8c42', '#4cc9f0', '#4895ef', '#560bad', '#b5179e', '#7209b7', '#3f37c9', '#4361ee', '#4cc9f0', '#48bfe3'];
+                                                    let hash = 0;
+                                                    for (let i = 0; i < nickname.length; i++) hash = nickname.charCodeAt(i) + ((hash << 5) - hash);
+                                                    return colors[Math.abs(hash) % colors.length];
+                                                })()
+                                            ) : 'var(--bg-card)',
+                                            color: '#fff',
+                                            fontWeight: 'bold'
+                                        }}>
+                                            {nickname ? nickname.slice(0, 1).toUpperCase() : '?'}
+                                        </div>
                                     )}
                                 </div>
                                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                    <span style={{ fontWeight: 'bold', fontSize: '16px' }}>{nickname || '（未設定）'}</span>
-                                    <div style={{ padding: '8px 12px', backgroundColor: 'var(--bg-dark)', borderRadius: '4px' }}>
-                                        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>プレビュー</span>
-                                    </div>
+                                    <span style={{ fontWeight: 'bold', fontSize: '18px', color: 'var(--text-main)' }}>{nickname || '（未設定）'}</span>
+                                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>プレビュー</span>
                                 </div>
                             </div>
                             <div style={{ flex: 1 }}></div>

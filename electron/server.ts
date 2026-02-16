@@ -625,6 +625,21 @@ export function startServer(port: number): Promise<void> {
                 }
             })
 
+            expressApp.get('/api/users', authMiddleware, requirePermission('READ_ONLY'), (_req, res) => {
+                try {
+                    const users = sharedUserDB.getAllUsers().map(u => ({
+                        id: u.id,
+                        nickname: u.nickname,
+                        iconUrl: u.iconUrl,
+                        lastAccessAt: u.lastAccessAt,
+                        isActive: u.isActive
+                    }))
+                    res.json(users)
+                } catch (e) {
+                    res.status(500).json({ error: { code: 'SERVER_ERROR' } })
+                }
+            })
+
             // グローバルエラーハンドラー (最後の砦)
             expressApp.use((err: any, req: Request, res: Response, next: NextFunction) => {
                 logError('server', `Unhandled error at ${req.method} ${req.url}`, err)

@@ -541,30 +541,46 @@ export function Inspector({
                                 }).sort((a, b) => {
                                     if (a.isOnline === b.isOnline) return a.nickname.localeCompare(b.nickname)
                                     return a.isOnline ? -1 : 1
-                                }).map(user => (
-                                    <div key={user.id} className={`user-item ${user.isOnline ? 'online' : 'offline'}`}>
-                                        <div className="user-avatar">
-                                            {user.iconUrl ? (
-                                                <img
-                                                    src={user.iconUrl}
-                                                    alt={user.nickname}
-                                                    style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
-                                                />
-                                            ) : (
-                                                <div className="user-avatar-placeholder">
-                                                    {user.nickname.slice(0, 2).toUpperCase()}
+                                }).map(user => {
+                                    // ユーザー名から色を生成する
+                                    const getAvatarColor = (name: string) => {
+                                        const colors = [
+                                            '#ff8c42', '#4cc9f0', '#4895ef', '#560bad', '#b5179e',
+                                            '#7209b7', '#3f37c9', '#4361ee', '#4cc9f0', '#48bfe3'
+                                        ]
+                                        let hash = 0
+                                        for (let i = 0; i < name.length; i++) {
+                                            hash = name.charCodeAt(i) + ((hash << 5) - hash)
+                                        }
+                                        return colors[Math.abs(hash) % colors.length]
+                                    }
+                                    const avatarBgColor = getAvatarColor(user.nickname)
+
+                                    return (
+                                        <div key={user.id} className={`user-item ${user.isOnline ? 'online' : 'offline'}`}>
+                                            <div className="user-avatar">
+                                                {user.iconUrl && (user.iconUrl.startsWith('data:') || user.iconUrl.startsWith('/') || user.iconUrl.startsWith('http')) ? (
+                                                    <img
+                                                        src={user.iconUrl}
+                                                        alt={user.nickname}
+                                                        style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                                                    />
+                                                ) : (
+                                                    <div className="user-avatar-placeholder" style={{ backgroundColor: avatarBgColor }}>
+                                                        {user.nickname.slice(0, 1).toUpperCase()}
+                                                    </div>
+                                                )}
+                                                <div className="user-status-indicator"></div>
+                                            </div>
+                                            <div className="user-info">
+                                                <div className="user-name" title={user.nickname}>{user.nickname}</div>
+                                                <div className="user-status-text">
+                                                    {user.isOnline ? 'オンライン' : `最終アクセス: ${new Date(user.lastAccessAt).toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}`}
                                                 </div>
-                                            )}
-                                            <div className="user-status-indicator"></div>
-                                        </div>
-                                        <div className="user-info">
-                                            <div className="user-name" title={user.nickname}>{user.nickname}</div>
-                                            <div className="user-status-text">
-                                                {user.isOnline ? 'オンライン' : `最終アクセス: ${new Date(user.lastAccessAt).toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}`}
                                             </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    )
+                                })}
                             </div>
                         </div>
                     )}

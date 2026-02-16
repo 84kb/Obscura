@@ -142,6 +142,7 @@ try {
 
         // ユーザー管理
         getSharedUsers: () => ipcRenderer.invoke('get-shared-users'),
+        getRemoteSharedUsers: (params) => ipcRenderer.invoke('get-remote-shared-users', params),
         addSharedUser: (user) => ipcRenderer.invoke('add-shared-user', user),
         deleteSharedUser: (userId) => ipcRenderer.invoke('delete-shared-user', userId),
         updateSharedUser: (userId, updates) => ipcRenderer.invoke('update-shared-user', userId, updates),

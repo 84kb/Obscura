@@ -11,9 +11,8 @@ import { SettingsModal } from './components/SettingsModal'
 import { ContextMenu } from './components/ContextMenu'
 import { ConfirmModal } from './components/ConfirmModal'
 import { SubfolderGrid } from './components/SubfolderGrid'
-import { ProfileSetupModal } from './components/ProfileSetupModal'
 import { useLibrary } from './hooks/useLibrary'
-import { MediaFile, AppSettings, RemoteLibrary, ViewSettings, defaultViewSettings, ClientConfig, SharedUser } from './types'
+import { MediaFile, AppSettings, ViewSettings, defaultViewSettings, ClientConfig, SharedUser } from './types'
 import { MainHeader } from './components/MainHeader'
 import { useSocket } from './hooks/useSocket'
 import { useTheme } from './hooks/useTheme'
@@ -260,13 +259,36 @@ function AppContent() {
     useEffect(() => {
         const fetchUsers = async () => {
             try {
-                const users = await api.getSharedUsers()
-
-                // URL補完
+                let users: SharedUser[] = []
                 let baseUrl = ''
+
                 if (activeRemoteLibrary) {
                     baseUrl = activeRemoteLibrary.url
+                    try {
+                        // トークンが分割されていない場合はurl/tokenから抽出を試みる
+                        let ut = activeRemoteLibrary.userToken
+                        let at = activeRemoteLibrary.accessToken
+
+                        if (!ut || !at) {
+                            if (activeRemoteLibrary.token && activeRemoteLibrary.token.includes(':')) {
+                                const parts = activeRemoteLibrary.token.split(':')
+                                ut = parts[0]
+                                at = parts[1]
+                            } else {
+                                at = activeRemoteLibrary.token
+                            }
+                        }
+
+                        users = await api.getRemoteSharedUsers({
+                            url: activeRemoteLibrary.url,
+                            userToken: ut || '',
+                            accessToken: at || ''
+                        })
+                    } catch (e) {
+                        console.error('Failed to fetch remote users:', e)
+                    }
                 } else {
+                    users = await api.getSharedUsers()
                     try {
                         const serverConfig = await api.getServerConfig()
                         if (serverConfig && serverConfig.port) {
@@ -675,9 +697,6 @@ function AppContent() {
         localStorage.setItem('app_settings', JSON.stringify(settings))
     }, [settings])
 
-    // リモートライブラリ管理
-    const [remoteLibraries, setRemoteLibraries] = useState<RemoteLibrary[]>([])
-
     // 重複検知・解決用ステート
     const [duplicateQueue, setDuplicateQueue] = useState<{ newMedia: MediaFile; existingMedia: MediaFile; onResolve?: (media: MediaFile) => void }[]>([])
 
@@ -730,24 +749,6 @@ function AppContent() {
         }
     }
 
-    // プロファイル設定モーダル
-    const [showProfileSetup, setShowProfileSetup] = useState(false)
-    const [profileSetupLibrary, setProfileSetupLibrary] = useState<string>('')
-
-    useEffect(() => {
-        const loadRemoteLibraries = async () => {
-            try {
-                const config = await api.getClientConfig()
-                if (config && config.remoteLibraries) {
-                    setRemoteLibraries(config.remoteLibraries)
-                }
-            } catch (error) {
-                console.error("Failed to load remote libraries:", error)
-            }
-        }
-        loadRemoteLibraries()
-    }, [showSettingsModal]) // 設定モーダルが閉じたときに更新
-
     // リモートライブラリ接続時にプロファイルをチェック
     useEffect(() => {
         if (!activeRemoteLibrary) return
@@ -762,10 +763,15 @@ function AppContent() {
 
                 if (response.ok) {
                     const profile = await response.json()
-                    // ニックネームが未設定の場合、設定モーダルを表示
-                    if (!profile.nickname) {
-                        setProfileSetupLibrary(activeRemoteLibrary.name || 'リモートライブラリ')
-                        setShowProfileSetup(true)
+                    // ニックネームが未設定の場合、ローカルのニックネームが設定されていれば自動同期
+                    if (!profile.nickname && clientConfig?.nickname) {
+                        console.log(`[App] Auto-syncing profile to remote library: ${activeRemoteLibrary.name}`)
+                        await (window.electronAPI as any).updateRemoteProfile(
+                            activeRemoteLibrary.url,
+                            activeRemoteLibrary.token,
+                            clientConfig.nickname,
+                            clientConfig.iconUrl
+                        )
                     }
                 }
             } catch (error) {
@@ -774,33 +780,7 @@ function AppContent() {
         }
 
         checkProfile()
-    }, [activeRemoteLibrary, myUserToken])
-
-    // プロファイル保存ハンドラー
-    const handleSaveProfile = async (profile: { nickname: string; iconUrl?: string }) => {
-        if (!activeRemoteLibrary) return
-        if (!myUserToken) {
-            alert('認証トークンがありません。再接続してください。')
-            return
-        }
-
-        const response = await fetch(`${activeRemoteLibrary.url}/api/profile`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                ...getAuthHeaders(activeRemoteLibrary.token, myUserToken)
-            },
-            body: JSON.stringify(profile)
-        })
-
-        if (!response.ok) {
-            const error = await response.json()
-            throw new Error(error.error?.message || 'プロファイルの保存に失敗しました')
-        }
-
-        setShowProfileSetup(false)
-    }
-
+    }, [activeRemoteLibrary, myUserToken, clientConfig])
 
     // コンテキストメニュー
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; media: MediaFile } | null>(null)
@@ -1026,7 +1006,7 @@ function AppContent() {
         }
 
         // リモートライブラリかチェック
-        const remoteLib = remoteLibraries.find(l => l.id === libraryId)
+        const remoteLib = (clientConfig?.remoteLibraries || []).find((l: any) => l.id === libraryId)
 
         if (remoteLib) {
             // リモート転送処理
@@ -1521,7 +1501,7 @@ function AppContent() {
                 }}
                 folders={folders}
                 libraries={libraries}
-                remoteLibraries={remoteLibraries}
+                remoteLibraries={clientConfig?.remoteLibraries || []}
                 activeLibrary={activeLibrary}
                 activeRemoteLibrary={activeRemoteLibrary}
                 onCreateFolder={createFolder}
@@ -1652,7 +1632,7 @@ function AppContent() {
                     onShowInExplorer={handleShowInExplorer}
                     onAddToFolder={handleAddToFolder}
                     availableLibraries={availableLibraries}
-                    remoteLibraries={remoteLibraries}
+                    remoteLibraries={clientConfig?.remoteLibraries || []}
                     onAddToLibrary={handleAddToLibrary}
                     onRename={() => {
                         setRenamingMediaId(contextMenu.media.id)
@@ -1737,14 +1717,6 @@ function AppContent() {
                     onCancel={() => setDeleteConfirmIds([])}
                 />
             )}
-
-            {/* プロファイル設定モーダル */}
-            <ProfileSetupModal
-                isOpen={showProfileSetup}
-                libraryName={profileSetupLibrary}
-                onSave={handleSaveProfile}
-                onClose={() => setShowProfileSetup(false)}
-            />
 
             {isDragging && (
                 <div className="app-drag-overlay">

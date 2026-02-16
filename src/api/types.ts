@@ -108,6 +108,7 @@ export interface IMediaLibraryAPI {
 
     // ユーザー管理
     getSharedUsers(): Promise<SharedUser[]>;
+    getRemoteSharedUsers(params: { url: string; userToken: string; accessToken: string }): Promise<SharedUser[]>;
     addSharedUser(user: Omit<SharedUser, 'id' | 'createdAt' | 'lastAccessAt'>): Promise<SharedUser>;
     deleteSharedUser(userId: string): Promise<void>;
     updateSharedUser(userId: string, updates: Partial<SharedUser>): Promise<void>;

@@ -1434,6 +1434,28 @@ ipcMain.handle('test-connection', async (_, { url, token }: { url: string; token
     }
 })
 
+ipcMain.handle('get-remote-shared-users', async (_, { url, userToken, accessToken }: { url: string; userToken: string; accessToken: string }) => {
+    try {
+        const baseUrl = url.replace(/\/$/, '')
+        const apiUrl = `${baseUrl}/api/users`
+        const response = await fetch(apiUrl, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'X-User-Token': userToken
+            }
+        })
+        if (response.ok) {
+            return await response.json()
+        } else {
+            throw new Error(`Failed to fetch remote users: ${response.status} ${response.statusText}`)
+        }
+    } catch (e: any) {
+        console.error('get-remote-shared-users error:', e)
+        throw e
+    }
+})
+
 ipcMain.handle('add-remote-library', async (_, { name, url, token }: { name: string; url: string; token: string }) => {
     try {
         const config = getClientConfig()
