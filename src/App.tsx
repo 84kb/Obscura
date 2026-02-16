@@ -281,7 +281,7 @@ function AppContent() {
 
                         users = await api.getRemoteSharedUsers({
                             url: activeRemoteLibrary.url,
-                            userToken: ut || '',
+                            userToken: ut || myUserToken || '',
                             accessToken: at || ''
                         })
                     } catch (e) {
