@@ -14,6 +14,7 @@ export function useLibrary() {
     const [activeLibrary, setActiveLibrary] = useState<Library | null>(null)
     const [activeRemoteLibrary, setActiveRemoteLibrary] = useState<RemoteLibrary | null>(null)
     const [myUserToken, setMyUserToken] = useState<string>('')
+    const [isUserTokenLoaded, setIsUserTokenLoaded] = useState(false)
     const [randomSeed, setRandomSeed] = useState<number>(Date.now())
     const [filterOptions, setFilterOptions] = useState<FilterOptions>({
         searchQuery: '',
@@ -128,6 +129,7 @@ export function useLibrary() {
     // フォルダー (ex-Genre) 読み込み
     const loadFolders = useCallback(async () => {
         if (activeRemoteLibrary) {
+            if (!isUserTokenLoaded) return
             try {
                 const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
                 const response = await fetch(`${baseUrl}/api/folders`, {
@@ -149,10 +151,8 @@ export function useLibrary() {
                 setFolders([])
             }
         }
-    }, [activeRemoteLibrary, myUserToken])
+    }, [activeRemoteLibrary, myUserToken, isUserTokenLoaded])
 
-
-    // ... 
 
     // フォルダー (ex-Genre) 作成
     const createFolder = useCallback(async (name: string, parentId?: number | null) => {
@@ -258,6 +258,8 @@ export function useLibrary() {
                 }
             } catch (e) {
                 console.error('Failed to load client config in useLibrary', e)
+            } finally {
+                setIsUserTokenLoaded(true)
             }
         }
         loadConfig()
@@ -283,6 +285,9 @@ export function useLibrary() {
     // メディアファイル読み込み
     const loadMediaFiles = useCallback(async () => {
         if (activeRemoteLibrary) {
+            // トークン読み込み待ち
+            if (!isUserTokenLoaded) return
+
             // リモートから取得
             try {
                 setLoading(true)
@@ -319,11 +324,12 @@ export function useLibrary() {
                 console.error('Failed to load media files:', error)
             }
         }
-    }, [activeRemoteLibrary, activeLibrary, transformRemoteMedia, myUserToken])
+    }, [activeRemoteLibrary, activeLibrary, transformRemoteMedia, myUserToken, isUserTokenLoaded])
 
     // タグ読み込み
     const loadTags = useCallback(async () => {
         if (activeRemoteLibrary) {
+            if (!isUserTokenLoaded) return
             try {
                 const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
                 const response = await fetch(`${baseUrl}/api/tags`, {
@@ -344,11 +350,12 @@ export function useLibrary() {
                 console.error('Failed to load tags:', error)
             }
         }
-    }, [activeRemoteLibrary, myUserToken])
+    }, [activeRemoteLibrary, myUserToken, isUserTokenLoaded])
 
     // タググループ読み込み (現在リモートAPI未実装のためスキップまたは実装が必要。一旦スキップ)
     const loadTagGroups = useCallback(async () => {
         if (activeRemoteLibrary) {
+            if (!isUserTokenLoaded) return
             try {
                 const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
                 const response = await fetch(`${baseUrl}/api/tag-groups`, {
@@ -369,7 +376,7 @@ export function useLibrary() {
         } catch (error) {
             console.error('Failed to load tag groups:', error)
         }
-    }, [activeRemoteLibrary, myUserToken])
+    }, [activeRemoteLibrary, myUserToken, isUserTokenLoaded])
 
 
     // フォルダー選択とスキャン

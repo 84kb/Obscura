@@ -78,8 +78,13 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
             accessToken = req.query.accessToken as string
             userToken = req.query.userToken as string
         } else {
+            console.warn(`[Auth] Missing token. Headers: ${JSON.stringify(req.headers)}`)
             return res.status(401).json({ error: { code: 'INVALID_TOKEN', message: 'トークンが不足しています' } })
         }
+
+        // デバッグログ
+        // console.log(`[Auth] AccessToken: ${accessToken ? '***' : 'missing'}, UserToken: ${userToken ? 'exists' : 'missing'}`)
+
 
         const userTokenValidation = validateUserToken(userToken)
         const accessTokenValidation = validateAccessToken(accessToken)
