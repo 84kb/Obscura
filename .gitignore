@@ -57,3 +57,10 @@ Thumbs.db
 *.db
 *.db-shm
 *.db-wal
+
+# Security - NEVER commit these
+.cert/
+tokens.json
+*.pem
+*.key
+!*.cert.pem
