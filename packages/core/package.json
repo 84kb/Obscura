@@ -1,0 +1,7 @@
+{
+    "name": "@obscura/core",
+    "version": "0.7.15",
+    "private": true,
+    "main": "src/index.ts",
+    "types": "src/index.ts"
+}

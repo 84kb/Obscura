@@ -3,6 +3,69 @@
 
 <head>
   <meta charset="UTF-8" />
+  <!-- テーマをCSS読み込みより前に即時適用（フラッシュ防止） -->
+  <script>
+    ; (function () {
+      var id = localStorage.getItem('active_theme_id');
+      var themes = {
+        'default-dark': '--bg-dark:#1a1412;--bg-card:#2a2220;--bg-sidebar:#221c1a;--bg-hover:#3a3230;--primary:#ff8c42;--primary-hover:#ff7722;--primary-light:#ffb380;--accent:#ffa726;--text-main:#f5f0eb;--text-muted:#c4b5a0;--border:#3d3430',
+        'default-light': '--bg-dark:#ffffff;--bg-card:#f3f4f6;--bg-sidebar:#f9fafb;--bg-hover:#e5e7eb;--primary:#3b82f6;--primary-hover:#2563eb;--primary-light:#60a5fa;--accent:#f59e0b;--text-main:#1f2937;--text-muted:#6b7280;--border:#e5e7eb',
+        'default-gray': '--bg-dark:#202020;--bg-card:#2d2d2d;--bg-sidebar:#252525;--bg-hover:#383838;--primary:#a0a0a0;--primary-hover:#b0b0b0;--primary-light:#808080;--accent:#808080;--text-main:#e0e0e0;--text-muted:#a0a0a0;--border:#404040',
+        'nord': '--bg-dark:#2e3440;--bg-card:#3b4252;--bg-sidebar:#242933;--bg-hover:#434c5e;--primary:#88c0d0;--primary-hover:#81a1c1;--primary-light:#8fbcbb;--accent:#ebcb8b;--text-main:#eceff4;--text-muted:#d8dee9;--border:#4c566a',
+        'tokyo-night': '--bg-dark:#1a1b26;--bg-card:#24283b;--bg-sidebar:#16161e;--bg-hover:#292e42;--primary:#7aa2f7;--primary-hover:#89ddff;--primary-light:#bb9af7;--accent:#ff9e64;--text-main:#c0caf5;--text-muted:#a9b1d6;--border:#3b4261',
+        'rose-pine-moon': '--bg-dark:#232136;--bg-card:#2a273f;--bg-sidebar:#393552;--bg-hover:#44415a;--primary:#ea9a97;--primary-hover:#ebbcba;--primary-light:#f6c3d6;--accent:#c4a7e7;--text-main:#e0def4;--text-muted:#908caa;--border:#56526e',
+        'catppuccin-macchiato': '--bg-dark:#24273a;--bg-card:#363a4f;--bg-sidebar:#1e2030;--bg-hover:#494d64;--primary:#f5bde6;--primary-hover:#c6a0f6;--primary-light:#b7bdf8;--accent:#ee99a0;--text-main:#cad3f5;--text-muted:#a5adcb;--border:#5b6078',
+        'catppuccin-frappe': '--bg-dark:#303446;--bg-card:#414559;--bg-sidebar:#232634;--bg-hover:#51576d;--primary:#81c8be;--primary-hover:#99d1db;--primary-light:#85c1dc;--accent:#ca9ee6;--text-main:#c6d0f5;--text-muted:#a5adce;--border:#626880',
+        'everforest': '--bg-dark:#2d353b;--bg-card:#343f44;--bg-sidebar:#232a2e;--bg-hover:#3d484d;--primary:#a7c080;--primary-hover:#d3c6aa;--primary-light:#83c092;--accent:#dbbc7f;--text-main:#d3c6aa;--text-muted:#9da9a0;--border:#475258'
+      };
+      var css = id ? themes[id] : null;
+      if (!css && id) {
+        // 1. 高速化のため、CSS形式で保存されたキャッシュを優先確認
+        css = localStorage.getItem('active_theme_inline_css');
+
+        // 2. なければJSON形式（バックアップ）を確認
+        if (!css) {
+          var c = localStorage.getItem('active_theme_colors');
+          if (c) {
+            try {
+              var o = JSON.parse(c);
+              css = Object.keys(o).map(function (k) { return k + ':' + o[k] }).join(';');
+            } catch (e) { }
+          }
+        }
+
+        // 3. 全カスタムテーマリストから検索
+        if (!css) {
+          var ct = localStorage.getItem('custom_themes');
+          if (ct) {
+            try {
+              var list = JSON.parse(ct);
+              for (var i = 0; i < list.length; i++) {
+                if (list[i].id === id) {
+                  var colors = list[i].colors;
+                  var vars = {
+                    '--bg-dark': colors.bgDark, '--bg-card': colors.bgCard,
+                    '--bg-sidebar': colors.bgSidebar, '--bg-hover': colors.bgHover,
+                    '--primary': colors.primary, '--primary-hover': colors.primaryHover,
+                    '--primary-light': colors.primaryLight, '--accent': colors.accent,
+                    '--text-main': colors.textMain, '--text-muted': colors.textMuted,
+                    '--border': colors.border
+                  };
+                  css = Object.keys(vars).map(function (k) { return k + ':' + vars[k] }).join(';');
+                  break;
+                }
+              }
+            } catch (e) { }
+          }
+        }
+      }
+      if (!css) css = themes['default-dark'];
+      var s = document.createElement('style');
+      s.id = 'theme-preload';
+      s.textContent = ':root{' + css + '}';
+      document.documentElement.appendChild(s);
+    })();
+  </script>
   <link rel="icon" type="image/svg+xml" href="/vite.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
   <title>Obscura</title>
@@ -10,7 +73,7 @@
 
 <body>
   <div id="root"></div>
-  <script type="module" src="/src/main.tsx"></script>
+  <script type="module" src="/apps/desktop/src/main.tsx"></script>
 </body>
 
 </html>

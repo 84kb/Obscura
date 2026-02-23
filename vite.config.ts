@@ -12,7 +12,7 @@ export default defineConfig({
         electron([
             {
                 // メインプロセス
-                entry: 'electron/main.ts',
+                entry: 'apps/desktop/electron/main.ts',
                 onstart(args) {
                     const distPath = path.join(process.cwd(), 'dist-electron')
 
@@ -36,7 +36,7 @@ export default defineConfig({
                     }
 
                     // プリロードスクリプトを直接コピー（ビルドプロセスをスキップ）
-                    const preloadSrc = path.join(process.cwd(), 'electron', 'preload.cjs')
+                    const preloadSrc = path.join(process.cwd(), 'apps', 'desktop', 'electron', 'preload.cjs')
                     const preloadDest = path.join(distPath, 'preload.cjs')
                     try {
                         if (fs.existsSync(preloadSrc)) {
@@ -77,7 +77,7 @@ export default defineConfig({
                         outDir: 'dist-electron',
                         minify: false,
                         lib: {
-                            entry: 'electron/main.ts',
+                            entry: 'apps/desktop/electron/main.ts',
                             formats: ['cjs'],
                             fileName: () => 'main.cjs',
                         },

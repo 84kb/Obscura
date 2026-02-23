@@ -1,8 +1,12 @@
 {
   "name": "obscura",
-  "version": "0.7.11",
+  "version": "0.7.21",
   "description": "ライブラリ型メディアプレイヤー",
   "main": "dist-electron/main.cjs",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev": "vite",
     "bump": "node scripts/bump-version.js",
@@ -56,8 +60,10 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@emotion/is-prop-valid": "^1.4.0",
     "@types/fluent-ffmpeg": "^2.1.28",
     "@types/multer": "^2.0.0",
+    "@xpadev-net/niconicomments": "^0.2.76",
     "7zip-bin": "^5.2.0",
     "chokidar": "^3.6.0",
     "cors": "^2.8.5",
@@ -100,8 +106,9 @@
       "icon": "build/icon.ico"
     },
     "nsis": {
-      "oneClick": true,
-      "perMachine": false,
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": false
     },
     "extraResources": [

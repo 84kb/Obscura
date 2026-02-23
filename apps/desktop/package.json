@@ -1,0 +1,14 @@
+{
+    "name": "@obscura/desktop",
+    "version": "0.7.15",
+    "private": true,
+    "main": "dist-electron/main.cjs",
+    "scripts": {
+        "dev": "vite",
+        "build": "tsc && vite build && electron-builder",
+        "preview": "vite preview"
+    },
+    "dependencies": {
+        "@obscura/core": "*"
+    }
+}

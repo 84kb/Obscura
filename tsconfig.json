@@ -23,8 +23,9 @@
         "allowSyntheticDefaultImports": true
     },
     "include": [
-        "src",
-        "electron"
+        "apps/*/src",
+        "apps/*/electron",
+        "packages/*/src"
     ],
     "references": [
         {
@@ -32,6 +33,6 @@
         }
     ],
     "exclude": [
-        "src/mobile"
+        "apps/android"
     ]
 }
