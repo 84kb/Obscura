@@ -61,7 +61,7 @@
 }
 
 .list-view-row.selected {
-    background-color: rgba(255, 140, 66, 0.15);
+    background-color: color-mix(in srgb, var(--primary), transparent 85%);
 }
 
 .list-view-cell {

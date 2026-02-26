@@ -45,6 +45,46 @@ export function initializePluginSystem() {
             console.log(`[PluginSystem] Unregistered player overlay: ${id}`);
         },
 
+        media: {
+            get: async (id: number) => {
+                return await window.electronAPI.getMediaFile(id);
+            },
+            getSelected: async () => {
+                const selected = await window.electronAPI.getSelectedMedia();
+                return selected[0] || null;
+            },
+            getSelection: async () => {
+                return await window.electronAPI.getSelectedMedia();
+            },
+            update: async (id: number, updates: Partial<MediaFile>) => {
+                return await window.electronAPI.updateMedia(id, updates);
+            },
+            addTag: async (mediaId: number, tagId: number) => {
+                return await window.electronAPI.addTagToMedia(mediaId, tagId);
+            },
+            removeTag: async (mediaId: number, tagId: number) => {
+                return await window.electronAPI.removeTagFromMedia(mediaId, tagId);
+            },
+            import: async (filePaths: string[]) => {
+                return await window.electronAPI.importMedia(filePaths);
+            }
+        },
+
+        ui: {
+            showNotification: (options: any) => {
+                window.electronAPI.showNotification({
+                    title: options.title,
+                    message: options.description || options.message || ''
+                });
+            },
+            showMessageBox: async (options: any) => {
+                return await window.electronAPI.showMessageBox(options);
+            },
+            copyToClipboard: async (text: string) => {
+                await window.electronAPI.copyToClipboard(text);
+            }
+        },
+
         system: {
             fetch: async (url: string, options?: any) => {
                 return await window.electronAPI.pluginFetch(url, options);
@@ -60,7 +100,22 @@ export function initializePluginSystem() {
             },
             loadCommentFile: async (mediaFilePath: string) => {
                 return await window.electronAPI.loadCommentFile(mediaFilePath);
+            },
+            openPath: async (path: string) => {
+                await window.electronAPI.openPath(path);
+            },
+            openExternal: async (url: string) => {
+                await window.electronAPI.openExternal(url);
+            },
+            storage: {
+                get: async (_key: string) => null, // TODO
+                set: async (_key: string, _value: any) => { } // TODO
             }
+        },
+
+        on: (event: any, callback: (...args: any[]) => void) => {
+            const wrappedCallback = (_e: any, ...args: any[]) => callback(...args);
+            return window.electronAPI.on(event, wrappedCallback);
         }
     };
 

@@ -27,19 +27,41 @@ export function RatingFilterDropdown({
         return () => document.removeEventListener('keydown', handleKeyDown)
     }, [onClose])
 
-    const toggleRating = (rating: number) => {
-        const currentSelected = filterOptions.selectedRatings || []
-        let newSelected: number[]
+    const toggleRating = (rating: number, e?: React.MouseEvent) => {
+        if (e) {
+            e.preventDefault()
+            e.stopPropagation()
+        }
 
-        if (currentSelected.includes(rating)) {
-            newSelected = currentSelected.filter(r => r !== rating)
+        const isRightClick = e ? (e.button === 2 || e.ctrlKey) : false
+        const currentSelected = filterOptions.selectedRatings || []
+        const currentExcluded = filterOptions.excludedRatings || []
+
+        let newSelected = [...currentSelected]
+        let newExcluded = [...currentExcluded]
+
+        if (isRightClick) {
+            // 右クリック: 除外の切り替え
+            if (currentExcluded.includes(rating)) {
+                newExcluded = currentExcluded.filter(r => r !== rating)
+            } else {
+                newExcluded = [...currentExcluded, rating]
+                newSelected = currentSelected.filter(r => r !== rating)
+            }
         } else {
-            newSelected = [...currentSelected, rating]
+            // 左クリック: 選択の切り替え
+            if (currentSelected.includes(rating)) {
+                newSelected = currentSelected.filter(r => r !== rating)
+            } else {
+                newSelected = [...currentSelected, rating]
+                newExcluded = currentExcluded.filter(r => r !== rating)
+            }
         }
 
         onFilterChange({
             ...filterOptions,
-            selectedRatings: newSelected
+            selectedRatings: newSelected,
+            excludedRatings: newExcluded
         })
     }
 
@@ -67,14 +89,18 @@ export function RatingFilterDropdown({
             <div className="rating-filter-list">
                 {ratings.map(rating => {
                     const isSelected = (filterOptions.selectedRatings || []).includes(rating)
+                    const isExcluded = (filterOptions.excludedRatings || []).includes(rating)
+
                     return (
                         <div
                             key={rating}
-                            className={`rating-filter-item ${isSelected ? 'selected' : ''}`}
-                            onClick={() => toggleRating(rating)}
+                            className={`rating-filter-item ${isSelected ? 'selected' : ''} ${isExcluded ? 'excluded' : ''}`}
+                            onClick={(e) => toggleRating(rating, e)}
+                            onContextMenu={(e) => toggleRating(rating, e)}
                         >
                             <div className="rating-checkbox">
                                 {isSelected && <span className="check-mark">✓</span>}
+                                {isExcluded && <span className="exclude-mark">×</span>}
                             </div>
                             <div className="rating-stars">
                                 {rating > 0 ? renderStars(rating) : <span className="no-rating-text">評価なし</span>}

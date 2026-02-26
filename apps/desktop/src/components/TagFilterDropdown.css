@@ -75,7 +75,7 @@
 }
 
 .mode-btn.active {
-    background: rgba(255, 140, 66, 0.15);
+    background: color-mix(in srgb, var(--primary), transparent 85%);
     border-color: var(--primary);
     color: var(--primary);
 }
@@ -135,7 +135,7 @@
 }
 
 .group-item.active {
-    background: rgba(255, 140, 66, 0.15);
+    background: color-mix(in srgb, var(--primary), transparent 85%);
     color: var(--primary);
 }
 
@@ -167,7 +167,7 @@
 }
 
 .tag-item.selected {
-    background: rgba(255, 140, 66, 0.1);
+    background: color-mix(in srgb, var(--primary), transparent 90%);
 }
 
 .tag-checkbox {

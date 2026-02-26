@@ -119,7 +119,7 @@
 }
 
 .log-group.is-expanded {
-    border-color: var(--primary, #ff8c42);
+    border-color: var(--primary);
 }
 
 .log-group-header {

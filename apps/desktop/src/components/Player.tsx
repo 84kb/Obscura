@@ -810,10 +810,10 @@ export const Player: React.FC<PlayerProps> = ({
                             <div className="mpv-indicator" style={{
                                 marginTop: '16px',
                                 padding: '8px 16px',
-                                background: 'rgba(255, 170, 0, 0.15)',
-                                border: '1px solid rgba(255, 170, 0, 0.3)',
+                                background: 'color-mix(in srgb, var(--primary), transparent 85%)',
+                                border: '1px solid color-mix(in srgb, var(--primary), transparent 70%)',
                                 borderRadius: '4px',
-                                color: '#ffaa00',
+                                color: 'var(--primary)',
                                 fontSize: '12px',
                                 display: 'flex',
                                 alignItems: 'center',

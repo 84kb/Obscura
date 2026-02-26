@@ -78,6 +78,16 @@ const API_ENDPOINTS: ApiEndpoint[] = [
         ]
     },
     {
+        method: 'POST',
+        path: '/api/media/:id/folders',
+        label: 'フォルダー追加',
+        description: 'メディアにフォルダーを追加します。',
+        permission: 'EDIT', // Changed from permissions to permission
+        params: [
+            { name: 'folderId', type: 'number', desc: '追加するフォルダーのID' } // Changed description to desc
+        ]
+    },
+    {
         method: 'PUT',
         path: '/api/media/:id',
         label: 'メディア情報更新',
@@ -233,6 +243,98 @@ const API_ENDPOINTS: ApiEndpoint[] = [
         ]
     },
 ]
+
+const JS_API_REFERENCE = [
+    {
+        name: 'window.ObscuraAPI.registerCommentProvider',
+        description: '外部サービスからコメントを取得するためのプロバイダーを登録します。UIの拡張フックもここに含まれます。',
+        example: `window.ObscuraAPI.registerCommentProvider({
+  id: 'my-plugin',
+  name: 'My Plugin',
+  canHandle: (url) => url.includes('example.com'),
+  fetchComments: async (mediaId, url) => {
+    // コメント取得ロジック
+    return [{ vpos: 1000, content: 'Hello', mail: '', userId: 'user1' }];
+  },
+  uiHooks: {
+    inspectorComments: (media) => [
+      { id: 'btn1', label: 'カスタムアクション', onClick: () => console.log('Clicked!') }
+    ],
+    playerTopBar: (media) => [
+      { id: 'btn2', label: 'Playerボタン', icon: '<svg>...</svg>', onClick: () => alert('Player!') }
+    ]
+  }
+});`
+    },
+    {
+        name: 'window.ObscuraAPI.registerPlayerOverlay',
+        description: 'プレイヤー上にCanvas描画を行うオーバーレイを登録します。毎フレーム実行されます。',
+        example: `window.ObscuraAPI.registerPlayerOverlay('my-overlay', (canvas, media, context) => {
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'red';
+  ctx.fillRect(10, 10, 100, 100);
+});`
+    },
+    {
+        name: 'ObscuraAPI.media',
+        description: 'メディアアイテムの取得、選択状態、更新、タグ操作、インポートなどを行います。',
+        example: `// 特定のメディア取得
+const media = await ObscuraAPI.media.get(123);
+
+// 選択中のアイテム取得
+const selected = await ObscuraAPI.media.getSelected();
+const selection = await ObscuraAPI.media.getSelection(); // 配列で取得
+
+// メタデータ更新
+await ObscuraAPI.media.update(media.id, { description: 'New Description' });
+
+// タグ操作
+await ObscuraAPI.media.addTag(media.id, tagId);
+await ObscuraAPI.media.removeTag(media.id, tagId);
+
+// ファイルのインポート
+await ObscuraAPI.media.import(['C:/path/to/file.mp4']);`
+    },
+    {
+        name: 'ObscuraAPI.ui',
+        description: '通知、メッセージボックスの表示、クリップボード操作などを行います。',
+        example: `// 通知を表示
+ObscuraAPI.ui.showNotification({ title: '完了', message: '処理が終わりました' });
+
+// メッセージボックスを表示
+const result = await ObscuraAPI.ui.showMessageBox({
+  title: '確認',
+  message: '実行しますか？',
+  buttons: ['はい', 'いいえ'],
+  type: 'question'
+});
+
+// クリップボードにコピー
+await ObscuraAPI.ui.copyToClipboard('text to copy');`
+    },
+    {
+        name: 'ObscuraAPI.system',
+        description: '外部データの取得 (CORS回避用) や、プラグイン固有データの保存/読み込み、ファイル操作を行います。',
+        example: `// 外部データの取得
+const data = await window.ObscuraAPI.system.fetch('https://api.example.com/data');
+
+// プラグイン固有データの保存/読み込み
+await window.ObscuraAPI.system.saveMediaData(mediaId, 'my-plugin', { key: 'value' });
+const saved = await window.ObscuraAPI.system.loadMediaData(mediaId, 'my-plugin');
+
+// ファイル/URL を開く
+await ObscuraAPI.system.openPath('C:/path/to/folder');
+await ObscuraAPI.system.openExternal('https://example.com');`
+    },
+    {
+        name: 'ObscuraAPI.on',
+        description: 'アプリ内で発生するイベント（ライブラリ更新など）を購読します。',
+        example: `// ライブラリ更新イベントを購読
+ObscuraAPI.on('library-updated', () => {
+  console.log('Library was updated!');
+});`
+    }
+];
 
 const PERMISSION_LABELS: Record<string, string> = {
     'READ_ONLY': '閲覧',
@@ -568,19 +670,20 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                 <div className="settings-info">
                     <span className="settings-label">{colorLabels[key]}</span>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div className="settings-controls" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <input
                         type="color"
                         value={value}
                         onChange={(e) => onChange(e.target.value)}
-                        style={{ width: '40px', height: '30px', padding: 0, border: 'none', cursor: 'pointer' }}
+                        className="color-input"
+                        style={{ width: '32px', height: '32px', padding: 0, border: 'none', cursor: 'pointer', background: 'transparent' }}
                     />
                     <input
                         type="text"
                         value={value}
                         onChange={(e) => onChange(e.target.value)}
-                        className="form-control"
-                        style={{ width: '100px' }}
+                        className="settings-input"
+                        style={{ width: '90px' }}
                     />
                 </div>
             </div>
@@ -637,22 +740,22 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
             <div className="settings-page">
                 <h3 className="settings-page-title">テーマ設定</h3>
                 <div className="settings-section">
-                    <div className="settings-header-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                        <span className="settings-description">
+                    <div className="settings-header-actions" style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
+                        <span className="settings-description" style={{ margin: 0 }}>
                             アプリの外観をカスタマイズできます。プリセットから選ぶか、独自のテーマを作成してください。
                         </span>
                         <div style={{ display: 'flex', gap: '8px' }}>
-                            <button className="btn btn-primary btn-sm" onClick={() => {
+                            <button className="btn btn-primary btn-sm" style={{ height: '32px', padding: '0 12px' }} onClick={() => {
                                 setEditingColors(defaultDarkTheme.colors)
                                 setIsCreatingTheme(true)
                             }}>
                                 新規作成
                             </button>
-                            <button className="btn btn-secondary btn-sm" onClick={() => setShowTemplateModal(true)}>
+                            <button className="btn btn-secondary btn-sm" style={{ height: '32px', padding: '0 12px' }} onClick={() => setShowTemplateModal(true)}>
                                 テンプレート
                             </button>
                             <div style={{ position: 'relative' }}>
-                                <button className="btn btn-secondary btn-sm" onClick={() => document.getElementById('theme-import-input')?.click()}>
+                                <button className="btn btn-secondary btn-sm" style={{ height: '32px', padding: '0 12px' }} onClick={() => document.getElementById('theme-import-input')?.click()}>
                                     CSSからインポート
                                 </button>
                                 <input
@@ -729,7 +832,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         </div>
                     )}
 
-                    <div className="theme-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '15px' }}>
+                    <div className="theme-grid">
                         {themes.map(theme => (
                             <div
                                 key={theme.id}
@@ -757,10 +860,10 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                 }}>
                                     <div style={{ width: '20px', height: '20px', background: theme.colors.primary, borderRadius: '50%' }}></div>
                                 </div>
-                                <div className="theme-info" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <span style={{ fontWeight: 'bold' }}>{theme.name}</span>
+                                <div className="theme-info">
+                                    <span className="theme-card-name">{theme.name}</span>
                                     {theme.isSystem ? (
-                                        <span className="badge" style={{ fontSize: '10px', padding: '2px 6px', background: 'var(--bg-hover)', borderRadius: '4px' }}>System</span>
+                                        <span className="badge system-badge">System</span>
                                     ) : (
                                         <div className="theme-actions" onClick={(e) => e.stopPropagation()}>
                                             <button
@@ -867,9 +970,9 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                             </div>
                         </div>
                         {ffmpegUpdateStatus === 'updating' && (
-                            <div style={{ padding: '0 20px 20px' }}>
-                                <div style={{ height: '4px', background: '#333', borderRadius: '2px', overflow: 'hidden' }}>
-                                    <div style={{ height: '100%', background: '#0ea5e9', width: `${ffmpegUpdateProgress}%`, transition: 'width 0.2s' }}></div>
+                            <div className="settings-padded-content" style={{ paddingTop: 0 }}>
+                                <div style={{ height: '4px', background: 'var(--bg-dark)', borderRadius: '2px', overflow: 'hidden' }}>
+                                    <div style={{ height: '100%', background: 'var(--primary)', width: `${ffmpegUpdateProgress}%`, transition: 'width 0.2s' }}></div>
                                 </div>
                             </div>
                         )}
@@ -886,7 +989,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
         return (
             <div className="settings-page">
                 <h3 className="settings-page-title">ショートカット設定</h3>
-                <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+                <div className="settings-padded-content" style={{ display: 'flex', justifyContent: 'flex-end', paddingBottom: 0 }}>
                     <button
                         className="btn btn-secondary btn-sm"
                         onClick={() => {
@@ -1032,7 +1135,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     // データ読み込み
     useEffect(() => {
         const loadData = async () => {
-            if (activeCategory === 'network') {
+            if (activeCategory === 'network' || activeCategory === 'developer') {
                 try {
                     const config = await api.getServerConfig()
                     setServerConfig(config)
@@ -1052,7 +1155,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                     const libs = await api.getLibraries()
                     setLibraries(libs)
                 } catch (e) {
-                    console.error('Failed to load network settings:', e)
+                    console.error('Failed to load settings data:', e)
                 }
             } else if (activeCategory === 'general' || activeCategory === 'import') {
                 try {
@@ -1214,14 +1317,14 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                 <h4 className="section-title">ユーザー管理</h4>
 
                 {/* 接続中ユーザー */}
-                <div className="settings-card" style={{ marginBottom: '16px', border: '1px solid #2a2a2c' }}>
-                    <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
+                <div className="settings-card">
+                    <div className="settings-row-vertical">
                         <span className="settings-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: activeUsers.length > 0 ? '#10b981' : '#6b7280' }}></span>
                             現在の接続数: {activeUsers.length}
                         </span>
                         {activeUsers.length > 0 && (
-                            <div className="active-users-list">
+                            <div className="active-users-list" style={{ marginLeft: '16px' }}>
                                 {activeUsers.map(u => (
                                     <span key={u.id} className="active-user-badge">
                                         <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981', display: 'inline-block', marginRight: '6px' }}></div>
@@ -1234,13 +1337,13 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                 </div>
 
                 {/* 新規ユーザー追加 */}
-                <div className="settings-card" style={{ marginBottom: '16px' }}>
-                    <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '12px' }}>
+                <div className="settings-card">
+                    <div className="settings-row-vertical">
                         <span className="settings-label">新規ユーザー追加</span>
-                        <p style={{ fontSize: '13px', color: '#888', margin: 0 }}>
+                        <p className="settings-description" style={{ margin: 0 }}>
                             ユーザーから受け取ったトークンを入力し、アクセストークンを発行してください。
                         </p>
-                        <div style={{ display: 'flex', gap: '8px', width: '100%', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', gap: '8px', width: '100%', alignItems: 'center', marginTop: '4px' }}>
                             <input
                                 type="text"
                                 placeholder="ユーザートークンを入力"
@@ -1254,7 +1357,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                             </button>
                         </div>
                         {newAccessToken && (
-                            <div className="token-display">
+                            <div className="token-display" style={{ width: '100%' }}>
                                 <p>アクセストークンを共有してください（一度しか表示されません）:</p>
                                 <code>{newAccessToken}</code>
                                 <button
@@ -1274,92 +1377,94 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
                 {/* 全ユーザーリスト */}
                 <div className="settings-card">
-                    <span className="settings-label" style={{ marginBottom: '12px', display: 'block' }}>登録ユーザー一覧</span>
-                    <div className="users-list">
-                        {sharedUsers.map(u => (
-                            <div key={u.id} className="user-card-item">
-                                <div className="user-card-header">
-                                    <span className="user-card-name">{u.nickname || '未指定'}</span>
-                                    <button
-                                        onClick={() => handleDeleteUser(u.id)}
-                                        className="icon-button delete"
-                                        title="削除"
-                                        style={{ color: '#ef4444', flexShrink: 0 }}
-                                    >
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                                    </button>
-                                </div>
-                                <div className="user-card-last-access">
-                                    最終アクセス: {u.lastAccessAt ? new Date(u.lastAccessAt).toLocaleString() : '未アクセス'}
-                                </div>
-                                {/* トークン表示 (スポイラー形式) */}
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                    <div className="token-row">
-                                        <div className="token-label-row">
-                                            <span className="token-label">ユーザートークン:</span>
-                                            {visibleTokens[u.id] === 'user' && (
-                                                <button
-                                                    onClick={() => api.copyToClipboard(u.userToken)}
-                                                    className="btn btn-outline btn-small"
-                                                >
-                                                    コピー
-                                                </button>
-                                            )}
-                                        </div>
-                                        <div
-                                            onClick={() => toggleTokenVisibility(u.id, 'user')}
-                                            className={`token-value-box ${visibleTokens[u.id] === 'user' ? 'revealed' : ''}`}
+                    <div className="settings-padded-content">
+                        <span className="settings-label">登録ユーザー一覧</span>
+                        <div className="users-list">
+                            {sharedUsers.map(u => (
+                                <div key={u.id} className="user-card-item">
+                                    <div className="user-card-header">
+                                        <span className="user-card-name">{u.nickname || '未指定'}</span>
+                                        <button
+                                            onClick={() => handleDeleteUser(u.id)}
+                                            className="icon-button delete"
+                                            title="削除"
                                         >
-                                            {visibleTokens[u.id] === 'user' ? u.userToken : 'クリックして表示'}
-                                        </div>
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                        </button>
                                     </div>
-                                    <div className="token-row">
-                                        <div className="token-label-row">
-                                            <span className="token-label">アクセストークン:</span>
-                                            {visibleTokens[u.id] === 'access' && (
-                                                <button
-                                                    onClick={() => api.copyToClipboard(u.accessToken)}
-                                                    className="btn btn-outline btn-small"
-                                                >
-                                                    コピー
-                                                </button>
-                                            )}
-                                        </div>
-                                        <div
-                                            onClick={() => toggleTokenVisibility(u.id, 'access')}
-                                            className={`token-value-box ${visibleTokens[u.id] === 'access' ? 'revealed' : ''}`}
-                                        >
-                                            {visibleTokens[u.id] === 'access' ? u.accessToken : 'クリックして表示'}
-                                        </div>
+                                    <div className="user-card-last-access">
+                                        最終アクセス: {u.lastAccessAt ? new Date(u.lastAccessAt).toLocaleString() : '未アクセス'}
                                     </div>
-                                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                        ※ 接続時は「ユーザートークン:アクセストークン」形式で入力
-                                    </div>
+                                    {/* トークン表示 (スポイラー形式) */}
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                        <div className="token-row">
+                                            <div className="token-label-row">
+                                                <span className="token-label">ユーザートークン</span>
+                                                {visibleTokens[u.id] === 'user' && (
+                                                    <button
+                                                        onClick={() => api.copyToClipboard(u.userToken)}
+                                                        className="btn btn-outline btn-small"
+                                                    >
+                                                        コピー
+                                                    </button>
+                                                )}
+                                            </div>
+                                            <div
+                                                onClick={() => toggleTokenVisibility(u.id, 'user')}
+                                                className={`token-value-box ${visibleTokens[u.id] === 'user' ? 'revealed' : ''}`}
+                                            >
+                                                {visibleTokens[u.id] === 'user' ? u.userToken : 'クリックして表示'}
+                                            </div>
+                                        </div>
+                                        <div className="token-row">
+                                            <div className="token-label-row">
+                                                <span className="token-label">アクセストークン</span>
+                                                {visibleTokens[u.id] === 'access' && (
+                                                    <button
+                                                        onClick={() => api.copyToClipboard(u.accessToken)}
+                                                        className="btn btn-outline btn-small"
+                                                    >
+                                                        コピー
+                                                    </button>
+                                                )}
+                                            </div>
+                                            <div
+                                                onClick={() => toggleTokenVisibility(u.id, 'access')}
+                                                className={`token-value-box ${visibleTokens[u.id] === 'access' ? 'revealed' : ''}`}
+                                            >
+                                                {visibleTokens[u.id] === 'access' ? u.accessToken : 'クリックして表示'}
+                                            </div>
+                                        </div>
+                                        <div className="field-hint" style={{ fontSize: '11px', marginTop: '0' }}>
+                                            ※ 接続時は「ユーザートークン:アクセストークン」形式で入力
+                                        </div>
 
-                                    {/* 権限管理 */}
-                                    <div className="permission-container">
-                                        <span className="permission-title">権限設定:</span>
-                                        <div className="permission-badges">
-                                            {(['READ_ONLY', 'DOWNLOAD', 'UPLOAD', 'EDIT', 'FULL'] as any[]).map((p: any) => (
-                                                <button
-                                                    key={p}
-                                                    onClick={() => handleTogglePermission(u.id, p)}
-                                                    className={`permission-btn ${(u.permissions || []).includes(p) ? 'active' : ''}`}
-                                                    title={p}
-                                                >
-                                                    {PERMISSION_LABELS[p] || p}
-                                                </button>
-                                            ))}
+                                        {/* 権限管理 */}
+                                        <div className="permission-container">
+                                            <span className="permission-title">権限設定</span>
+                                            <div className="permission-badges">
+                                                {(['READ_ONLY', 'DOWNLOAD', 'UPLOAD', 'EDIT', 'FULL'] as any[]).map((p: any) => (
+                                                    <button
+                                                        key={p}
+                                                        onClick={() => handleTogglePermission(u.id, p)}
+                                                        className={`permission-btn ${(u.permissions || []).includes(p) ? 'active' : ''}`}
+                                                        title={p}
+                                                    >
+                                                        {PERMISSION_LABELS[p] || p}
+                                                    </button>
+                                                ))}
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-                        ))}
-                    </div>    {sharedUsers.length === 0 && (
-                        <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                            ユーザーがいません
+                            ))}
                         </div>
-                    )}
+                        {sharedUsers.length === 0 && (
+                            <div className="empty-message">
+                                登録されているユーザーはいません
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
 
@@ -1578,10 +1683,9 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
 
                             {/* IP制限 */}
-                            <div className="settings-card" style={{ marginBottom: '16px' }}>
-                                <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '12px' }}>
-
-                                    <div className="settings-info">
+                            <div className="settings-card">
+                                <div className="settings-row-vertical">
+                                    <div className="settings-info" style={{ paddingRight: 0 }}>
                                         <span className="settings-label">IPアドレス制限 (ホワイトリスト)</span>
                                         <span className="settings-description">
                                             指定したIPアドレスからのアクセスのみを許可します。リストが空の場合はすべてのIPからのアクセスを許可します。
@@ -1601,10 +1705,10 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                         </button>
                                     </div>
                                     {serverConfig.allowedIPs && serverConfig.allowedIPs.length > 0 && (
-                                        <div className="users-list" style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        <div className="settings-padded-content" style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '8px', padding: '0 4px' }}>
                                             {serverConfig.allowedIPs.map((ip: string) => (
-                                                <div key={ip} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--bg-dark)', padding: '8px 12px', borderRadius: '4px' }}>
-                                                    <span style={{ fontFamily: 'monospace' }}>{ip}</span>
+                                                <div key={ip} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--bg-dark)', padding: '8px 12px', borderRadius: '4px', border: '1px solid var(--border)' }}>
+                                                    <span style={{ fontFamily: 'monospace', fontSize: '13px' }}>{ip}</span>
                                                     <button
                                                         onClick={() => handleDeleteIP(ip)}
                                                         className="icon-button delete"
@@ -1684,10 +1788,12 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         <section className="settings-section">
                             <h4 className="section-title">自分の接続情報</h4>
                             <div className="settings-card">
-                                <p className="settings-description">
-                                    このPCへの接続情報です。他のPCから接続する際に入力してください。
-                                </p>
-                                <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
+                                <div className="settings-description-box">
+                                    <p className="settings-description">
+                                        このPCへの接続情報です。他のPCから接続する際に入力してください。
+                                    </p>
+                                </div>
+                                <div className="settings-row-vertical">
                                     <span className="settings-label">ローカルIPアドレス</span>
                                     <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                                         {serverConfig.allowedIPs && serverConfig.allowedIPs.length > 0 ? (
@@ -1697,7 +1803,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                         )}
                                     </div>
                                 </div>
-                                <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '8px', marginTop: '12px' }}>
+                                <div className="settings-row-vertical">
                                     <span className="settings-label">あなたのユーザートークン</span>
                                     <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
                                         <code className="code-block" style={{ flex: 1, margin: 0, wordBreak: 'break-all' }}>
@@ -1801,10 +1907,10 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                 {clientConfig?.remoteLibraries && clientConfig.remoteLibraries.length > 0 ? (
                                     <div className="users-table" style={{ width: '100%' }}>
                                         {clientConfig.remoteLibraries.map((lib: any) => (
-                                            <div key={lib.id} className="settings-row" style={{ borderBottom: '1px solid var(--border)', padding: '12px 0' }}>
-                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                                    <span style={{ fontWeight: 'bold', color: 'var(--text-main)' }}>{lib.name || 'Remote Library'}</span>
-                                                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{lib.url}</span>
+                                            <div key={lib.id} className="settings-row">
+                                                <div className="settings-info">
+                                                    <span className="settings-label">{lib.name || 'Remote Library'}</span>
+                                                    <span className="settings-description" style={{ fontSize: '12px' }}>{lib.url}</span>
                                                     <span style={{ fontSize: '11px', color: 'color-mix(in srgb, var(--text-muted), transparent 40%)' }}>Last connected: {new Date(lib.lastConnectedAt).toLocaleString()}</span>
                                                 </div>
                                                 <button
@@ -1818,7 +1924,9 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                         ))}
                                     </div>
                                 ) : (
-                                    <p className="settings-description">登録されたリモートライブラリはありません。</p>
+                                    <div className="settings-padded-content">
+                                        <p className="settings-description" style={{ margin: 0 }}>登録されたリモートライブラリはありません。</p>
+                                    </div>
                                 )}
                             </div>
                         </section>
@@ -1877,7 +1985,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                             <span className="settings-label">PiP 操作モード</span>
                             <span className="settings-description">ピクチャーインピクチャー画面のボタン配置</span>
                         </div>
-                        <div className="radio-group" style={{ display: 'flex', gap: '16px' }}>
+                        <div className="radio-group" style={{ display: 'flex', gap: '12px' }}>
                             <label className="radio-item">
                                 <input
                                     type="radio"
@@ -1961,90 +2069,246 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     )
 
     const renderDeveloperSettings = () => {
-        const apiBaseUrl = serverConfig ? `http://localhost:${serverConfig.port}` : 'http://localhost:8765'
+        const apiBaseUrl = serverConfig ? `http://${window.location.hostname}:${serverConfig.port}` : 'http://localhost:8765'
+        const hostSecret = serverConfig?.hostSecret || ''
 
         return (
             <div className="settings-page">
                 <h3 className="settings-page-title">開発者ツール</h3>
+
                 <section className="settings-section">
-                    <h4 className="section-title">API エンドポイント</h4>
+                    <h4 className="section-title">API 接続情報</h4>
                     <div className="settings-card">
-                        <p className="settings-description" style={{ marginBottom: '16px' }}>
-                            以下のエンドポイントを使用して、ライブラリのデータに外部からアクセスできます。<br />
-                            <strong>Base URL:</strong> <code>{apiBaseUrl}</code><br />
-                            <strong>認証:</strong> ヘッダー <code>Authorization: Bearer [YOUR_HOST_SECRET]</code> を使用してください。
-                        </p>
+                        <div className="settings-row-vertical">
+                            <div className="settings-label-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                <span className="settings-label">API Base URL</span>
+                                <button className="btn btn-outline btn-small" onClick={() => {
+                                    api.copyToClipboard(apiBaseUrl)
+                                    alert('API Base URL をコピーしました')
+                                }}>コピー</button>
+                            </div>
+                            <code className="code-block" style={{ margin: 0, width: '100%' }}>{apiBaseUrl}</code>
+                        </div>
 
-                        <div className="api-list">
-                            {API_ENDPOINTS.map(api => {
-                                const apiId = `${api.method}-${api.path}`
-                                return (
-                                    <div key={apiId} className="api-item" style={{ borderBottom: '1px solid var(--border)', paddingBottom: '12px', marginBottom: '12px' }}>
-                                        <div
-                                            className="api-header"
-                                            onClick={() => toggleApi(apiId)}
-                                        >
-                                            <div className="api-method-path">
-                                                <span className={`api-method ${api.method.toLowerCase()}`}>{api.method}</span>
-                                                <span className="api-path">{api.path}</span>
+                        <div className="settings-row-vertical" style={{ marginTop: '16px' }}>
+                            <div className="settings-label-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                <span className="settings-label">Host Secret (認証用シークレット)</span>
+                                <div style={{ display: 'flex', gap: '8px' }}>
+                                    <button
+                                        className="btn btn-outline btn-small"
+                                        onClick={() => {
+                                            if (hostSecret) {
+                                                api.copyToClipboard(hostSecret)
+                                                alert('Host Secret をコピーしました')
+                                            }
+                                        }}
+                                    >
+                                        コピー
+                                    </button>
+                                    <button
+                                        className="btn btn-outline btn-small"
+                                        onClick={async () => {
+                                            if (confirm('Host Secret をリセットしてもよろしいですか？\n既存の拡張機能の認証が切れる可能性があります。')) {
+                                                const newSecret = await api.resetHostSecret()
+                                                setServerConfig({ ...serverConfig, hostSecret: newSecret })
+                                            }
+                                        }}
+                                    >
+                                        リセット
+                                    </button>
+                                </div>
+                            </div>
+                            <div
+                                className="token-value-box revealed"
+                                style={{ width: '100%', cursor: 'text', userSelect: 'all' }}
+                            >
+                                {hostSecret || '設定取得中...'}
+                            </div>
+                            <span className="settings-description" style={{ marginTop: '8px', display: 'block' }}>
+                                APIリクエストの <code>Authorization</code> ヘッダーに <code>Bearer [Host Secret]</code> として使用してください。
+                            </span>
+                        </div>
+                    </div>
+                </section>
+
+                <section className="settings-section" style={{ marginTop: '24px' }}>
+                    <h4 className="section-title">Plugin JS API (ObscuraAPI)</h4>
+                    <p className="settings-description">
+                        アプリ本体の UI を拡張したり、メディアに関連するデータを操作するための JavaScript API です。
+                        各プラグインの <code>.js</code> ファイル内で利用可能です。
+                    </p>
+                    <div className="api-list">
+                        {JS_API_REFERENCE.map((apiItem, idx) => {
+                            const id = `js-api-${idx}`
+                            const isOpen = openApiIds.includes(id)
+                            return (
+                                <div key={idx} className="api-item">
+                                    <div className="api-header" onClick={() => toggleApi(id)}>
+                                        <span className="api-path" style={{ fontWeight: 'bold' }}>{apiItem.name}</span>
+                                        <span className="api-label" style={{ opacity: 0.8 }}>Plugin API</span>
+                                        <span className={`api-arrow ${isOpen ? 'open' : ''}`}>
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                        </span>
+                                    </div>
+                                    {isOpen && (
+                                        <div className="api-details">
+                                            <p style={{ margin: '0 0 12px 0', fontSize: '13px', color: 'var(--text-main)', opacity: 0.9 }}>{apiItem.description}</p>
+                                            <div className="api-desc-section">
+                                                <div className="detail-title-row">
+                                                    <span className="detail-title">Code Example</span>
+                                                    <button
+                                                        className="btn btn-outline btn-smaller"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            window.electronAPI.copyToClipboard(apiItem.example);
+                                                            alert('コードサンプルをコピーしました');
+                                                        }}
+                                                    >
+                                                        コピー
+                                                    </button>
+                                                </div>
+                                                <code className="code-block code-block-sm" style={{ whiteSpace: 'pre-wrap' }}>{apiItem.example}</code>
                                             </div>
-                                            <span className="api-label">{api.label}</span>
-                                            <svg
-                                                width="16"
-                                                height="16"
-                                                viewBox="0 0 24 24"
-                                                fill="none"
-                                                stroke="currentColor"
-                                                strokeWidth="2"
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                                style={{ transition: 'transform 0.2s', transform: openApiIds.includes(apiId) ? 'rotate(180deg)' : 'rotate(0)' }}
-                                            >
-                                                <polyline points="6 9 12 15 18 9"></polyline>
-                                            </svg>
                                         </div>
+                                    )}
+                                </div>
+                            )
+                        })}
+                    </div>
+                </section>
 
-                                        {openApiIds.includes(apiId) && (
-                                            <div className="api-details" style={{ marginTop: '12px', padding: '12px', background: 'var(--bg-dark)', borderRadius: '4px' }}>
-                                                {api.description && <p style={{ marginBottom: '8px', color: 'var(--text-muted)' }}>{api.description}</p>}
-                                                {api.permission && (
-                                                    <div style={{ marginBottom: '8px' }}>
-                                                        <span style={{ color: 'var(--text-muted)' }}>必要な権限: </span>
-                                                        <code style={{ backgroundColor: 'var(--bg-hover)', padding: '2px 4px', borderRadius: '4px' }}>{api.permission}</code>
-                                                    </div>
-                                                )}
-                                                {api.params && api.params.length > 0 && (
-                                                    <div style={{ marginTop: '12px' }}>
-                                                        <strong style={{ display: 'block', marginBottom: '8px', color: 'var(--text-muted)', fontSize: '12px' }}>Parameters:</strong>
-                                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                <section className="settings-section" style={{ marginTop: '24px' }}>
+                    <h4 className="section-title">REST API エンドポイント一覧</h4>
+                    <div className="settings-card" style={{ padding: 0 }}>
+                        <div className="api-list">
+                            {API_ENDPOINTS.map((endpoint, index) => {
+                                const id = `${endpoint.method}-${endpoint.path}-${index}`
+                                const isOpen = openApiIds.includes(id)
+
+                                // cURL example generating
+                                const curlExample = `curl -X ${endpoint.method} "${apiBaseUrl}${endpoint.path.replace(':id', '1')}" \\\n  -H "Authorization: Bearer ${hostSecret || 'YOUR_SECRET'}"`
+
+                                return (
+                                    <div key={id} className="api-item">
+                                        <div className="api-header" onClick={() => toggleApi(id)}>
+                                            <div className="api-method-path">
+                                                <span className={`method-badge ${endpoint.method.toLowerCase()}`}>
+                                                    {endpoint.method}
+                                                </span>
+                                                <span className="api-path">{endpoint.path}</span>
+                                            </div>
+                                            <span className="api-label">{endpoint.label}</span>
+                                            <span className={`api-arrow ${isOpen ? 'open' : ''}`}>
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                            </span>
+                                        </div>
+                                        {isOpen && (
+                                            <div className="api-details">
+                                                <div className="api-desc-box">
+                                                    <p className="detail-title">概要</p>
+                                                    <p style={{ margin: 0 }}>{endpoint.description}</p>
+                                                </div>
+
+                                                <div className="api-desc-section">
+                                                    <p className="detail-title">認証権限</p>
+                                                    <span className="permission-badge-mini">{endpoint.permission}</span>
+                                                </div>
+
+                                                {endpoint.params && endpoint.params.length > 0 && (
+                                                    <div className="api-desc-section">
+                                                        <p className="detail-title">パラメーター</p>
+                                                        <table className="params-table">
                                                             <thead>
-                                                                <tr style={{ textAlign: 'left', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
-                                                                    <th style={{ padding: '4px' }}>Name</th>
-                                                                    <th style={{ padding: '4px' }}>Type</th>
-                                                                    <th style={{ padding: '4px' }}>Description</th>
+                                                                <tr>
+                                                                    <th>名前</th>
+                                                                    <th>型</th>
+                                                                    <th>説明</th>
                                                                 </tr>
                                                             </thead>
                                                             <tbody>
-                                                                {api.params.map(p => (
-                                                                    <tr key={p.name} style={{ borderBottom: '1px solid var(--border)' }}>
-                                                                        <td style={{ padding: '4px', color: 'var(--primary-light)' }}>
+                                                                {endpoint.params.map(p => (
+                                                                    <tr key={p.name}>
+                                                                        <td className="param-name">
                                                                             {p.name}
-                                                                            {p.required && <span style={{ color: 'var(--accent)', marginLeft: '2px' }}>*</span>}
+                                                                            {p.required && <span className="required" style={{ color: '#ef4444', marginLeft: '2px' }}>*</span>}
                                                                         </td>
-                                                                        <td style={{ padding: '4px', opacity: 0.7 }}>{p.type}</td>
-                                                                        <td style={{ padding: '4px', opacity: 0.9 }}>{p.desc}</td>
+                                                                        <td className="param-type">{p.type}</td>
+                                                                        <td className="param-desc">{p.desc}</td>
                                                                     </tr>
                                                                 ))}
                                                             </tbody>
                                                         </table>
                                                     </div>
                                                 )}
+
+                                                <div className="api-desc-section">
+                                                    <div className="detail-title-row">
+                                                        <span className="detail-title">cURL 利用例</span>
+                                                        <button className="btn btn-outline btn-smaller" onClick={(e) => {
+                                                            e.stopPropagation()
+                                                            api.copyToClipboard(curlExample)
+                                                            alert('cURL 例をコピーしました')
+                                                        }}>コピー</button>
+                                                    </div>
+                                                    <code className="code-block code-block-sm">{curlExample}</code>
+                                                </div>
+
+                                                <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+                                                    <button className="btn btn-outline btn-small" onClick={(e) => {
+                                                        e.stopPropagation()
+                                                        api.copyToClipboard(endpoint.path)
+                                                        alert('パスをコピーしました')
+                                                    }}>パスをコピー</button>
+                                                </div>
                                             </div>
                                         )}
                                     </div>
                                 )
                             })}
                         </div>
+                    </div>
+                </section>
+
+                <section className="settings-section" style={{ marginTop: '24px' }}>
+                    <h4 className="section-title">拡張機能開発リソース</h4>
+                    <div className="resource-list">
+                        <a href="#" className="resource-item" onClick={(e) => {
+                            e.preventDefault()
+                            api.openExternal('https://github.com/obscura-app/extension-template')
+                        }}>
+                            <div className="resource-icon">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
+                            </div>
+                            <div className="resource-info">
+                                <span className="resource-title">Extension テンプレート (GitHub)</span>
+                                <span className="resource-desc">TypeScript + Vite を使用した拡張機能のベースプロジェクトです。</span>
+                            </div>
+                        </a>
+
+                        <div className="resource-item">
+                            <div className="resource-icon">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+                            </div>
+                            <div className="resource-info">
+                                <span className="resource-title">@obscura/core 型定義の利用</span>
+                                <span className="resource-desc">
+                                    プロジェクト内で <code>npm install -D @obscura/core</code> を実行することで、APIの型補完を有効にできます。
+                                </span>
+                            </div>
+                        </div>
+
+                        <a href="#" className="resource-item" onClick={(e) => {
+                            e.preventDefault()
+                            api.openExternal('https://docs.antigravity.dev/api')
+                        }}>
+                            <div className="resource-icon">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+                            </div>
+                            <div className="resource-info">
+                                <span className="resource-title">開発者向け公式ドキュメント</span>
+                                <span className="resource-desc">APIの仕様や拡張機能のライフサイクルについての詳細な解説です。</span>
+                            </div>
+                        </a>
                     </div>
                 </section>
             </div>
@@ -2064,8 +2328,8 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
             <section className="settings-section">
                 <h4 className="section-title">アプリケーション更新</h4>
                 <div className="settings-card">
-                    <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '12px' }}>
-                        <div className="settings-info">
+                    <div className="settings-row-vertical">
+                        <div className="settings-info" style={{ paddingRight: 0 }}>
                             <span className="settings-label">バージョン情報</span>
                             <span className="settings-description">
                                 現在のバージョン: v{appVersion}
@@ -2079,8 +2343,8 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
                         <div style={{ width: '100%' }}>
                             {updateStatus === 'checking' && (
-                                <div className="status-indicator">
-                                    <div className="spinner"></div>
+                                <div className="status-indicator" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-muted)' }}>
+                                    <div className="spinner" style={{ width: '14px', height: '14px', border: '2px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
                                     <span>更新を確認中...</span>
                                 </div>
                             )}
@@ -2106,21 +2370,21 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                 </div>
                             )}
 
-                            <div className="button-group" style={{ display: 'flex', gap: '12px', marginTop: '4px' }}>
+                            <div className="button-group" style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
                                 {updateStatus === 'idle' && (
-                                    <button className="btn-save" onClick={handleCheckForUpdates}>
+                                    <button className="btn btn-primary btn-sm" onClick={handleCheckForUpdates}>
                                         更新を確認
                                     </button>
                                 )}
 
                                 {updateStatus === 'available' && (
-                                    <button className="btn-save" onClick={handleDownloadUpdate}>
+                                    <button className="btn btn-primary btn-sm" onClick={handleDownloadUpdate}>
                                         アップデートをダウンロード
                                     </button>
                                 )}
 
                                 {updateStatus === 'downloaded' && (
-                                    <button className="btn-save" onClick={handleQuitAndInstall}>
+                                    <button className="btn btn-primary btn-sm" onClick={handleQuitAndInstall}>
                                         再起動してインストール
                                     </button>
                                 )}
@@ -2214,7 +2478,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                 <section className="settings-section">
                     <h4 className="section-title">ダウンロード</h4>
                     <div className="settings-card">
-                        <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
+                        <div className="settings-row-vertical">
                             <span className="settings-label">保存先フォルダー</span>
                             <div style={{ display: 'flex', gap: '8px', width: '100%', alignItems: 'center' }}>
                                 <input
@@ -2237,37 +2501,9 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
                 <section className="settings-section">
                     <div className="settings-card">
-                        <div className="settings-row">
-                            <div className="settings-info">
-                                <span className="settings-label">自動インポートを有効にする</span>
-                                <span className="settings-description">
-                                    指定したフォルダを監視し、新しいファイルを自動的にインポートします。
-                                </span>
-                            </div>
-                            <label className="toggle-switch">
-                                <input
-                                    type="checkbox"
-                                    checked={clientConfig?.autoImport?.enabled || false}
-                                    onChange={(e) => {
-                                        const newConfig = {
-                                            ...clientConfig,
-                                            autoImport: {
-                                                ...(clientConfig.autoImport || { watchPaths: [] }),
-                                                enabled: e.target.checked
-                                            }
-                                        }
-                                        setClientConfig(newConfig)
-                                        if (window.electronAPI) (window.electronAPI as any).updateClientConfig(newConfig)
-                                    }}
-                                />
-                                <span className="slider"></span>
-                            </label>
-                        </div>
 
-                        <div className="settings-divider" style={{ margin: '16px 0', borderBottom: '1px solid var(--border)' }}></div>
-
-                        <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span className="settings-label" style={{ fontSize: '13px' }}>監視フォルダ設定</span>
+                        <div className="settings-padded-content" style={{ paddingBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span className="settings-label" style={{ fontSize: '13px', marginBottom: 0 }}>監視フォルダ設定</span>
                             <button className="btn btn-secondary btn-sm" onClick={handleAddWatchPath}>
                                 + フォルダを追加
                             </button>
@@ -2278,21 +2514,21 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                 監視フォルダが設定されていません
                             </div>
                         ) : (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <div className="settings-padded-content" style={{ display: 'flex', flexDirection: 'column', gap: '12px', paddingTop: 0 }}>
                                 {clientConfig.autoImport.watchPaths.map((p: AutoImportPath) => (
                                     <div key={p.id} className="watcher-item">
-                                        <div style={{ width: '32px', display: 'flex', justifyContent: 'center' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
                                             <input
                                                 type="checkbox"
                                                 checked={p.enabled}
                                                 onChange={(e) => handleUpdateWatchPath(p.id, { enabled: e.target.checked })}
-                                                style={{ width: '16px', height: '16px' }}
+                                                style={{ width: '16px', height: '16px', cursor: 'pointer' }}
                                             />
                                         </div>
 
                                         <div style={{ flex: 1, minWidth: 0 }}>
-                                            <div style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                <span>インポート先: </span>
+                                            <div style={{ fontSize: '12px', marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                <span style={{ fontWeight: 'bold', minWidth: '70px' }}>インポート先:</span>
                                                 <select
                                                     value={p.targetLibraryId}
                                                     onChange={(e) => handleUpdateWatchPath(p.id, { targetLibraryId: e.target.value })}
@@ -2310,14 +2546,9 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
                                         <button
                                             onClick={() => handleRemoveWatchPath(p.id)}
-                                            style={{
-                                                background: 'transparent',
-                                                border: 'none',
-                                                color: 'var(--accent)',
-                                                cursor: 'pointer',
-                                                padding: '4px'
-                                            }}
+                                            className="icon-button delete"
                                             title="削除"
+                                            style={{ color: 'var(--accent)', padding: '4px' }}
                                         >
                                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="6"></line></svg>
                                         </button>
@@ -2325,19 +2556,23 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                 ))}
                             </div>
                         )}
-                        <div style={{ marginTop: '16px', fontSize: '11px', color: '#eab308' }}>
-                            ※ インポート完了後、元のファイルは完全に削除されます。
+                        <div className="settings-description-box" style={{ borderTop: '1px solid var(--border)', borderBottom: 'none' }}>
+                            <p className="settings-description" style={{ color: '#eab308' }}>
+                                ※ インポート完了後、元のファイルは完全に削除されます。
+                            </p>
                         </div>
                     </div>
                 </section>
 
                 <section className="settings-section">
                     <div className="settings-card">
-                        <div className="settings-info" style={{ marginBottom: '16px' }}>
-                            <span className="settings-label">他のライブラリへの追加設定</span>
-                            <span className="settings-description">
-                                ファイルを他のライブラリに追加する際、引き継ぐ情報を選択します。
-                            </span>
+                        <div className="settings-padded-content" style={{ paddingBottom: '8px' }}>
+                            <div className="settings-info" style={{ paddingRight: 0 }}>
+                                <span className="settings-label">他のライブラリへの追加設定</span>
+                                <span className="settings-description">
+                                    ファイルを他のライブラリに追加する際、引き継ぐ情報を選択します。
+                                </span>
+                            </div>
                         </div>
 
                         {(() => {
@@ -2531,13 +2766,13 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                 <h3 className="settings-page-title">プロファイル設定</h3>
                 <section className="settings-section">
                     <div className="settings-card">
-                        <div className="settings-info" style={{ marginBottom: '16px' }}>
+                        <div className="settings-description-box">
                             <span className="settings-description">
                                 ここで設定したニックネームとアイコンは、リモートライブラリへの接続時や、ホストとしてライブラリを公開する際に使用されます。
                             </span>
                         </div>
 
-                        <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '12px' }}>
+                        <div className="settings-row-vertical">
                             <label className="settings-label">ニックネーム</label>
                             <input
                                 type="text"
@@ -2546,11 +2781,10 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                 value={nickname}
                                 onChange={e => setNickname(e.target.value)}
                                 maxLength={50}
-                                style={{ width: '100%' }}
                             />
                         </div>
 
-                        <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '12px', marginTop: '16px' }}>
+                        <div className="settings-row-vertical">
                             <label className="settings-label">アイコン</label>
                             <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                                 <button
@@ -2636,7 +2870,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                 <h3 className="settings-page-title">拡張機能（プラグイン）設定</h3>
                 <section className="settings-section">
                     <div className="settings-card">
-                        <div className="settings-info" style={{ marginBottom: '16px' }}>
+                        <div className="settings-description-box">
                             <span className="settings-description">
                                 <code>plugins</code> フォルダに配置されたスクリプトを拡張機能として読み込みます。<br />
                                 サードパーティ製スクリプトの実行はセキュリティリスクを伴うため、信頼できる提供元のプラグインのみを有効にしてください。
@@ -2692,65 +2926,69 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     const isEnabled = settings?.extensions?.[plugin.id]?.enabled ?? false
 
                                     return (
-                                        <div key={plugin.id} className="settings-row" style={{ alignItems: 'flex-start', borderBottom: '1px solid var(--border)', paddingBottom: '16px' }}>
-                                            <div className="settings-info" style={{ gap: '4px' }}>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                    <span className="settings-label" style={{ fontSize: '15px' }}>{title}</span>
-                                                    {(version || author) && (
-                                                        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                                                            {version} {author}
-                                                        </span>
-                                                    )}
+                                        <div key={plugin.id} className="settings-row-vertical">
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'flex-start' }}>
+                                                <div className="settings-info" style={{ gap: '4px', paddingRight: '0' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                        <span className="settings-label" style={{ fontSize: '15px' }}>{title}</span>
+                                                        {(version || author) && (
+                                                            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                                                                {version} {author}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <span className="settings-description" style={{ marginTop: '4px' }}>
+                                                        {meta.description || '説明がありません。'}
+                                                    </span>
+                                                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace', marginTop: '4px' }}>
+                                                        ID: {plugin.id}
+                                                    </span>
                                                 </div>
-                                                <span className="settings-description" style={{ marginTop: '4px' }}>
-                                                    {meta.description || '説明がありません。'}
-                                                </span>
-                                                <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace', marginTop: '4px' }}>
-                                                    ID: {plugin.id}
-                                                </span>
-                                            </div>
-                                            <label className="toggle-switch" style={{ marginTop: '0' }}>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={isEnabled}
-                                                    onChange={(e) => {
-                                                        const newExtensions = { ...(settings?.extensions || {}) }
-                                                        newExtensions[plugin.id] = { enabled: e.target.checked }
+                                                <div style={{ display: 'flex', alignItems: 'center' }}>
+                                                    <label className="toggle-switch" style={{ marginTop: '0' }}>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={isEnabled}
+                                                            onChange={(e) => {
+                                                                const newExtensions = { ...(settings?.extensions || {}) }
+                                                                newExtensions[plugin.id] = { enabled: e.target.checked }
 
-                                                        const newConfig = {
-                                                            ...settings,
-                                                            extensions: newExtensions
-                                                        }
-                                                        onUpdateSettings(newConfig)
-                                                        if (window.electronAPI) {
-                                                            (window.electronAPI as any).updateClientConfig(newConfig)
-                                                        }
-                                                    }}
-                                                />
-                                                <span className="slider"></span>
-                                            </label>
-                                            <button
-                                                className="btn btn-outline btn-small"
-                                                style={{ marginLeft: '8px', color: 'var(--danger, #e74c3c)', borderColor: 'var(--danger, #e74c3c)', padding: '4px 10px', fontSize: '12px' }}
-                                                onClick={async () => {
-                                                    if (!confirm(`「${title}」を削除しますか？\nこの操作は元に戻せません。`)) return
-                                                    if (!window.electronAPI) return
-                                                    try {
-                                                        const result = await (window.electronAPI as any).uninstallPlugin(plugin.id)
-                                                        if (result.success) {
-                                                            const scripts = await window.electronAPI.getPluginScripts()
-                                                            setAvailablePlugins(scripts || [])
-                                                        } else {
-                                                            alert(`削除に失敗しました: ${result.error}`)
-                                                        }
-                                                    } catch (e) {
-                                                        console.error('[Settings] Plugin uninstall failed:', e)
-                                                    }
-                                                }}
-                                                title="プラグインを削除"
-                                            >
-                                                削除
-                                            </button>
+                                                                const newConfig = {
+                                                                    ...settings,
+                                                                    extensions: newExtensions
+                                                                }
+                                                                onUpdateSettings(newConfig)
+                                                                if (window.electronAPI) {
+                                                                    (window.electronAPI as any).updateClientConfig(newConfig)
+                                                                }
+                                                            }}
+                                                        />
+                                                        <span className="slider"></span>
+                                                    </label>
+                                                    <button
+                                                        className="btn btn-outline btn-small"
+                                                        style={{ marginLeft: '8px', color: 'var(--danger, #e74c3c)', borderColor: 'var(--danger, #e74c3c)', padding: '4px 10px', fontSize: '12px' }}
+                                                        onClick={async () => {
+                                                            if (!confirm(`「${title}」を削除しますか？\nこの操作は元に戻せません。`)) return
+                                                            if (!window.electronAPI) return
+                                                            try {
+                                                                const result = await (window.electronAPI as any).uninstallPlugin(plugin.id)
+                                                                if (result.success) {
+                                                                    const scripts = await window.electronAPI.getPluginScripts()
+                                                                    setAvailablePlugins(scripts || [])
+                                                                } else {
+                                                                    alert(`削除に失敗しました: ${result.error}`)
+                                                                }
+                                                            } catch (e) {
+                                                                console.error('[Settings] Plugin uninstall failed:', e)
+                                                            }
+                                                        }}
+                                                        title="プラグインを削除"
+                                                    >
+                                                        削除
+                                                    </button>
+                                                </div>
+                                            </div>
                                         </div>
                                     )
                                 })}
@@ -2904,24 +3142,26 @@ const AudioSettings = ({ clientConfig, setClientConfig }: { clientConfig: Client
                                     再生に使用するオーディオデバイスを選択します。
                                 </span>
                             </div>
-                            <select
-                                className="settings-input"
-                                style={{ width: '250px' }}
-                                value={currentDevice}
-                                onChange={(e) => updateConfig({ audioDevice: e.target.value })}
-                                disabled={!useMpvAudio}
-                            >
-                                <option value="auto">自動 (デフォルト)</option>
-                                {audioDevices.map((dev, i) => (
-                                    <option key={i} value={dev.name}>
-                                        {dev.description}
-                                    </option>
-                                ))}
-                            </select>
+                            <div className="settings-controls">
+                                <select
+                                    className="settings-input"
+                                    style={{ width: '220px' }}
+                                    value={currentDevice}
+                                    onChange={(e) => updateConfig({ audioDevice: e.target.value })}
+                                    disabled={!useMpvAudio}
+                                >
+                                    <option value="auto">自動 (デフォルト)</option>
+                                    {audioDevices.map((dev, i) => (
+                                        <option key={i} value={dev.name}>
+                                            {dev.description}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
                         </div>
 
-                        <div className="settings-row">
-                            <div className="settings-info">
+                        <div className="settings-row-vertical">
+                            <div className="settings-info" style={{ paddingRight: 0 }}>
                                 <span className="settings-label">WASAPI 排他モード (Exclusive Mode)</span>
                                 <span className="settings-description">
                                     <span style={{ color: 'var(--accent)', fontWeight: 'bold' }}>⚠ 実験的機能</span><br />
@@ -2940,8 +3180,8 @@ const AudioSettings = ({ clientConfig, setClientConfig }: { clientConfig: Client
                             </label>
                         </div>
 
-                        <div className="settings-row">
-                            <div className="settings-info">
+                        <div className="settings-row-vertical">
+                            <div className="settings-info" style={{ paddingRight: 0 }}>
                                 <span className="settings-label">動画ファイルでも使用する (音声のみ)</span>
                                 <span className="settings-description">
                                     <span style={{ color: 'var(--accent)', fontWeight: 'bold' }}>⚠ 画面は真っ暗になります</span><br />

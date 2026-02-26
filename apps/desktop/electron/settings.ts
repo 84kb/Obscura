@@ -56,7 +56,7 @@ const defaultConfig: ClientConfig = {
         watchPaths: []
     },
     thumbnailMode: 'speed',
-    discordRichPresenceEnabled: false,
+    discordRichPresenceEnabled: true,
     libraryViewSettings: {},
     enableGPUAcceleration: true
 }

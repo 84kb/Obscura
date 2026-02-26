@@ -1315,6 +1315,34 @@ export class LegacyMediaLibrary {
     }
   }
 
+  public async updateMedia(id: number, updates: any) {
+    await this.ready
+    const media = this.db.mediaFiles.find((m) => m.id === id)
+    if (media) {
+      // 安全なプロパティのみ更新を許可
+      const allowedKeys = ['title', 'artist', 'description', 'url', 'rating', 'modified_date', 'dominant_color']
+      let changed = false
+      for (const key of allowedKeys) {
+        if (updates[key] !== undefined) {
+          media[key] = updates[key]
+          changed = true
+        }
+      }
+
+      if (changed) {
+        this.saveMediaMetadata(media)
+        this.addAuditLog({
+          action: 'media_update',
+          targetId: id,
+          targetName: media.file_name,
+          description: `メディア情報を更新しました: ${media.file_name}`
+        })
+      }
+      return media
+    }
+    return null
+  }
+
   /**
    * 親作品を追加する（複数親対応）
    * 自己参照や直接的な循環依存を防止する

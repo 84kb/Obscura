@@ -125,7 +125,7 @@ textarea,
 .btn-outline:hover {
   border-color: var(--primary);
   color: var(--primary);
-  background: rgba(255, 140, 66, 0.05);
+  background: color-mix(in srgb, var(--primary), transparent 95%);
 }
 
 .btn-full {
@@ -198,6 +198,7 @@ textarea,
 .main-content {
   position: relative;
 }
+
 /* -------------------------------------------------------------
  * Custom Prompt Modal Styles (Appended via PowerShell)
  * ------------------------------------------------------------- */
@@ -227,23 +228,68 @@ textarea,
 }
 
 @keyframes modal-pop {
-  0% { opacity: 0; transform: scale(0.95) translateY(10px); }
-  100% { opacity: 1; transform: scale(1) translateY(0); }
+  0% {
+    opacity: 0;
+    transform: scale(0.95) translateY(10px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 
-.custom-prompt-modal { width: 400px; max-width: 90vw; }
-.app-modal-header { padding: 16px 20px; border-bottom: 1px solid var(--border); background-color: rgba(0, 0, 0, 0.2); }
-.app-modal-header h3 { margin: 0; font-size: 16px; font-weight: 600; color: var(--text-main); }
-.app-modal-body { padding: 20px; display: flex; flex-direction: column; gap: 12px; }
-.app-modal-body p { color: var(--text-muted); font-size: 14px; }
+.custom-prompt-modal {
+  width: 400px;
+  max-width: 90vw;
+}
+
+.app-modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  background-color: rgba(0, 0, 0, 0.2);
+}
+
+.app-modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.app-modal-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.app-modal-body p {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
 .app-modal-body input {
-  width: 100%; padding: 10px 12px; background-color: var(--bg-dark);
-  border: 1px solid var(--border); border-radius: var(--radius-md);
-  color: var(--text-main); font-size: 14px; outline: none; transition: border-color 0.2s;
-}
-.app-modal-body input:focus { border-color: var(--primary); }
-.app-modal-footer {
-  padding: 16px 20px; border-top: 1px solid var(--border);
-  display: flex; justify-content: flex-end; gap: 12px; background-color: rgba(0, 0, 0, 0.1);
+  width: 100%;
+  padding: 10px 12px;
+  background-color: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-main);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
 }
 
+.app-modal-body input:focus {
+  border-color: var(--primary);
+}
+
+.app-modal-footer {
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  background-color: rgba(0, 0, 0, 0.1);
+}

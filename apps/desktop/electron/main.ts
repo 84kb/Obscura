@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, protocol, Menu, MenuItem, nativeImage, clipboard, powerSaveBlocker } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, protocol, Menu, MenuItem, nativeImage, clipboard, powerSaveBlocker, Notification } from 'electron'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import fs from 'fs-extra'
@@ -545,6 +545,36 @@ app.on('window-all-closed', () => {
 console.log('[Main] Registering IPC handlers...')
 registerAudioHandlers()
 
+// プラグイン・拡張機能 API 用の IPC ハンドラー
+ipcMain.handle('show-message-box', async (event, options) => {
+    const win = BrowserWindow.fromWebContents(event.sender) || mainWindow
+    return await dialog.showMessageBox(win!, {
+        title: options.title,
+        message: options.message,
+        type: options.type || 'info',
+        buttons: options.buttons || ['OK'],
+        defaultId: options.defaultId,
+        cancelId: options.cancelId
+    })
+})
+
+ipcMain.on('show-notification', (_, options) => {
+    new Notification({
+        title: options.title,
+        body: options.message,
+    }).show()
+})
+
+ipcMain.handle('update-media', async (_, mediaId, updates) => {
+    return await getActiveMediaLibrary()?.updateMedia(mediaId, updates)
+})
+
+ipcMain.handle('get-selected-media', async () => {
+    // レンダラー側で管理されている選択状態を返すためのプレースホルダ
+    // 必要に応じて App.tsx 等から状態を同期する仕組みが必要
+    return []
+})
+
 // ライブラリ管理
 // メディアの他のライブラリへのコピー
 console.log('[DEBUG] Registering IPC handler: copy-media-to-library')
@@ -756,6 +786,7 @@ ipcMain.handle('import-media', async (event, filePaths: string[]) => {
         return results
     })
 })
+
 
 // 全メディアファイル取得
 ipcMain.handle('get-media-files', async () => {

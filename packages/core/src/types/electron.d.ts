@@ -161,4 +161,8 @@ export interface ElectronAPI {
     // Discord RPC
     updateDiscordActivity: (activity: any) => Promise<void>
     clearDiscordActivity: () => Promise<void>
+
+    // ダイアログ・通知
+    showNotification: (options: { title: string; description?: string; type?: string }) => void
+    showMessageBox: (options: { title: string; message: string; type?: string; buttons?: string[]; defaultId?: number; cancelId?: number }) => Promise<{ response: number }>
 }

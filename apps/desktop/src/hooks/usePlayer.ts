@@ -209,12 +209,15 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
             }
         }
 
+        // 人間の聴感特性に合わせて2乗のスケーリングを適用
+        const scaledVolume = newVolume * newVolume
+
         if (isMpv) {
-            api.setAudioVolume(newVolume * 100) // MPV uses 0-100
+            api.setAudioVolume(scaledVolume * 100) // MPV uses 0-100
         } else {
             const media = videoRef.current || audioRef.current
             if (media) {
-                media.volume = newVolume
+                media.volume = scaledVolume
                 if (newVolume > 0 && isMuted) media.muted = false
             }
         }
@@ -327,7 +330,7 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
         if (!media) return
 
         // 保存された設定を適用
-        media.volume = volume
+        media.volume = volume * volume // 聴感補正を適用
         media.muted = isMuted
         media.loop = isLooping
         media.playbackRate = playbackRate
@@ -402,8 +405,8 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
     useEffect(() => {
         if (!isMpv) return
 
-        // 初期化時にボリューム設定
-        api.setAudioVolume(volume * 100)
+        // 初期化時にボリューム設定 (聴感補正を適用)
+        api.setAudioVolume(volume * volume * 100)
 
         // イベント購読
         const cleanupTime = api.on('audio:time-update', (_: any, time: number) => {

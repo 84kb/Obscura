@@ -111,6 +111,8 @@ try {
         updateDescription: (mediaId, description) => ipcRenderer.invoke('update-description', mediaId, description),
         updateUrl: (mediaId, url) => ipcRenderer.invoke('update-url', mediaId, url),
         exportMedia: (mediaId, options) => ipcRenderer.invoke('export-media', mediaId, options),
+        updateMedia: (mediaId, updates) => ipcRenderer.invoke('update-media', mediaId, updates),
+        getSelectedMedia: () => ipcRenderer.invoke('get-selected-media'),
         copyMediaToLibrary: (mediaIds, libraryPath, settings, options) => ipcRenderer.invoke('copy-media-to-library', mediaIds, libraryPath, settings, options),
 
         // キャプチャ
@@ -227,6 +229,10 @@ try {
         maximizeWindow: () => ipcRenderer.invoke('window-maximize'),
         closeWindow: () => ipcRenderer.invoke('window-close'),
         focusWindow: () => ipcRenderer.invoke('focus-window'),
+
+        // ダイアログ・通知
+        showNotification: (options) => ipcRenderer.send('show-notification', options),
+        showMessageBox: (options) => ipcRenderer.invoke('show-message-box', options),
 
         // 汎用イベントリスナー (ホワイトリスト形式)
         on: (channel, callback) => {

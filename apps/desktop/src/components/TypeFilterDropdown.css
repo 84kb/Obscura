@@ -34,7 +34,7 @@
 }
 
 .type-filter-item.selected {
-    background-color: rgba(255, 140, 66, 0.1);
+    background-color: color-mix(in srgb, var(--primary), transparent 90%);
 }
 
 .type-filter-item.excluded {

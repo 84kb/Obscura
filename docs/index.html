@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Obscura Developer - Plugin API Documentation</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+</head>
+
+<body class="dark-theme">
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <span class="logo-text">Obscura <span class="accent">Docs</span></span>
+            </div>
+            <div class="search-container">
+                <input type="text" id="api-search" placeholder="APIを検索...">
+            </div>
+        </div>
+        <div class="sidebar-content">
+            <ul class="nav-list">
+                <li class="nav-item">
+                    <a href="#introduction" class="nav-link active">はじめに</a>
+                </li>
+                <li class="nav-group">
+                    <span class="group-title">Plugin JS API</span>
+                    <ul id="js-api-nav" class="sub-nav"></ul>
+                </li>
+                <li class="nav-group">
+                    <span class="group-title">REST API</span>
+                    <ul id="rest-api-nav" class="sub-nav"></ul>
+                </li>
+            </ul>
+        </div>
+    </nav>
+
+    <main class="main-content">
+        <header class="top-header">
+            <div class="breadcrumb">
+                <span id="breadcrumb-current">はじめに</span>
+            </div>
+            <div class="header-actions">
+                <a href="https://github.com/84kb/Obscura" target="_blank" class="github-link">
+                    <svg height="24" viewBox="0 0 16 16" width="24" fill="currentColor">
+                        <path
+                            d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z">
+                        </path>
+                    </svg>
+                </a>
+            </div>
+        </header>
+
+        <section id="content-area" class="content-section">
+            <!-- Dynamic Content Load -->
+            <div id="introduction">
+                <h1>Obscura Plugin API</h1>
+                <p class="lead">Obscuraの機能を拡張し、メディアとの対話を自動化するためのAPIドキュメント。 JavaScript Plugin APIとREST APIの両方を提供しています。
+                </p>
+
+                <div class="info-card">
+                    <h3>認証について</h3>
+                    <p>REST APIのリクエストには <code>Authorization</code> ヘッダーが必要です。</p>
+                    <pre><code>Authorization: Bearer [Host Secret]</code></pre>
+                    <p>Host Secretは、Obscuraアプリの「設定 > 開発者ツール」から確認・取得できます。</p>
+                </div>
+
+                <h2>クイックスタート</h2>
+                <div class="grid">
+                    <div class="card">
+                        <h4>Plugin JS API</h4>
+                        <p>アプリのUIを拡張したり、内部データを操作します。<code>.js</code>ファイルをプラグインフォルダに配置するだけで動作します。</p>
+                        <a href="#" onclick="showSection('js-api-0')">リファレンスを見る</a>
+                    </div>
+                    <div class="card">
+                        <h4>REST API</h4>
+                        <p>外部ツールや自作スクリプトからHTTPリクエスト経由でObscuraを操作します。</p>
+                        <a href="#" onclick="showSection('rest-api-0')">エンドポイント一覧</a>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <footer>
+            <div class="footer-content">
+                <p>&copy; 2026 Obscura Project. Inspired by Eagle Developer Center.</p>
+            </div>
+        </footer>
+    </main>
+
+    <script src="api-data.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>

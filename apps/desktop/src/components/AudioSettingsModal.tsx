@@ -46,13 +46,18 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({
             animationId = requestAnimationFrame(draw)
             analyser.getByteFrequencyData(dataArray)
             ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+            const rootStyle = getComputedStyle(document.documentElement)
+            const primaryColor = rootStyle.getPropertyValue('--primary').trim() || '#ff8c42'
+            const accentColor = rootStyle.getPropertyValue('--accent').trim() || '#ffa726'
+
             const barWidth = (canvas.width / bufferLength) * 2.5
             let x = 0
             for (let i = 0; i < bufferLength; i++) {
                 const barHeight = (dataArray[i] / 255) * canvas.height
                 const gradient = ctx.createLinearGradient(0, canvas.height - barHeight, 0, canvas.height)
-                gradient.addColorStop(0, '#ff8c42')
-                gradient.addColorStop(1, '#ffa726')
+                gradient.addColorStop(0, primaryColor)
+                gradient.addColorStop(1, accentColor)
                 ctx.fillStyle = gradient
                 ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight)
                 x += barWidth + 1

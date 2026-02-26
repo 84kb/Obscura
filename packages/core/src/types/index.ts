@@ -89,6 +89,7 @@ export interface FilterOptions {
     sortOrder: 'name' | 'date' | 'size' | 'duration' | 'last_played' | 'rating' | 'modified' | 'artist' | 'tags' | 'random'
     sortDirection: 'asc' | 'desc'
     selectedRatings: number[] // 0-5, 0 は「評価なし」
+    excludedRatings: number[]
     selectedExtensions: string[]
     excludedExtensions: string[]
     selectedArtists: string[]
@@ -346,6 +347,12 @@ export interface ElectronAPI {
     deleteSharedUser: (userId: string) => Promise<void>
     updateSharedUser: (userId: string, updates: Partial<SharedUser>) => Promise<void>
 
+    // プラグイン API
+    showNotification: (options: { title: string; message: string }) => void
+    showMessageBox: (options: ExtensionMessageBoxOptions) => Promise<{ response: number }>
+    updateMedia: (mediaId: number, updates: any) => Promise<MediaFile | null>
+    getSelectedMedia: () => Promise<MediaFile[]>
+
     // クライアント機能
     getHardwareId: () => Promise<string>
     generateUserToken: () => Promise<string>
@@ -490,6 +497,22 @@ export interface PlayerOverlayContext {
     enabled: boolean;
 }
 
+export interface ExtensionNotificationOptions {
+    title: string;
+    description?: string;
+    type?: 'info' | 'success' | 'warning' | 'error';
+    duration?: number;
+}
+
+export interface ExtensionMessageBoxOptions {
+    title: string;
+    message: string;
+    type?: 'info' | 'error' | 'warning' | 'question';
+    buttons?: string[];
+    defaultId?: number;
+    cancelId?: number;
+}
+
 export interface ExtensionUIHooks {
     inspectorComments?: (media: MediaFile) => ExtensionButton[];
     playerTopBar?: (media: MediaFile) => ExtensionButton[];
@@ -513,13 +536,42 @@ export interface ObscuraAPI {
     registerPlayerOverlay: (id: string, callback: (canvas: HTMLCanvasElement, media: MediaFile, context: PlayerOverlayContext) => void) => void;
     unregisterPlayerOverlay: (id: string) => void;
 
+    // メディア操作 (Eagle 互換)
+    media: {
+        get: (id: number) => Promise<MediaFile | null>;
+        getSelected: () => Promise<MediaFile | null>;
+        getSelection: () => Promise<MediaFile[]>;
+        update: (id: number, updates: Partial<MediaFile>) => Promise<MediaFile | null>;
+        addTag: (mediaId: number, tagId: number) => Promise<void>;
+        removeTag: (mediaId: number, tagId: number) => Promise<void>;
+        import: (filePaths: string[]) => Promise<MediaFile[]>;
+    };
+
+    // UI 操作
+    ui: {
+        showNotification: (options: ExtensionNotificationOptions) => void;
+        showMessageBox: (options: ExtensionMessageBoxOptions) => Promise<{ response: number }>;
+        copyToClipboard: (text: string) => void;
+    };
+
     system: {
         fetch: (url: string, options?: any) => Promise<any>;
         saveMediaData: (mediaId: number, pluginId: string, data: any) => Promise<boolean>;
         loadMediaData: (mediaId: number, pluginId: string) => Promise<any>;
         saveCommentFile: (mediaFilePath: string, data: any) => Promise<boolean>;
         loadCommentFile: (mediaFilePath: string) => Promise<any>;
+        openPath: (path: string) => Promise<void>;
+        openExternal: (url: string) => Promise<void>;
+
+        // プラグイン用永続ストレージ
+        storage: {
+            get: (key: string) => Promise<any>;
+            set: (key: string, value: any) => Promise<void>;
+        };
     };
+
+    // イベント
+    on: (event: 'selection-changed' | 'item-info-updated' | 'theme-changed', callback: (...args: any[]) => void) => () => void;
 }
 
 // グローバルオブジェクトの型拡張

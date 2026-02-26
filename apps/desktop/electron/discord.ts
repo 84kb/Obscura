@@ -1,7 +1,8 @@
 import DiscordRPC from 'discord-rpc'
 
-// これは仮のClient IDです。
-// Discord Developer Portalでアプリケーションを作成し、ここを自身のClient IDに置き換えてください。
+// [IMPORTANT] Discord Developer Portal でアプリケーションを作成し、
+// その CLIENT ID (Application ID) をここにセットしてください。
+// 詳細: https://discord.com/developers/applications
 const CLIENT_ID = '1462710290322952234'
 
 let rpc: DiscordRPC.Client | null = null

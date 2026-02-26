@@ -50,6 +50,7 @@ export function useLibrary() {
         sortOrder: 'name',
         sortDirection: 'desc',
         selectedRatings: [],
+        excludedRatings: [],
         selectedExtensions: [],
         excludedExtensions: [],
         selectedArtists: [],
@@ -1108,10 +1109,22 @@ export function useLibrary() {
         }
 
         // 評価フィルター
-        if (filterOptions.selectedRatings && filterOptions.selectedRatings.length > 0) {
+        if ((filterOptions.selectedRatings && filterOptions.selectedRatings.length > 0) ||
+            (filterOptions.excludedRatings && filterOptions.excludedRatings.length > 0)) {
             result = result.filter(m => {
                 const rating = m.rating || 0
-                return filterOptions.selectedRatings.includes(rating)
+
+                // 除外チェック
+                if (filterOptions.excludedRatings?.includes(rating)) {
+                    return false
+                }
+
+                // 選択チェック (選択されているものがある場合のみ)
+                if (filterOptions.selectedRatings?.length > 0) {
+                    return filterOptions.selectedRatings.includes(rating)
+                }
+
+                return true
             })
         }
 

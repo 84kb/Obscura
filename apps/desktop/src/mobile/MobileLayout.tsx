@@ -37,7 +37,6 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
                 <button className="icon-btn" onClick={toggleSidebar}>
                     <Menu size={24} />
                 </button>
-                <div className="mobile-logo">Obscura</div>
                 <button className="icon-btn">
                     <Search size={24} />
                 </button>

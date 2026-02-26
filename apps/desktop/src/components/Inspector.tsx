@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { MediaFile, Tag, Folder, MediaComment, SharedUser, CommentProvider } from '@obscura/core'
 import './Inspector.css'
@@ -89,6 +89,8 @@ export function Inspector({
     const [showFolderInput, setShowFolderInput] = useState(false)
     const [tagInput, setTagInput] = useState('')
     const [folderInput, setFolderInput] = useState('')
+    const [focusedTagIndex, setFocusedTagIndex] = useState(-1)
+    const [focusedFolderIndex, setFocusedFolderIndex] = useState(-1)
 
     // ファイル名編集用
     const [fileName, setFileName] = useState('')
@@ -126,6 +128,24 @@ export function Inspector({
             setPromptData({ isOpen: true, message, defaultValue, resolve });
         });
     };
+
+    // flatten folder tree helper
+    const getFlattenedFolders = useMemo(() => {
+        const buildTree = (parentId: number | null, depth: number = 0): { folder: typeof allFolders[0], depth: number }[] => {
+            const children = allFolders
+                .filter(f => f.parentId === parentId)
+                // If there's an 'orderIndex' use it, else fallback to name sorting
+                .sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0) || a.name.localeCompare(b.name))
+
+            let result: { folder: typeof allFolders[0], depth: number }[] = []
+            for (const child of children) {
+                result.push({ folder: child, depth })
+                result = result.concat(buildTree(child.id, depth + 1))
+            }
+            return result
+        }
+        return buildTree(null)
+    }, [allFolders])
 
     const handleFetchPluginComments = async (pluginId: string) => {
         if (media.length !== 1 || !window.ObscuraAPI) return;
@@ -210,6 +230,29 @@ export function Inspector({
 
     // テキストエリアの自動リサイズ用
     const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+    // ピッカーリスト用のRef
+    const tagListRef = useRef<HTMLDivElement>(null)
+    const folderListRef = useRef<HTMLDivElement>(null)
+
+    // Focused item のスクロール追従
+    useEffect(() => {
+        if (showTagInput && focusedTagIndex >= 0 && tagListRef.current) {
+            const item = tagListRef.current.querySelector(`#tag-item-${focusedTagIndex}`) as HTMLElement
+            if (item) {
+                item.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+            }
+        }
+    }, [focusedTagIndex, showTagInput])
+
+    useEffect(() => {
+        if (showFolderInput && focusedFolderIndex >= 0 && folderListRef.current) {
+            const item = folderListRef.current.querySelector(`#folder-item-${focusedFolderIndex}`) as HTMLElement
+            if (item) {
+                item.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+            }
+        }
+    }, [focusedFolderIndex, showFolderInput])
 
     useEffect(() => {
         if (textareaRef.current) {
@@ -301,10 +344,12 @@ export function Inspector({
                 if (showTagInput) {
                     setShowTagInput(false)
                     setTagInput('')
+                    setFocusedTagIndex(-1)
                 }
                 if (showFolderInput) {
                     setShowFolderInput(false)
                     setFolderInput('')
+                    setFocusedFolderIndex(-1)
                 }
             }
         }
@@ -324,12 +369,14 @@ export function Inspector({
                 tagButtonRef.current && !tagButtonRef.current.contains(target)) {
                 setShowTagInput(false)
                 setTagInput('')
+                setFocusedTagIndex(-1)
             }
             // フォルダーピッカーが開いている時
             if (showFolderInput && folderPickerRef.current && !folderPickerRef.current.contains(target) &&
                 folderButtonRef.current && !folderButtonRef.current.contains(target)) {
                 setShowFolderInput(false)
                 setFolderInput('')
+                setFocusedFolderIndex(-1)
             }
         }
         // Use mousedown instead of click to fix issue where dragging from inside to outside closes the menu
@@ -469,9 +516,34 @@ export function Inspector({
     }
 
     const handleTagInputKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (e.key === 'Enter') {
+        const filteredTags = allTags.filter(t => t.name.toLowerCase().includes(tagInput.toLowerCase()))
+        const maxIndex = filteredTags.length - 1
+
+        if (e.key === 'ArrowDown') {
             e.preventDefault()
-            handleCreateTag()
+            setFocusedTagIndex(prev => Math.min(prev + 2, maxIndex))
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault()
+            setFocusedTagIndex(prev => Math.max(prev - 2, 0))
+        } else if (e.key === 'ArrowRight') {
+            e.preventDefault()
+            setFocusedTagIndex(prev => Math.min(prev + 1, maxIndex))
+        } else if (e.key === 'ArrowLeft') {
+            e.preventDefault()
+            setFocusedTagIndex(prev => Math.max(prev - 1, 0))
+        } else if (e.key === 'Enter') {
+            e.preventDefault()
+            if (focusedTagIndex >= 0 && focusedTagIndex <= maxIndex) {
+                const tag = filteredTags[focusedTagIndex]
+                const isAdded = commonTags.some(ct => ct.id === tag.id)
+                if (isAdded) {
+                    media.forEach(m => onRemoveTag(m.id, tag.id))
+                } else {
+                    media.forEach(m => onAddTag(m.id, tag.id))
+                }
+            } else {
+                handleCreateTag()
+            }
         } else if (e.key === ',') {
             e.preventDefault()
             handleCreateTag()
@@ -485,9 +557,31 @@ export function Inspector({
     }
 
     const handleFolderInputKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (e.key === 'Enter') {
+        // filter from flattened folders to preserve hierarchy visually if possible
+        const filteredFlattened = getFlattenedFolders.filter((item: { folder: typeof allFolders[0], depth: number }) =>
+            item.folder.name.toLowerCase().includes(folderInput.toLowerCase())
+        )
+        const maxIndex = filteredFlattened.length - 1
+
+        if (e.key === 'ArrowDown') {
             e.preventDefault()
-            handleCreateFolder()
+            setFocusedFolderIndex(prev => Math.min(prev + 1, maxIndex))
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault()
+            setFocusedFolderIndex(prev => Math.max(prev - 1, 0))
+        } else if (e.key === 'Enter') {
+            e.preventDefault()
+            if (focusedFolderIndex >= 0 && focusedFolderIndex <= maxIndex) {
+                const folder = filteredFlattened[focusedFolderIndex].folder
+                const isAdded = commonFolders.some(cf => cf.id === folder.id)
+                if (isAdded) {
+                    media.forEach(m => onRemoveFolder(m.id, folder.id))
+                } else {
+                    media.forEach(m => onAddFolder(m.id, folder.id))
+                }
+            } else {
+                handleCreateFolder()
+            }
         }
     }
 
@@ -1153,15 +1247,18 @@ export function Inspector({
                                     autoFocus
                                 />
                             </div>
-                            <div className="picker-popover-list">
-                                {allTags.filter(t => t.name.toLowerCase().includes(tagInput.toLowerCase())).map(tag => {
+                            <div className="picker-popover-list" ref={tagListRef}>
+                                {allTags.filter(t => t.name.toLowerCase().includes(tagInput.toLowerCase())).map((tag, index) => {
                                     const isAdded = commonTags.some(ct => ct.id === tag.id)
                                     const isPartial = !isAdded && media.some(m => m.tags?.some(mt => mt.id === tag.id))
+                                    const isFocused = index === focusedTagIndex
 
                                     return (
                                         <div
                                             key={tag.id}
-                                            className={`picker - popover - item ${isAdded ? 'added' : ''} ${isPartial ? 'partial' : ''} `}
+                                            id={`tag-item-${index}`}
+                                            className={`picker-popover-item ${isAdded ? 'added' : ''} ${isPartial ? 'partial' : ''} ${isFocused ? 'focused' : ''}`}
+                                            onMouseEnter={() => setFocusedTagIndex(index)}
                                             onClick={(e) => {
                                                 e.stopPropagation()
                                                 if (isAdded) {
@@ -1197,7 +1294,8 @@ export function Inspector({
                                 )}
                             </div>
                             <div className="picker-popover-footer">
-                                <button className="picker-close-btn" onClick={() => { setShowTagInput(false); setTagInput(''); }}>
+                                <span className="picker-shortcuts">移動 ↑ ↓ ← →  選択 ⏎</span>
+                                <button className="picker-close-btn" onClick={() => { setShowTagInput(false); setTagInput(''); setFocusedTagIndex(-1) }}>
                                     閉じる ESC
                                 </button>
                             </div>
@@ -1224,38 +1322,47 @@ export function Inspector({
                                     autoFocus
                                 />
                             </div>
-                            <div className="picker-popover-list">
-                                {allFolders.filter(f => f.name.toLowerCase().includes(folderInput.toLowerCase())).map(folder => {
-                                    const isAdded = commonFolders.some(cf => cf.id === folder.id)
-                                    const isPartial = !isAdded && media.some(m => m.folders?.some(mf => mf.id === folder.id))
+                            <div className="picker-popover-list folder-popover-list" ref={folderListRef}>
+                                {getFlattenedFolders
+                                    .filter((item: { folder: typeof allFolders[0], depth: number }) => item.folder.name.toLowerCase().includes(folderInput.toLowerCase()))
+                                    .map((item: { folder: typeof allFolders[0], depth: number }, index: number) => {
+                                        const folder = item.folder
+                                        const depth = folderInput.trim() !== '' ? 0 : item.depth // indent only if not searching
+                                        const isAdded = commonFolders.some(cf => cf.id === folder.id)
+                                        const isPartial = !isAdded && media.some(m => m.folders?.some(mf => mf.id === folder.id))
+                                        const isFocused = index === focusedFolderIndex
 
-                                    return (
-                                        <div
-                                            key={folder.id}
-                                            className={`picker - popover - item ${isAdded ? 'added' : ''} ${isPartial ? 'partial' : ''} `}
-                                            onClick={(e) => {
-                                                e.stopPropagation()
-                                                if (isAdded) {
-                                                    media.forEach(m => onRemoveFolder(m.id, folder.id))
-                                                } else {
-                                                    media.forEach(m => onAddFolder(m.id, folder.id))
-                                                }
-                                            }}
-                                        >
-                                            <span className="picker-checkbox">
-                                                {isAdded && (
-                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                                                        <polyline points="20 6 9 17 4 12" />
-                                                    </svg>
-                                                )}
-                                                {isPartial && (
-                                                    <div className="partial-mark"></div>
-                                                )}
-                                            </span>
-                                            <span>{folder.name}</span>
-                                        </div>
-                                    )
-                                })}
+                                        return (
+                                            <div
+                                                key={folder.id}
+                                                id={`folder-item-${index}`}
+                                                className={`picker-popover-item ${isAdded ? 'added' : ''} ${isPartial ? 'partial' : ''} ${isFocused ? 'focused' : ''}`}
+                                                style={{ marginLeft: `${depth * 16}px`, width: `calc(100% - ${depth * 16}px)` }}
+                                                onMouseEnter={() => setFocusedFolderIndex(index)}
+                                                onClick={(e) => {
+                                                    e.stopPropagation()
+                                                    if (isAdded) {
+                                                        media.forEach(m => onRemoveFolder(m.id, folder.id))
+                                                    } else {
+                                                        media.forEach(m => onAddFolder(m.id, folder.id))
+                                                    }
+                                                }}
+                                            >
+                                                <span className="picker-checkbox">
+                                                    {isAdded && (
+                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                                                            <polyline points="20 6 9 17 4 12" />
+                                                        </svg>
+                                                    )}
+                                                    {isPartial && (
+                                                        <div className="partial-mark"></div>
+                                                    )}
+                                                </span>
+                                                <span className="folder-name-text">{folder.name}</span>
+                                            </div>
+                                        )
+                                    })}
+
                                 {folderInput.trim() && !allFolders.some(f => f.name.toLowerCase() === folderInput.trim().toLowerCase()) && (
                                     <button className="picker-popover-create-btn" onClick={handleCreateFolder}>
                                         <span className="create-plus">+</span>
@@ -1268,7 +1375,8 @@ export function Inspector({
                                 )}
                             </div>
                             <div className="picker-popover-footer">
-                                <button className="picker-close-btn" onClick={() => { setShowFolderInput(false); setFolderInput(''); }}>
+                                <span className="picker-shortcuts">移動 ↑ ↓  選択 ⏎</span>
+                                <button className="picker-close-btn" onClick={() => { setShowFolderInput(false); setFolderInput(''); setFocusedFolderIndex(-1) }}>
                                     閉じる ESC
                                 </button>
                             </div>

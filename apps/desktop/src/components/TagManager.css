@@ -203,7 +203,8 @@
 
 .tag-manager-input:focus {
     border-color: var(--primary);
-    box-shadow: 0 0 0 3px rgba(255, 140, 66, 0.1);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary), transparent 90%);
+    outline: none;
 }
 
 .tag-manager-grid {

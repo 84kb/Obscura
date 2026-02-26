@@ -215,7 +215,7 @@
 .add-tag-chip:hover {
     border-color: var(--primary);
     color: var(--primary);
-    background: rgba(255, 140, 66, 0.05);
+    background: color-mix(in srgb, var(--primary), transparent 95%);
 }
 
 /* インフォメーション行 */
@@ -347,26 +347,54 @@
 .picker-popover-list {
     flex: 1;
     overflow-y: auto;
-    padding: 4px 0;
+    padding: 8px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-auto-rows: max-content;
+    gap: 4px;
+    align-content: start;
+}
+
+.picker-popover-list.folder-popover-list {
+    display: flex;
+    flex-direction: column;
+    min-height: 250px;
 }
 
 .picker-popover-item {
-    padding: 8px 16px;
+    padding: 4px 8px;
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
     cursor: pointer;
-    transition: background 0.2s;
-    font-size: 13px;
+    transition: background 0.2s, border-color 0.2s;
+    font-size: 11px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    overflow: hidden;
+    flex-shrink: 0;
 }
 
-.picker-popover-item:hover {
+.picker-popover-item span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.picker-popover-item .folder-name-text {
+    flex: 1;
+}
+
+.picker-popover-item:hover,
+.picker-popover-item.focused {
     background: var(--bg-hover);
+    border-color: var(--border);
 }
 
 .picker-checkbox {
     width: 16px;
     height: 16px;
+    flex-shrink: 0;
     border: 1px solid var(--border);
     border-radius: 4px;
     display: flex;
@@ -377,22 +405,23 @@
 
 .picker-popover-item.added .picker-checkbox {
     border-color: var(--primary);
-    background: rgba(255, 140, 66, 0.1);
+    background: color-mix(in srgb, var(--primary), transparent 90%);
 }
 
 .picker-popover-create-btn {
-    width: calc(100% - 16px);
-    margin: 8px;
-    padding: 10px;
+    grid-column: 1 / -1;
+    width: 100%;
+    margin: 4px 0;
+    padding: 8px;
     background: transparent;
     border: 1px dashed var(--border);
-    border-radius: 8px;
+    border-radius: 6px;
     color: var(--text-main);
     display: flex;
     align-items: center;
     gap: 8px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 12px;
 }
 
 .create-plus {
@@ -411,16 +440,30 @@
     padding: 8px;
     border-top: 1px solid var(--border);
     background: rgba(0, 0, 0, 0.1);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.picker-shortcuts {
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
 }
 
 .picker-close-btn {
-    width: 100%;
     background: transparent;
     border: none;
     color: var(--text-muted);
     font-size: 11px;
     cursor: pointer;
-    padding: 4px;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+.picker-close-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-main);
 }
 
 /* 投稿者・説明入力 */
@@ -441,7 +484,7 @@
 .artist-input:focus,
 .artist-input.expanded {
     border-color: var(--primary);
-    box-shadow: 0 0 0 3px rgba(255, 140, 66, 0.1);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary), transparent 90%);
     background: var(--bg-sidebar);
 }
 
@@ -579,7 +622,7 @@
 }
 
 .picker-popover-item.partial .picker-checkbox {
-    background: rgba(255, 140, 66, 0.2);
+    background: color-mix(in srgb, var(--primary), transparent 80%);
     border-color: var(--primary);
     display: flex;
     align-items: center;
@@ -734,7 +777,7 @@
 
 .url-input:focus {
     border-color: var(--primary);
-    box-shadow: 0 0 0 3px rgba(255, 140, 66, 0.1);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary), transparent 90%);
 }
 
 .url-actions {

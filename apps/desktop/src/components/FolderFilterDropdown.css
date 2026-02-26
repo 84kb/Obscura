@@ -75,7 +75,7 @@
 }
 
 .folder-filter-rule .mode-btn.active {
-    background: rgba(255, 140, 66, 0.15);
+    background: color-mix(in srgb, var(--primary), transparent 85%);
     border-color: var(--primary);
     color: var(--primary);
 }
@@ -130,7 +130,7 @@
 }
 
 .folder-filter-item.selected {
-    background: rgba(255, 140, 66, 0.1);
+    background: color-mix(in srgb, var(--primary), transparent 90%);
 }
 
 .folder-filter-item.excluded {

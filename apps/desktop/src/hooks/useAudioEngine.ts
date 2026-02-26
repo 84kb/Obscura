@@ -741,7 +741,9 @@ export function useAudioEngine() {
 
         // Master Gain
         if (masterGainNodeRef.current) {
-            masterGainNodeRef.current.gain.setTargetAtTime(s.masterGain / 100, t, 0.05)
+            // 聴感特性に合わせて2乗のスケーリングを適用
+            const gainValue = Math.pow(settings.masterGain / 100, 2)
+            masterGainNodeRef.current.gain.setTargetAtTime(gainValue, t, 0.05)
         }
 
         localStorage.setItem('audio_engine_settings_v3', JSON.stringify(s))
