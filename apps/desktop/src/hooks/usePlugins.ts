@@ -1,15 +1,15 @@
 import { useState, useEffect } from 'react'
-import { CommentProvider } from '@obscura/core'
+import { ObscuraPlugin } from '@obscura/core'
 
-export function useCommentProviders(): CommentProvider[] {
-    const [providers, setProviders] = useState<CommentProvider[]>(() => {
-        return window.ObscuraAPI ? [...window.ObscuraAPI.getCommentProviders()] : []
+export function usePlugins(): ObscuraPlugin[] {
+    const [plugins, setPlugins] = useState<ObscuraPlugin[]>(() => {
+        return window.ObscuraAPI ? [...window.ObscuraAPI.getPlugins()] : []
     })
 
     useEffect(() => {
         const handlePluginRegistered = () => {
             if (window.ObscuraAPI) {
-                setProviders([...window.ObscuraAPI.getCommentProviders()])
+                setPlugins([...window.ObscuraAPI.getPlugins()])
             }
         }
 
@@ -23,5 +23,5 @@ export function useCommentProviders(): CommentProvider[] {
         }
     }, [])
 
-    return providers
+    return plugins
 }

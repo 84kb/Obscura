@@ -149,8 +149,8 @@ try {
         getPluginScripts: () => ipcRenderer.invoke('plugin:getScripts'),
         installPlugin: () => ipcRenderer.invoke('plugin:install'),
         uninstallPlugin: (pluginId) => ipcRenderer.invoke('plugin:uninstall', pluginId),
-        saveCommentFile: (filePath, data) => ipcRenderer.invoke('plugin:saveCommentFile', filePath, data),
-        loadCommentFile: (filePath) => ipcRenderer.invoke('plugin:loadCommentFile', filePath),
+        saveAssociatedData: (filePath, data) => ipcRenderer.invoke('plugin:saveAssociatedData', filePath, data),
+        loadAssociatedData: (filePath) => ipcRenderer.invoke('plugin:loadAssociatedData', filePath),
 
         // ユーザー管理
         getSharedUsers: () => ipcRenderer.invoke('get-shared-users'),

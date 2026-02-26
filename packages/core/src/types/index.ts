@@ -425,8 +425,8 @@ export interface ElectronAPI {
     getPluginScripts: () => Promise<PluginInfo[]>;
 
     // コメントファイルI/O（動画横保存）
-    saveCommentFile: (mediaFilePath: string, data: any) => Promise<boolean>;
-    loadCommentFile: (mediaFilePath: string) => Promise<any>;
+    saveAssociatedData: (mediaFilePath: string, data: any) => Promise<boolean>;
+    loadAssociatedData: (mediaFilePath: string) => Promise<any>;
 }
 
 export interface RemoteLibrary {
@@ -475,11 +475,13 @@ export interface LibraryTransferSettings {
 // 拡張機能・プラグインAPI用 型定義
 // ---------------------------------------------------------------------------
 
-export interface ExtensionComment {
-    vpos: number;      // 再生位置からのミリ秒
-    content: string;   // コメント本文
-    mail: string;      // コマンド（red, shita, big など）
-    userId: string;    // アカウントID
+// プラグインから取得される汎用データのインターフェース
+export interface ExtensionResource {
+    id: string | number;
+    time?: number;     // タイムライン上の位置（秒）
+    type?: string;     // データ種別 (comment, chapter, etc.)
+    content: string;   // コンテンツ本文
+    [key: string]: any; // その他のプラグイン固有データ
 }
 
 export interface ExtensionButton {
@@ -514,23 +516,24 @@ export interface ExtensionMessageBoxOptions {
 }
 
 export interface ExtensionUIHooks {
-    inspectorComments?: (media: MediaFile) => ExtensionButton[];
+    inspectorActions?: (media: MediaFile) => ExtensionButton[];
     playerTopBar?: (media: MediaFile) => ExtensionButton[];
     playerOverlay?: (canvas: HTMLCanvasElement, media: MediaFile, context: PlayerOverlayContext) => void;
 }
 
-export interface CommentProvider {
+export interface ObscuraPlugin {
     id: string;        // 例: 'niconico'
-    name: string;      // 例: 'ニコニコ動画'
+    name: string;      // 例: '拡張機能'
     canHandle: (url: string) => boolean; // このURLを処理可能か判定
-    fetchComments: (mediaId: number, url: string) => Promise<ExtensionComment[]>; // コメント取得処理
+    fetchData: (mediaId: number, url: string) => Promise<ExtensionResource[]>; // データ取得処理
     uiHooks?: ExtensionUIHooks;
 }
 
 export interface ObscuraAPI {
-    registerCommentProvider: (provider: CommentProvider) => void;
-    unregisterCommentProvider?: (pluginId: string) => void;
-    getCommentProviders: () => CommentProvider[];
+    registerPlugin: (plugin: ObscuraPlugin) => void;
+    unregisterPlugin?: (pluginId: string) => void;
+    getPlugins: () => ObscuraPlugin[];
+
 
     // プレイヤーオーバーレイAPI
     registerPlayerOverlay: (id: string, callback: (canvas: HTMLCanvasElement, media: MediaFile, context: PlayerOverlayContext) => void) => void;
@@ -558,8 +561,9 @@ export interface ObscuraAPI {
         fetch: (url: string, options?: any) => Promise<any>;
         saveMediaData: (mediaId: number, pluginId: string, data: any) => Promise<boolean>;
         loadMediaData: (mediaId: number, pluginId: string) => Promise<any>;
-        saveCommentFile: (mediaFilePath: string, data: any) => Promise<boolean>;
-        loadCommentFile: (mediaFilePath: string) => Promise<any>;
+        // 各種データ保存用 (旧 saveCommentFile)
+        saveAssociatedData: (mediaFilePath: string, data: any) => Promise<boolean>;
+        loadAssociatedData: (mediaFilePath: string) => Promise<any>;
         openPath: (path: string) => Promise<void>;
         openExternal: (url: string) => Promise<void>;
 

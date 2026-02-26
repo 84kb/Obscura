@@ -5,25 +5,40 @@
 
 const JS_API_REFERENCE = [
     {
-        name: 'window.ObscuraAPI.registerCommentProvider',
-        description: '外部サービスからコメントを取得するためのプロバイダーを登録します。UIの拡張フックもここに含まれます。',
-        example: `window.ObscuraAPI.registerCommentProvider({
+        name: 'window.ObscuraAPI.registerPlugin',
+        description: '外部リソースからのデータ取得や、インスペクタ・プレイヤーへのUI拡張（ボタン等）を統合するプラグインを登録します。',
+        example: `window.ObscuraAPI.registerPlugin({
   id: 'my-plugin',
   name: 'My Plugin',
-  canHandle: (url) => url.includes('example.com'),
-  fetchComments: async (mediaId, url) => {
-    // コメント取得ロジック
-    return [{ vpos: 1000, content: 'Hello', mail: '', userId: 'user1' }];
+  // リソース（URL等）をこのプラグインで扱えるか判定
+  canHandle: (resource) => resource.includes('example.com'),
+  // データの動的取得ロジック（コメントやメタデータなど）
+  fetchData: async (mediaId, resource) => {
+    const data = await ObscuraAPI.system.fetch('...');
+    return data;
   },
+  // UIの拡張フック
   uiHooks: {
-    inspectorComments: (media) => [
+    // インスペクタ（詳細パネル）にボタンを追加
+    inspectorActions: (media) => [
       { id: 'btn1', label: 'カスタムアクション', onClick: () => console.log('Clicked!') }
     ],
+    // プレイヤー上部バーにボタンを追加
     playerTopBar: (media) => [
       { id: 'btn2', label: 'Playerボタン', icon: '<svg>...</svg>', onClick: () => alert('Player!') }
     ]
   }
 });`
+    },
+    {
+        name: 'window.ObscuraAPI.unregisterPlugin',
+        description: '登録済みのプラグインを解除します。',
+        example: `window.ObscuraAPI.unregisterPlugin('my-plugin');`
+    },
+    {
+        name: 'window.ObscuraAPI.getPlugins',
+        description: '現在登録されているすべてのプラグインのリストを取得します。',
+        example: `const plugins = window.ObscuraAPI.getPlugins();`
     },
     {
         name: 'window.ObscuraAPI.registerPlayerOverlay',
@@ -35,6 +50,11 @@ const JS_API_REFERENCE = [
 });`
     },
     {
+        name: 'window.ObscuraAPI.unregisterPlayerOverlay',
+        description: '登録済みのプレイヤーオーバーレイを解除します。',
+        example: `window.ObscuraAPI.unregisterPlayerOverlay('my-overlay');`
+    },
+    {
         name: 'ObscuraAPI.media',
         description: 'メディアアイテムの取得、選択状態、更新、タグ操作、インポートなどを行います。',
         example: `// 特定のメディア取得
@@ -42,10 +62,15 @@ const media = await ObscuraAPI.media.get(123);
 
 // 選択中のアイテム取得
 const selected = await ObscuraAPI.media.getSelected();
-const selection = await ObscuraAPI.media.getSelection(); // 配列で取得
+const selection = await ObscuraAPI.media.getSelection(); // 複数選択されているすべてのアイテムを配列で取得
 
 // メタデータ更新
-await ObscuraAPI.media.update(media.id, { description: 'New Description' });
+await ObscuraAPI.media.update(media.id, {
+  title: 'New Title',
+  description: 'New Description',
+  rating: 5,
+  artist: 'New Artist'
+});
 
 // タグ操作
 await ObscuraAPI.media.addTag(media.id, tagId);
@@ -77,9 +102,17 @@ await ObscuraAPI.ui.copyToClipboard('text to copy');`
         example: `// 外部データの取得
 const data = await window.ObscuraAPI.system.fetch('https://api.example.com/data');
 
-// プラグイン固有データの保存/読み込み
+// プラグイン固有データの保存/読み込み (拡張情報フォルダ)
 await window.ObscuraAPI.system.saveMediaData(mediaId, 'my-plugin', { key: 'value' });
 const saved = await window.ObscuraAPI.system.loadMediaData(mediaId, 'my-plugin');
+
+// 関連データファイルの直接保存/読み込み (動画ファイルと同じ場所に .comments.json などを保持する)
+await window.ObscuraAPI.system.saveAssociatedData(media.file_path, { ... });
+const data = await window.ObscuraAPI.system.loadAssociatedData(media.file_path);
+
+// プラグイン設定などの永続化ストレージ
+await ObscuraAPI.system.storage.set('my_setting', true);
+const mySetting = await ObscuraAPI.system.storage.get('my_setting');
 
 // ファイル/URL を開く
 await ObscuraAPI.system.openPath('C:/path/to/folder');

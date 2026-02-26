@@ -11,6 +11,8 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
+    <!-- Prism.js for syntax highlighting -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
 </head>
 
 <body class="dark-theme">
@@ -99,7 +101,11 @@
                         <div class="info-card">
                             <p>REST APIのリクエストには <code>Authorization</code> ヘッダーが必要です。Host Secretは、Obscuraアプリの「設定 >
                                 開発者ツール」から取得できます。</p>
-                            <pre><code>Authorization: Bearer [Host Secret]</code></pre>
+                            <div class="code-container" style="margin-top: 12px;">
+                                <button class="copy-btn" onclick="copyCode(this)">コピー</button>
+                                <pre
+                                    class="language-bash"><code class="language-bash"><div class="code-line">Authorization: Bearer [Host Secret]</div></code></pre>
+                            </div>
                         </div>
 
                         <h2 id="quickstart">クイックスタート</h2>
@@ -139,6 +145,9 @@
         </main>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
     <script src="api-data.js"></script>
     <script src="app.js"></script>
 </body>

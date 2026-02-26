@@ -10,7 +10,7 @@ export function registerPluginSystem(userDataPath: string) {
     // 開発時はプロジェクトルートの plugins フォルダを参照する
     const pluginsDir = app.isPackaged
         ? path.join(userDataPath, 'plugins')
-        : path.join(__dirname, '../../plugins'); // dist-electron/ 内から見たパス。うまくいかない場合は手動でフォールバックを追加
+        : path.join(__dirname, '../plugins'); // dist-electron/ 内から見たパス。
     const extensionsDataDir = path.join(userDataPath, 'extensions_data');
 
     // ディレクトリの確保
@@ -72,32 +72,32 @@ export function registerPluginSystem(userDataPath: string) {
         }
     });
 
-    // コメントファイルI/O — 動画ファイルと同階層に .comments.json を保存
-    ipcMain.handle('plugin:saveCommentFile', async (_event, mediaFilePath: string, data: any) => {
+    // AssociatedData I/O — 動画ファイルと同階層に .comments.json などを保存
+    ipcMain.handle('plugin:saveAssociatedData', async (_event, mediaFilePath: string, data: any) => {
         try {
             if (!mediaFilePath) return false;
             const parsed = path.parse(mediaFilePath);
-            const commentPath = path.join(parsed.dir, `${parsed.name}.comments.json`);
-            await fs.writeJson(commentPath, data, { spaces: 2 });
-            console.log(`[Plugin] Saved comment file: ${commentPath}`);
+            const dataPath = path.join(parsed.dir, `${parsed.name}.comments.json`); // フォーマットはそのまま維持
+            await fs.writeJson(dataPath, data, { spaces: 2 });
+            console.log(`[Plugin] Saved associated data file: ${dataPath}`);
             return true;
         } catch (error) {
-            console.error(`[Plugin] Save Comment File Error:`, error);
+            console.error(`[Plugin] Save Associated Data Error:`, error);
             return false;
         }
     });
 
-    ipcMain.handle('plugin:loadCommentFile', async (_event, mediaFilePath: string) => {
+    ipcMain.handle('plugin:loadAssociatedData', async (_event, mediaFilePath: string) => {
         try {
             if (!mediaFilePath) return null;
             const parsed = path.parse(mediaFilePath);
-            const commentPath = path.join(parsed.dir, `${parsed.name}.comments.json`);
-            if (await fs.pathExists(commentPath)) {
-                return await fs.readJson(commentPath);
+            const dataPath = path.join(parsed.dir, `${parsed.name}.comments.json`);
+            if (await fs.pathExists(dataPath)) {
+                return await fs.readJson(dataPath);
             }
             return null;
         } catch (error) {
-            console.error(`[Plugin] Load Comment File Error:`, error);
+            console.error(`[Plugin] Load Associated Data Error:`, error);
             return null;
         }
     });

@@ -143,13 +143,13 @@
      * 2. HTML内の埋め込みJSONから threadKey, threadId, nvComment server を抽出
      * 3. public.nvcomment.nicovideo.jp/v1/threads にPOSTしてコメントを取得
      */
-    const fetchComments = async (mediaId, url) => {
+    const fetchData = async (mediaId, url) => {
         const videoId = extractVideoId(url);
         if (!videoId) {
             throw new Error('無効なニコニコ動画のURLです: ' + url);
         }
 
-        console.log(`[NicoNicoPlugin] Fetching comments for ${videoId} (media: ${mediaId})`);
+        console.log(`[NicoNicoPlugin] Fetching data for ${videoId} (media: ${mediaId})`);
 
         try {
             // Step 1: 動画視聴ページのHTMLを取得
@@ -318,7 +318,7 @@
             (async () => {
                 try {
                     console.log(`[NicoNicoPlugin] loading comments for ${media.id} (Canvas: ${canvas.width}x${canvas.height}, DPR: ${dpr})`);
-                    const data = await window.ObscuraAPI.system.loadCommentFile(media.file_path);
+                    const data = await window.ObscuraAPI.system.loadAssociatedData(media.file_path);
                     if (data && currentMediaId === media.id) {
                         currentCommentData = data;
                         currentNiconiComments = new window.NiconiComments(canvas, data, {
@@ -356,12 +356,22 @@
     window.ObscuraAPI.registerPlayerOverlay(NICO_PROVIDER_ID, renderOverlay);
 
     // プラグインの登録
-    window.ObscuraAPI.registerCommentProvider({
+    window.ObscuraAPI.registerPlugin({
         id: NICO_PROVIDER_ID,
         name: NICO_PROVIDER_NAME,
         canHandle: isNicoUrl,
-        fetchComments: fetchComments,
+        fetchData: fetchData,
         uiHooks: {
+            // インスペクタ（詳細パネル）にボタンを追加
+            inspectorActions: (media) => [{
+                id: 'sync-comments',
+                label: 'コメント同期',
+                onClick: async ({ media }) => {
+                    // インスペクタ側の fetchComments -> fetchData 呼び出しにより、
+                    // 自動的にこのプラグインの fetchData が呼ばれる
+                    console.log('[Plugin:Niconico] Sync actions triggered for', media.file_name);
+                }
+            }],
             // 上部バーにコメント表示トグルボタンを配置
             playerTopBar: (_media) => [{
                 id: 'toggle-danmaku',

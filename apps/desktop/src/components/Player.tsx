@@ -7,7 +7,7 @@ import { toMediaUrl } from '../utils/fileUrl'
 import { ShortcutContext } from '../contexts/ShortcutContext'
 import { AudioSettingsModal } from './AudioSettingsModal'
 import { getAuthHeaders } from '../utils/auth'
-import { useCommentProviders } from '../hooks/useCommentProviders'
+import { usePlugins as useCommentProviders } from '../hooks/usePlugins'
 
 interface PlayerProps {
     media: MediaFile

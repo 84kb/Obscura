@@ -1,4 +1,4 @@
-import { CommentProvider, AppSettings, MediaFile, PlayerOverlayContext, ObscuraAPI } from '@obscura/core';
+import { ObscuraPlugin, AppSettings, MediaFile, PlayerOverlayContext, ObscuraAPI } from '@obscura/core';
 
 export function initializePluginSystem() {
     if (window.ObscuraAPI) {
@@ -6,31 +6,47 @@ export function initializePluginSystem() {
         return;
     }
 
-    const commentProviders: CommentProvider[] = [];
+    const plugins: ObscuraPlugin[] = [];
     const playerOverlays: Map<string, (canvas: HTMLCanvasElement, media: MediaFile, context: PlayerOverlayContext) => void> = new Map();
 
     const obscuraAPI: ObscuraAPI = {
-        registerCommentProvider: (provider: CommentProvider) => {
-            if (commentProviders.find(p => p.id === provider.id)) {
-                console.warn(`[PluginSystem] Provider ${provider.id} is already registered.`);
+        registerPlugin: (plugin: ObscuraPlugin) => {
+            if (plugins.find(p => p.id === plugin.id)) {
+                console.warn(`[PluginSystem] Plugin ${plugin.id} is already registered.`);
                 return;
             }
-            commentProviders.push(provider);
-            console.log(`[PluginSystem] Registered comment provider: ${provider.name} (${provider.id})`);
+            // 互換性のためのブリッジ処理
+            const p = plugin as any;
+            // 1. fetchData <-> fetchComments の相互埋め (古い命名のプラグインをサポート)
+            if (p.fetchData && !p.fetchComments) p.fetchComments = p.fetchData;
+            if (p.fetchComments && !p.fetchData) p.fetchData = p.fetchComments;
+
+            // 2. uiHooks のブリッジ
+            if (p.uiHooks) {
+                if (p.uiHooks.inspectorActions && !p.uiHooks.inspectorComments) {
+                    p.uiHooks.inspectorComments = p.uiHooks.inspectorActions;
+                }
+                if (p.uiHooks.inspectorComments && !p.uiHooks.inspectorActions) {
+                    p.uiHooks.inspectorActions = p.uiHooks.inspectorComments;
+                }
+            }
+
+            plugins.push(plugin);
+            console.log(`[PluginSystem] Registered plugin: ${plugin.name} (${plugin.id})`);
             // React コンポーネント等にプラグインが追加されたことを通知する
             window.dispatchEvent(new Event('plugin-registered'));
         },
 
-        getCommentProviders: () => {
-            return [...commentProviders];
+        getPlugins: () => {
+            return [...plugins];
         },
 
         // APIとしての登録解除も公開(必要であれば)
-        unregisterCommentProvider: (pluginId: string) => {
-            const index = commentProviders.findIndex(p => p.id === pluginId);
+        unregisterPlugin: (pluginId: string) => {
+            const index = plugins.findIndex(p => p.id === pluginId);
             if (index >= 0) {
-                commentProviders.splice(index, 1);
-                console.log(`[PluginSystem] Unregistered CommentProvider: ${pluginId}`);
+                plugins.splice(index, 1);
+                console.log(`[PluginSystem] Unregistered Plugin: ${pluginId}`);
                 window.dispatchEvent(new Event('plugin-registered'));
             }
         },
@@ -95,11 +111,11 @@ export function initializePluginSystem() {
             loadMediaData: async (mediaId: number, pluginId: string) => {
                 return await window.electronAPI.loadPluginMediaData(mediaId, pluginId);
             },
-            saveCommentFile: async (mediaFilePath: string, data: any) => {
-                return await window.electronAPI.saveCommentFile(mediaFilePath, data);
+            saveAssociatedData: async (mediaFilePath: string, data: any) => {
+                return await window.electronAPI.saveAssociatedData(mediaFilePath, data);
             },
-            loadCommentFile: async (mediaFilePath: string) => {
-                return await window.electronAPI.loadCommentFile(mediaFilePath);
+            loadAssociatedData: async (mediaFilePath: string) => {
+                return await window.electronAPI.loadAssociatedData(mediaFilePath);
             },
             openPath: async (path: string) => {
                 await window.electronAPI.openPath(path);
@@ -151,8 +167,8 @@ export async function loadPluginScripts(config?: AppSettings) {
                 if (!extConfig || !extConfig.enabled) {
                     if (loadedScripts.has(scriptId)) {
                         loadedScripts.delete(scriptId);
-                        if (window.ObscuraAPI && window.ObscuraAPI.unregisterCommentProvider) {
-                            window.ObscuraAPI.unregisterCommentProvider(pluginId);
+                        if (window.ObscuraAPI && window.ObscuraAPI.unregisterPlugin) {
+                            window.ObscuraAPI.unregisterPlugin(pluginId);
                         }
                         const existingScript = document.getElementById(scriptId);
                         if (existingScript) existingScript.remove();

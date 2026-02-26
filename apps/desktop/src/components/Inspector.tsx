@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { MediaFile, Tag, Folder, MediaComment, SharedUser, CommentProvider } from '@obscura/core'
+import { MediaFile, Tag, Folder, MediaComment, SharedUser, ObscuraPlugin } from '@obscura/core'
 import './Inspector.css'
 import { toMediaUrl } from '../utils/fileUrl'
 import { api } from '../api'
@@ -8,7 +8,7 @@ import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { InspectorSection, InfoSectionContent, CommentSectionContent, PlaylistSectionContent, RelationSectionContent, MediaPicker } from './InspectorSections'
 import { useNotification } from '../contexts/NotificationContext'
-import { useCommentProviders } from '../hooks/useCommentProviders'
+import { usePlugins } from '../hooks/usePlugins'
 
 interface InspectorProps {
     media: MediaFile[]
@@ -107,7 +107,7 @@ export function Inspector({
     const [fetchingPlugins, setFetchingPlugins] = useState<Record<string, boolean>>({})
 
     // カスタムフックでプロバイダを監視・取得
-    const availableProviders = useCommentProviders()
+    const availableProviders = usePlugins()
 
     // Electron で window.prompt が使えないためのカスタムプロンプト状態
     const [promptData, setPromptData] = useState<{
@@ -147,9 +147,9 @@ export function Inspector({
         return buildTree(null)
     }, [allFolders])
 
-    const handleFetchPluginComments = async (pluginId: string) => {
+    const handleFetchPluginData = async (pluginId: string) => {
         if (media.length !== 1 || !window.ObscuraAPI) return;
-        const provider = availableProviders.find((p: CommentProvider) => p.id === pluginId);
+        const provider = availableProviders.find((p: ObscuraPlugin) => p.id === pluginId);
         if (!provider) return;
 
         let targetUrl = url;
@@ -171,21 +171,24 @@ export function Inspector({
 
         setFetchingPlugins(prev => ({ ...prev, [pluginId]: true }));
         try {
-            // 1. プラグインからコメントを取得（v1Thread形式）
-            const commentData = await provider.fetchComments(media[0].id, targetUrl);
+            // 1. プラグインからデータを取得
+            if (typeof provider.fetchData !== 'function') {
+                throw new Error(`プラグイン ${provider.name} は fetchData メソッドを実装していません。`);
+            }
+            const resourceData = await provider.fetchData(media[0].id, targetUrl);
 
-            // 2. 動画ファイルと同階層に .comments.json として保存
+            // 2. 動画ファイルと同階層にデータを保存
             const filePath = media[0].file_path;
             if (!filePath) {
                 throw new Error('メディアファイルのパスが見つかりません');
             }
-            const success = await window.ObscuraAPI.system.saveCommentFile(filePath, commentData);
+            const success = await window.ObscuraAPI.system.saveAssociatedData(filePath, resourceData);
 
             if (success) {
                 addNotification({
                     type: 'success',
                     title: '取得完了',
-                    message: `${provider.name} からコメントを取得・保存しました`,
+                    message: `${provider.name} からデータを取得・保存しました`,
                     duration: 3000
                 });
 
@@ -197,16 +200,16 @@ export function Inspector({
                 addNotification({
                     type: 'error',
                     title: '保存失敗',
-                    message: 'コメントファイルの保存に失敗しました',
+                    message: 'データの保存に失敗しました',
                     duration: 5000
                 });
             }
         } catch (error: any) {
-            console.error(`Failed to fetch comments from ${pluginId}: `, error);
+            console.error(`Failed to fetch data from ${pluginId}: `, error);
             addNotification({
                 type: 'error',
                 title: '取得エラー',
-                message: error.message || 'コメントの取得に失敗しました',
+                message: error.message || 'データの取得に失敗しました',
                 duration: 5000
             });
         } finally {
@@ -1178,15 +1181,15 @@ export function Inspector({
                                                 <CommentSectionContent
                                                     comments={comments}
                                                     formatTime={formatTime}
-                                                    providers={availableProviders.map((p: CommentProvider) => ({
+                                                    providers={availableProviders.map((p: ObscuraPlugin) => ({
                                                         id: p.id,
                                                         name: p.name,
-                                                        onClick: () => handleFetchPluginComments(p.id),
+                                                        onClick: () => handleFetchPluginData(p.id),
                                                         isFetching: !!fetchingPlugins[p.id],
                                                         disabled: false
                                                     }))}
-                                                    extensionButtons={availableProviders.flatMap((p: CommentProvider) =>
-                                                        p.uiHooks?.inspectorComments ? p.uiHooks.inspectorComments(media[0]).map(btn => ({
+                                                    extensionButtons={availableProviders.flatMap((p: ObscuraPlugin) =>
+                                                        p.uiHooks?.inspectorActions ? p.uiHooks.inspectorActions(media[0]).map(btn => ({
                                                             id: `${p.id}-${btn.id}`,
                                                             label: btn.label,
                                                             icon: btn.icon,
