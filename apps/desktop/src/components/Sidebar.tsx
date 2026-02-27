@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
+import { useFloatingPosition } from '../hooks/useFloatingPosition'
 import AuditLogModal from './AuditLogModal'
 import { FilterOptions, Library, RemoteLibrary, Folder } from '@obscura/core'
 import { api } from '../api'
@@ -175,9 +176,25 @@ export function Sidebar({
     const [auditLogLibrary, setAuditLogLibrary] = useState<Library | null>(null)
     const libraryDropdownRef = useRef<HTMLDivElement>(null)
     const libraryMenuRef = useRef<HTMLDivElement>(null)
+    const folderContextMenuRef = useRef<HTMLDivElement>(null)
+    const libContextMenuRef = useRef<HTMLDivElement>(null)
 
     // フォルダーツリーの構築 (メモ化)
     const folderTree = useMemo(() => buildFolderTree(folders), [folders])
+
+    // 位置調整フックの適用
+    useFloatingPosition(
+        folderContextMenuRef,
+        contextMenu?.x || 0,
+        contextMenu?.y || 0,
+        !!contextMenu
+    )
+    useFloatingPosition(
+        libContextMenuRef,
+        libContextMenu?.x || 0,
+        libContextMenu?.y || 0,
+        !!libContextMenu
+    )
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -854,6 +871,7 @@ export function Sidebar({
             {
                 contextMenu && createPortal(
                     <div
+                        ref={folderContextMenuRef}
                         className="context-menu"
                         style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 99999 }}
                     >
@@ -896,6 +914,7 @@ export function Sidebar({
             {
                 libContextMenu && createPortal(
                     <div
+                        ref={libContextMenuRef}
                         className="context-menu"
                         style={{ position: 'fixed', top: libContextMenu.y, left: libContextMenu.x, zIndex: 100000 }}
                     >

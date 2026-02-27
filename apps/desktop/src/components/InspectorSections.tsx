@@ -448,16 +448,12 @@ export const MediaPicker = ({
 
     React.useEffect(() => {
         const timer = setTimeout(async () => {
-            if (query.trim()) {
-                setLoading(true)
-                try {
-                    const res = await onSearch(query, searchTargets)
-                    setResults(res)
-                } finally {
-                    setLoading(false)
-                }
-            } else {
-                setResults([])
+            setLoading(true)
+            try {
+                const res = await onSearch(query, searchTargets)
+                setResults(res)
+            } finally {
+                setLoading(false)
             }
         }, 300)
         return () => clearTimeout(timer)

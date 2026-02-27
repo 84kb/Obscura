@@ -1,5 +1,6 @@
 import { useRef, useEffect } from 'react'
 import { MediaFile, Folder, RemoteLibrary } from '@obscura/core'
+import { useFloatingPosition } from '../hooks/useFloatingPosition'
 import './ContextMenu.css'
 
 interface ContextMenuProps {
@@ -73,26 +74,7 @@ export function ContextMenu({
     }, [onClose])
 
     // メニュー位置を画面内に収める
-    useEffect(() => {
-        if (menuRef.current) {
-            const rect = menuRef.current.getBoundingClientRect()
-            const viewportWidth = window.innerWidth
-            const viewportHeight = window.innerHeight
-
-            let adjustedX = x
-            let adjustedY = y
-
-            if (x + rect.width > viewportWidth) {
-                adjustedX = viewportWidth - rect.width - 10
-            }
-            if (y + rect.height > viewportHeight) {
-                adjustedY = viewportHeight - rect.height - 10
-            }
-
-            menuRef.current.style.left = `${adjustedX}px`
-            menuRef.current.style.top = `${adjustedY}px`
-        }
-    }, [x, y])
+    useFloatingPosition(menuRef, x, y, true)
 
     // フォルダーに追加済みかどうか
     const mediaFolderIds = media.folders?.map(f => f.id) || []

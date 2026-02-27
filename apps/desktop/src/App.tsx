@@ -22,7 +22,7 @@ import { ShortcutProvider, useShortcut } from './contexts/ShortcutContext'
 import './styles/index.css'
 import './styles/drag-overlay.css'
 import { LoadingOverlay } from './components/LoadingOverlay'
-import { getAuthHeaders } from './utils/auth'
+import { getAuthHeaders, getAuthQuery } from './utils/auth'
 import { api } from './api'
 import { initializePluginSystem, loadPluginScripts } from './api/plugin-system'
 
@@ -278,24 +278,12 @@ function AppContent() {
                 if (activeRemoteLibrary) {
                     baseUrl = activeRemoteLibrary.url
                     try {
-                        // トークンが分割されていない場合はurl/tokenから抽出を試みる
-                        let ut = activeRemoteLibrary.userToken
-                        let at = activeRemoteLibrary.accessToken
-
-                        if (!ut || !at) {
-                            if (activeRemoteLibrary.token && activeRemoteLibrary.token.includes(':')) {
-                                const parts = activeRemoteLibrary.token.split(':')
-                                ut = parts[0]
-                                at = parts[1]
-                            } else {
-                                at = activeRemoteLibrary.token
-                            }
-                        }
+                        const { userToken, accessToken } = getAuthQuery(activeRemoteLibrary.token, myUserToken)
 
                         users = await api.getRemoteSharedUsers({
                             url: activeRemoteLibrary.url,
-                            userToken: ut || myUserToken || '',
-                            accessToken: at || ''
+                            userToken: userToken || '',
+                            accessToken: accessToken || ''
                         })
                     } catch (e) {
                         console.error('Failed to fetch remote users:', e)
@@ -343,7 +331,7 @@ function AppContent() {
         fetchUsers()
         const interval = setInterval(fetchUsers, 5000)
         return () => clearInterval(interval)
-    }, [activeRemoteLibrary])
+    }, [activeRemoteLibrary, myUserToken])
 
 
     // 選択されたメディアのIDリスト

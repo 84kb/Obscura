@@ -1492,7 +1492,17 @@ ipcMain.handle('test-connection', async (_, { url, token }: { url: string; token
             accessToken = parts[1]
         }
 
-        const response = await fetch(apiUrl, {
+        // サーバーの存在確認
+        const response = await fetch(apiUrl, { method: 'GET' })
+
+        if (!response.ok) {
+            return { success: false, message: `Status: ${response.status} ${response.statusText}` }
+        }
+
+        const data: any = await response.json()
+
+        // トークンの検証
+        const profileResponse = await fetch(`${baseUrl}/api/profile`, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${accessToken}`,
@@ -1500,14 +1510,15 @@ ipcMain.handle('test-connection', async (_, { url, token }: { url: string; token
             }
         })
 
-        if (response.ok) {
-            const data: any = await response.json()
+        if (profileResponse.ok) {
             return {
                 success: true,
                 libraryName: data.libraryName || 'Remote Library'
             }
+        } else if (profileResponse.status === 401 || profileResponse.status === 403) {
+            return { success: false, message: 'アクセストークンが異なります。' }
         } else {
-            return { success: false, message: `Status: ${response.status} ${response.statusText}` }
+            return { success: false, message: `Status: ${profileResponse.status} ${profileResponse.statusText}` }
         }
     } catch (e: any) {
         return { success: false, message: e.message }

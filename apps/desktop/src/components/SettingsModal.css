@@ -16,8 +16,6 @@
 .settings-modal-container {
     width: 960px;
     height: 720px;
-    max-width: 95vw;
-    max-height: 90vh;
     max-height: 90vh;
     background: var(--bg-dark);
     /* Warm dark grey */
@@ -28,6 +26,7 @@
     overflow: hidden;
     box-shadow: 0 40px 80px rgba(0, 0, 0, 0.6);
     color: var(--text-main);
+    position: relative;
 }
 
 /* Sidebar */
@@ -1321,6 +1320,97 @@ a.resource-item:hover {
 .btn-icon-sm.text-danger:hover {
     background: rgba(239, 68, 68, 0.2);
     color: #ef4444;
+}
+
+
+.custom-template-modal {
+    width: 640px;
+    max-height: 80%;
+    margin-bottom: 40px;
+    display: flex;
+    flex-direction: column;
+}
+
+.inner-modal {
+    position: absolute;
+    border-radius: 16px;
+    z-index: 1000;
+}
+
+.app-modal-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    overflow: hidden;
+}
+
+.template-intro {
+    margin-bottom: 20px;
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.template-list {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    overflow-y: auto;
+    padding-right: 8px;
+    flex: 1;
+    min-height: 0;
+}
+
+.theme-template-item {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+    transition: border-color 0.2s;
+}
+
+.theme-template-item:hover {
+    border-color: var(--primary-light);
+}
+
+.template-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 12px;
+}
+
+.template-info-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.template-name {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.template-description {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.template-preview-code {
+    background: #0b0b0f;
+    padding: 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    overflow-x: auto;
+    color: #cad3f5;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    line-height: 1.5;
 }
 
 .btn-icon-sm svg {

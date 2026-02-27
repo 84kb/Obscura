@@ -468,48 +468,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         </div>
                     </div>
 
-                    {showTemplateModal && (
-                        <div className="modal-overlay" style={{ zIndex: 1100 }} onClick={() => setShowTemplateModal(false)}>
-                            <div className="modal-content" style={{ width: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
-                                <div className="modal-header">
-                                    <h3>テーマテンプレート</h3>
-                                    <button className="close-btn" onClick={() => setShowTemplateModal(false)}>×</button>
-                                </div>
-                                <div className="modal-body" style={{ overflowY: 'auto', padding: '20px' }}>
-                                    <p style={{ marginBottom: '20px', color: 'var(--text-muted)' }}>
-                                        これらのテンプレートをコピーして、新しいCSSファイルとして保存し、「CSSからインポート」機能で読み込むことができます。
-                                    </p>
-                                    {THEME_TEMPLATES.map((template, index) => (
-                                        <div key={index} style={{ marginBottom: '24px', border: '1px solid var(--border)', borderRadius: '8px', padding: '16px', background: 'var(--bg-card)' }}>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                                                <div>
-                                                    <h4 style={{ margin: 0, fontSize: '16px' }}>{template.name}</h4>
-                                                    <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)' }}>{template.description}</p>
-                                                </div>
-                                                <button className="btn btn-secondary btn-sm" onClick={() => handleCopyTemplate(template.css)}>
-                                                    コピー
-                                                </button>
-                                            </div>
-                                            <pre style={{
-                                                background: 'var(--bg-dark)',
-                                                padding: '12px',
-                                                borderRadius: '4px',
-                                                fontSize: '11px',
-                                                overflowX: 'auto',
-                                                color: 'var(--text-muted)',
-                                                border: '1px solid var(--border)'
-                                            }}>
-                                                <code>{template.css}</code>
-                                            </pre>
-                                        </div>
-                                    ))}
-                                </div>
-                                <div className="modal-footer">
-                                    <button className="btn btn-secondary" onClick={() => setShowTemplateModal(false)}>閉じる</button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
+
 
                     <div className="theme-grid">
                         {themes.map(theme => (
@@ -2614,6 +2573,43 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         <button className="btn-save" onClick={onClose}>閉じる</button>
                     </footer>
                 </div>
+
+                {showTemplateModal && (
+                    <div className="app-modal-overlay inner-modal" onClick={() => setShowTemplateModal(false)}>
+                        <div className="app-modal custom-template-modal" onClick={e => e.stopPropagation()}>
+                            <div className="app-modal-header">
+                                <h3>テーマテンプレート</h3>
+                                <button className="close-btn" onClick={() => setShowTemplateModal(false)}>×</button>
+                            </div>
+                            <div className="app-modal-body">
+                                <p className="template-intro">
+                                    これらのテンプレートをコピーして、新しいCSSファイルとして保存し、「CSSからインポート」機能で読み込むことができます。
+                                </p>
+                                <div className="template-list">
+                                    {THEME_TEMPLATES.map((template, index) => (
+                                        <div key={index} className="theme-template-item">
+                                            <div className="template-header">
+                                                <div className="template-info-group">
+                                                    <h4 className="template-name">{template.name}</h4>
+                                                    <p className="template-description">{template.description}</p>
+                                                </div>
+                                                <button className="btn btn-secondary btn-sm" onClick={() => handleCopyTemplate(template.css)}>
+                                                    コピー
+                                                </button>
+                                            </div>
+                                            <pre className="template-preview-code">
+                                                <code>{template.css}</code>
+                                            </pre>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="app-modal-footer">
+                                <button className="btn btn-secondary" onClick={() => setShowTemplateModal(false)}>閉じる</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     )

@@ -1,6 +1,6 @@
 {
   "name": "obscura",
-  "version": "0.7.21",
+  "version": "0.7.23",
   "description": "ライブラリ型メディアプレイヤー",
   "main": "dist-electron/main.cjs",
   "workspaces": [
