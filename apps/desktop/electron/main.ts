@@ -33,6 +33,21 @@ process.on('unhandledRejection', (reason, _promise) => {
 })
 
 
+// 単一インスタンスロックの要求 (インストーラー等でのアンインストール・アップデート時に必要)
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+    app.quit()
+    process.exit(0)
+} else {
+    app.on('second-instance', (_event, _commandLine, _workingDirectory) => {
+        // すでに開いているウィンドウがある場合はフォーカスを当てる
+        if (mainWindow) {
+            if (mainWindow.isMinimized()) mainWindow.restore()
+            mainWindow.focus()
+        }
+    })
+}
+
 // 開発環境かどうか
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
@@ -281,6 +296,14 @@ function createWindow() {
 // サムネイルキャッシュ (LRU形式の簡易実装)
 const thumbnailCache = new Map<string, Buffer>()
 const MAX_CACHE_SIZE = 200 // メモリ使用量を考慮して200枚程度
+
+// すべてのウィンドウが閉じられた時の処理
+app.on('window-all-closed', () => {
+    // macOS(darwin)以外では、ウィンドウがすべて閉じたらプロセスを終了させる
+    if (process.platform !== 'darwin') {
+        app.quit()
+    }
+})
 
 // アプリ起動時
 app.whenReady().then(() => {
