@@ -412,6 +412,31 @@ export class ElectronAdapter implements IMediaLibraryAPI {
         return this.api.removeRemoteTagFromMedia(url, token, mediaId, tagId);
     }
 
+    async addRemoteMediaParent(url: string, token: string, childId: number, parentId: number): Promise<void> {
+        return this.api.addRemoteMediaParent(url, token, childId, parentId);
+    }
+
+    async removeRemoteMediaParent(url: string, token: string, childId: number, parentId: number): Promise<void> {
+        return this.api.removeRemoteMediaParent(url, token, childId, parentId);
+    }
+
+    async searchRemoteMediaFiles(url: string, token: string, query: string, targets?: any): Promise<{ id: number; file_name: string; title?: string; thumbnail_path?: string | null }[]> {
+        return await window.electronAPI.searchRemoteMediaFiles(url, token, query, targets);
+    }
+
+    // Remote Cache Sync
+    async syncRemoteLibrary(url: string, token: string, remoteId: string): Promise<{ success: boolean; message?: string }> {
+        return await window.electronAPI.syncRemoteLibrary(url, token, remoteId);
+    }
+
+    async getRemoteCachePath(remoteId: string): Promise<string | null> {
+        return await window.electronAPI.getRemoteCachePath(remoteId);
+    }
+
+    async updateRemoteProfile(url: string, token: string, nickname: string, iconUrl?: string): Promise<{ success: boolean; message?: string }> {
+        return this.api.updateRemoteProfile(url, token, nickname, iconUrl);
+    }
+
     async checkForUpdates(): Promise<any> {
         return this.api.checkForUpdates();
     }

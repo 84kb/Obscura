@@ -24,19 +24,13 @@ export function getHardwareId(): string {
 
 /**
  * ユーザートークンを生成（外部ユーザー側）
- * セキュリティ: HMAC-SHA256を使用し、タイムスタンプとソルトで一意性を確保
+ * セキュリティ: ハードウェアIDをベースにした決定論的なトークンを生成し、再インストール時も同一トークンを復元できるようにする
  */
 export function generateUserToken(hardwareId: string): string {
-    const timestamp = Date.now().toString()
-    const salt = crypto.randomBytes(16).toString('hex')
-
-    // HMAC-SHA256でトークン生成
-    const hmac = crypto.createHmac('sha256', hardwareId)
-    hmac.update(timestamp + salt)
-    const token = hmac.digest('hex')
-
-    // トークン形式: timestamp.salt.token（検証用）
-    return `${timestamp}.${salt}.${token}`
+    const hash = crypto.createHash('sha256')
+    // アプリ固有のソルトと組み合わせることで他アプリからの類推を防ぐ
+    hash.update(hardwareId + 'obscura_user_token_salt_v1')
+    return hash.digest('hex')
 }
 
 /**

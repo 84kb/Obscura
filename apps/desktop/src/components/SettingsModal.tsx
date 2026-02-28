@@ -1545,19 +1545,49 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                 {clientConfig?.remoteLibraries && clientConfig.remoteLibraries.length > 0 ? (
                                     <div className="users-table" style={{ width: '100%' }}>
                                         {clientConfig.remoteLibraries.map((lib: any) => (
-                                            <div key={lib.id} className="settings-row">
-                                                <div className="settings-info">
+                                            <div key={lib.id} className="settings-row" style={{ alignItems: 'center' }}>
+                                                <div className="settings-info" style={{ flex: 1 }}>
                                                     <span className="settings-label">{lib.name || 'Remote Library'}</span>
                                                     <span className="settings-description" style={{ fontSize: '12px' }}>{lib.url}</span>
                                                     <span style={{ fontSize: '11px', color: 'color-mix(in srgb, var(--text-muted), transparent 40%)' }}>Last connected: {new Date(lib.lastConnectedAt).toLocaleString()}</span>
                                                 </div>
-                                                <button
-                                                    className="icon-button delete"
-                                                    onClick={() => handleDeleteRemoteLibrary(lib)}
-                                                    title="削除"
-                                                >
-                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                                                </button>
+                                                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                                    <button
+                                                        className="btn btn-outline btn-small"
+                                                        title="一括同期"
+                                                        onClick={async () => {
+                                                            try {
+                                                                const btn = document.getElementById(`sync-btn-${lib.id}`) as HTMLButtonElement
+                                                                if (btn) {
+                                                                    btn.disabled = true
+                                                                    btn.innerText = '同期中...'
+                                                                }
+                                                                const res = await api.syncRemoteLibrary(lib.url, lib.token, lib.id)
+                                                                if (res.success) {
+                                                                    alert('同期が完了しました。')
+                                                                }
+                                                            } catch (e: any) {
+                                                                alert(`同期に失敗しました: ${e.message}`)
+                                                            } finally {
+                                                                const btn = document.getElementById(`sync-btn-${lib.id}`) as HTMLButtonElement
+                                                                if (btn) {
+                                                                    btn.disabled = false
+                                                                    btn.innerText = '一括同期'
+                                                                }
+                                                            }
+                                                        }}
+                                                        id={`sync-btn-${lib.id}`}
+                                                    >
+                                                        一括同期
+                                                    </button>
+                                                    <button
+                                                        className="icon-button delete"
+                                                        onClick={() => handleDeleteRemoteLibrary(lib)}
+                                                        title="削除"
+                                                    >
+                                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                                    </button>
+                                                </div>
                                             </div>
                                         ))}
                                     </div>

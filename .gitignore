@@ -2,8 +2,11 @@ node_modules
 dist
 dist-electron
 dist-mobile
+dist-tauri
 build
 release
+src-tauri/target
+src-tauri/gen
 .vscode
 
 # Logs

@@ -108,6 +108,11 @@ export class AndroidAdapter implements IMediaLibraryAPI {
     async addRemoteTagToMedia(_url: string, _token: string, _mediaId: number, _tagId: number): Promise<void> { }
     async addRemoteTagsToMedia(_url: string, _token: string, _mediaIds: number[], _tagIds: number[]): Promise<void> { }
     async removeRemoteTagFromMedia(_url: string, _token: string, _mediaId: number, _tagId: number): Promise<void> { }
+    async addRemoteMediaParent(_url: string, _token: string, _childId: number, _parentId: number): Promise<void> { }
+    async removeRemoteMediaParent(_url: string, _token: string, _childId: number, _parentId: number): Promise<void> { }
+    async searchRemoteMediaFiles(_url: string, _token: string, _query: string, _options?: any): Promise<any[]> { return []; }
+    async syncRemoteLibrary(_url: string, _token: string, _remoteId: string): Promise<{ success: boolean; message?: string }> { return { success: false }; }
+    async getRemoteCachePath(_remoteId: string): Promise<string | null> { return null; }
 
     async openPath(_filePath: string): Promise<void> { }
     async openExternal(_url: string): Promise<void> { }

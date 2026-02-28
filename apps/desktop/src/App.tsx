@@ -137,7 +137,7 @@ function AppContent() {
 
         // Folders (activeFiles の中からカウント)
         folders.forEach(f => {
-            counts[`folder - ${f.id} `] = activeFiles.filter(m => m.folders?.some(mf => mf.id === f.id)).length
+            counts[`folder-${f.id}`] = activeFiles.filter(m => m.folders?.some(mf => mf.id === f.id)).length
         })
 
         return counts
@@ -160,7 +160,6 @@ function AppContent() {
         const loadAll = async () => {
             try {
                 // リモートライブラリの場合は接続確認してから読み込み
-                // リモートライブラリの場合は接続確認してから読み込み
                 if (activeRemoteLibrary) {
                     if (!myUserToken) {
                         console.log('[App] Waiting for user token before connecting to remote library...')
@@ -175,18 +174,13 @@ function AppContent() {
                     }
 
                     // URLが正規化（プロトコル変更など）された場合は更新
-                    // 末尾のスラッシュを除去して比較
                     const originalUrl = activeRemoteLibrary.url.replace(/\/$/, '')
                     const newUrl = connectedUrl.replace(/\/$/, '')
 
                     if (originalUrl !== newUrl) {
                         console.log(`[App] Protocol switch detected: ${originalUrl} -> ${newUrl} `)
                         const updatedLib = { ...activeRemoteLibrary, url: newUrl }
-                        switchToRemoteLibrary(updatedLib)
-                        // switchToRemoteLibraryが状態を更新するのを待つため、ここで一度中断しても良いが、
-                        // 続けて読み込み処理を行っても大きな問題はない（次回のレンダリングで正しいURLが使われるため）
-                        // ただし、即座に反映させるためにローカル変数も更新しておくべきかもしれないが、
-                        // useLibraryの内部状態依存が強いため、次回更新に任せるのが安全
+                        await switchToRemoteLibrary(updatedLib)
                     }
                 }
 
@@ -196,12 +190,11 @@ function AppContent() {
             } catch (e: any) {
                 if (activeRemoteLibrary) {
                     alert(`リモートライブラリ "${activeRemoteLibrary.name}" への接続に失敗しました。\nサーバーが起動していないか、ネットワークに問題があります。`)
-                    // 失敗した場合はローカルに戻すなどの処理も検討可能だが、一旦警告のみ
                 }
             }
         }
         loadAll()
-    }, [refreshLibrary, loadFolders, activeRemoteLibrary, myUserToken])
+    }, [refreshLibrary, loadFolders, activeRemoteLibrary, myUserToken, switchToRemoteLibrary])
 
     // Socketイベントハンドリング
     useEffect(() => {
@@ -1287,22 +1280,29 @@ function AppContent() {
     }
 
     const handleAddParent = async (childId: number, parentId: number) => {
-        if (!window.electronAPI) return
-        await (window.electronAPI as any).addMediaParent(childId, parentId)
-        if (!activeRemoteLibrary) {
+        if (activeRemoteLibrary) {
+            await api.addRemoteMediaParent(activeRemoteLibrary.url, activeRemoteLibrary.token, childId, parentId)
+            reloadLibrary()
+        } else if (window.electronAPI) {
+            await (window.electronAPI as any).addMediaParent(childId, parentId)
             refreshLibrary()
         }
     }
 
     const handleRemoveParent = async (childId: number, parentId: number) => {
-        if (!window.electronAPI) return
-        await (window.electronAPI as any).removeMediaParent(childId, parentId)
-        if (!activeRemoteLibrary) {
+        if (activeRemoteLibrary) {
+            await api.removeRemoteMediaParent(activeRemoteLibrary.url, activeRemoteLibrary.token, childId, parentId)
+            reloadLibrary()
+        } else if (window.electronAPI) {
+            await (window.electronAPI as any).removeMediaParent(childId, parentId)
             refreshLibrary()
         }
     }
 
     const handleSearchMedia = async (query: string, targets: any): Promise<any[]> => {
+        if (activeRemoteLibrary) {
+            return await api.searchRemoteMediaFiles(activeRemoteLibrary.url, activeRemoteLibrary.token, query, targets)
+        }
         if (!window.electronAPI) return []
         return await (window.electronAPI as any).searchMediaFiles(query, targets)
     }
@@ -1612,9 +1612,9 @@ function AppContent() {
                     onUpdateArtist={updateArtist}
                     // Remote library relation update support depends on backend API implementation.
                     // Assuming local only for now unless remote API supports it.
-                    onAddParent={activeRemoteLibrary ? undefined : handleAddParent}
-                    onRemoveParent={activeRemoteLibrary ? undefined : handleRemoveParent}
-                    onSearchMedia={activeRemoteLibrary ? undefined : handleSearchMedia}
+                    onAddParent={handleAddParent}
+                    onRemoveParent={handleRemoveParent}
+                    onSearchMedia={handleSearchMedia}
 
                     totalStats={libraryStats}
                     currentContextMedia={mediaFiles}

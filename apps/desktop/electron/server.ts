@@ -266,6 +266,18 @@ export function startServer(port: number): Promise<void> {
                 } catch (error) { res.status(500).json({ error: { code: 'SERVER_ERROR', message: 'エラーが発生しました' } }) }
             })
 
+            // リモート同期用のデータベース全件ダンプ取得API
+            expressApp.get('/api/sync/dump', authMiddleware, requirePermission('READ_ONLY'), async (_req: AuthenticatedRequest, res: Response) => {
+                try {
+                    // getRawDatabase()を用いてDB全体のJSONを返す
+                    const dbDump = library.getRawDatabase()
+                    res.json(dbDump)
+                } catch (error) {
+                    logError('api', `GET /api/sync/dump error`, error)
+                    res.status(500).json({ error: { code: 'SERVER_ERROR', message: 'ダンプの生成中にエラーが発生しました' } })
+                }
+            })
+
             expressApp.get('/api/media/:id', authMiddleware, requirePermission('READ_ONLY'), async (req: AuthenticatedRequest, res: Response) => {
                 try {
                     const { mediaId: id } = getSafeParams(req)
@@ -523,6 +535,59 @@ export function startServer(port: number): Promise<void> {
                 res.json({ success: true })
             })
 
+            // --- 関連作品 (親子関係) API ---
+            expressApp.post('/api/relations/media', authMiddleware, requirePermission('EDIT'), async (req: AuthenticatedRequest, res: Response) => {
+                try {
+                    const childId = req.body?.childId ?? req.query?.childId
+                    const parentId = req.body?.parentId ?? req.query?.parentId
+                    if (childId === undefined || parentId === undefined) {
+                        return res.status(400).json({ error: { code: 'INVALID_INPUT', message: 'childId と parentId が必要です' } })
+                    }
+                    library.setCurrentOperator(req.user?.nickname || 'Remote User')
+                    await library.addParent(Number(childId), Number(parentId))
+                    res.json({ success: true })
+                    if (io) io.emit('library-updated')
+                } catch (e: any) {
+                    logError('api', 'POST /api/relations/media error', e)
+                    res.status(500).json({ error: { code: 'SERVER_ERROR', message: e.message } })
+                }
+            })
+
+            expressApp.delete('/api/relations/media', authMiddleware, requirePermission('EDIT'), async (req: AuthenticatedRequest, res: Response) => {
+                try {
+                    const childId = req.body?.childId ?? req.query?.childId
+                    const parentId = req.body?.parentId ?? req.query?.parentId
+                    if (childId === undefined || parentId === undefined) {
+                        return res.status(400).json({ error: { code: 'INVALID_INPUT', message: 'childId と parentId が必要です' } })
+                    }
+                    library.setCurrentOperator(req.user?.nickname || 'Remote User')
+                    await library.removeParent(Number(childId), Number(parentId))
+                    res.json({ success: true })
+                    if (io) io.emit('library-updated')
+                } catch (e: any) {
+                    logError('api', 'DELETE /api/relations/media error', e)
+                    res.status(500).json({ error: { code: 'SERVER_ERROR', message: e.message } })
+                }
+            })
+
+            expressApp.get('/api/search/media', authMiddleware, requirePermission('READ_ONLY'), async (req: AuthenticatedRequest, res: Response) => {
+                try {
+                    const query = req.query?.query ?? req.body?.query
+                    let targets = req.query?.targets ?? req.body?.targets
+                    if (!query) {
+                        return res.status(400).json({ error: { code: 'INVALID_INPUT', message: 'query が必要です' } })
+                    }
+                    let parsedTargets = targets
+                    if (typeof targets === 'string') {
+                        try { parsedTargets = JSON.parse(targets) } catch (e) { }
+                    }
+                    const results = await library.searchMedia(query as string, parsedTargets)
+                    res.json({ success: true, results })
+                } catch (e: any) {
+                    logError('api', 'GET /api/search/media error', e)
+                    res.status(500).json({ error: { code: 'SERVER_ERROR', message: e.message } })
+                }
+            })
 
             // --- タグ操作API (関係) ---
             // ※パラメータ衝突を防ぐため、具体的なパス (/api/tags/media) を変数パス (/api/tags/:id) より前に配置

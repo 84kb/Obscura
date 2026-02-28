@@ -133,6 +133,15 @@ export interface ElectronAPI {
     addRemoteTagsToMedia: (url: string, token: string, mediaIds: number[], tagIds: number[]) => Promise<void>
     removeRemoteTagFromMedia: (url: string, token: string, mediaId: number, tagId: number) => Promise<void>
 
+    addRemoteMediaParent: (url: string, token: string, childId: number, parentId: number) => Promise<void>
+    removeRemoteMediaParent: (url: string, token: string, childId: number, parentId: number) => Promise<void>
+    searchRemoteMediaFiles: (url: string, token: string, query: string, targets?: any) => Promise<{ id: number; file_name: string; title?: string; thumbnail_path?: string | null }[]>
+
+    syncRemoteLibrary: (url: string, token: string, remoteId: string) => Promise<{ success: boolean; message?: string }>
+    getRemoteCachePath: (remoteId: string) => Promise<string | null>
+
+    updateRemoteProfile: (url: string, token: string, nickname: string, iconUrl?: string) => Promise<{ success: boolean; message?: string }>
+
     // === 自動アップデート ===
     checkForUpdates: () => Promise<any>
     downloadUpdate: () => Promise<any>

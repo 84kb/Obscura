@@ -180,6 +180,14 @@ try {
         addRemoteTagsToMedia: (url, token, mediaIds, tagIds) => ipcRenderer.invoke('add-remote-tags-to-media', { url, token, mediaIds, tagIds }),
         removeRemoteTagFromMedia: (url, token, mediaId, tagId) => ipcRenderer.invoke('remove-remote-tag-from-media', { url, token, mediaId, tagId }),
 
+        addRemoteMediaParent: (url, token, childId, parentId) => ipcRenderer.invoke('add-remote-media-parent', { url, token, childId, parentId }),
+        removeRemoteMediaParent: (url, token, childId, parentId) => ipcRenderer.invoke('remove-remote-media-parent', { url, token, childId, parentId }),
+        searchRemoteMediaFiles: (url, token, query, targets) => ipcRenderer.invoke('search-remote-media-files', { url, token, query, targets }),
+
+        // Remote Cache Sync
+        syncRemoteLibrary: (url, token, remoteId) => ipcRenderer.invoke('sync-remote-library', { url, token, remoteId }),
+        getRemoteCachePath: (remoteId) => ipcRenderer.invoke('get-remote-cache-path', remoteId),
+
         updateRemoteProfile: (url, token, nickname, iconUrl) => ipcRenderer.invoke('update-remote-profile', { url, token, nickname, iconUrl }),
 
         // === 自動アップデート ===

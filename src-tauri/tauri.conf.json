@@ -1,0 +1,37 @@
+﻿{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Obscura",
+  "version": "0.1.0",
+  "identifier": "com.obscura.medialib.tauri",
+  "build": {
+    "beforeDevCommand": "npm run dev:tauri:web",
+    "beforeBuildCommand": "npm run build:tauri:web",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist-tauri"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Obscura",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 1000,
+        "minHeight": 600,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null,
+      "capabilities": [
+        "default"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "../build/icon.ico"
+    ]
+  }
+}

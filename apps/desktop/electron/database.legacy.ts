@@ -518,6 +518,13 @@ export class LegacyMediaLibrary {
     return this.db.auditLogs
   }
 
+  /**
+   * データベースの生データをまるごと返却する（リモートキャッシュ同期用）
+   */
+  public getRawDatabase() {
+    return this.db
+  }
+
   // メディア操作
   public async importMediaFiles(filePaths: string[], onProgress?: (data: { current: number, total: number, fileName: string, step: string, percentage: number }) => void, options: { checkDuplicates?: boolean } = {}) {
     await this.ready;

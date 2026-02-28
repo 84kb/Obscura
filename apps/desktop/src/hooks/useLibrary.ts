@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { MediaFile, Tag, TagGroup, Folder, FilterOptions, Library, RemoteLibrary } from '@obscura/core'
 import { useNotification } from '../contexts/NotificationContext'
 import { api } from '../api'
-import { getAuthHeaders, getAuthQuery } from '../utils/auth'
+import { getAuthQuery } from '../utils/auth'
 
 export function useLibrary() {
     const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([])
@@ -137,34 +137,14 @@ export function useLibrary() {
 
     // フォルダー (ex-Genre) 読み込み
     const loadFolders = useCallback(async () => {
-        if (activeRemoteLibrary) {
-            if (!isUserTokenLoaded) return
-            if (!myUserToken) {
-                console.warn('[loadFolders] User token is empty. Skipping request.')
-                return
-            }
-            try {
-                const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
-                const response = await fetch(`${baseUrl}/api/folders`, {
-                    headers: getAuthHeaders(activeRemoteLibrary.token, myUserToken)
-                })
-                if (response.ok) {
-                    const data = await response.json()
-                    setFolders(Array.isArray(data) ? data : [])
-                }
-            } catch (e) {
-                console.error('Failed to load remote folders', e)
-            }
-        } else {
-            try {
-                const loadedFolders = await api.getFolders()
-                setFolders(Array.isArray(loadedFolders) ? loadedFolders : [])
-            } catch (error) {
-                console.error('Failed to load folders:', error)
-                setFolders([])
-            }
+        try {
+            const loadedFolders = await api.getFolders()
+            setFolders(Array.isArray(loadedFolders) ? loadedFolders : [])
+        } catch (error) {
+            console.error('Failed to load folders:', error)
+            setFolders([])
         }
-    }, [activeRemoteLibrary, myUserToken, isUserTokenLoaded])
+    }, [])
 
 
     // フォルダー (ex-Genre) 作成
@@ -307,10 +287,9 @@ export function useLibrary() {
         const startTime = performance.now()
 
         try {
+            // Wait for user token if accessing a remote library
             if (activeRemoteLibrary) {
-                // Wait for user token
                 if (!isUserTokenLoaded) {
-                    console.log('[loadMediaFiles] Waiting for user token...')
                     loadingRef.current = false
                     setLoading(false)
                     return
@@ -321,96 +300,34 @@ export function useLibrary() {
                     setLoading(false)
                     return
                 }
-
-                // Prepare fetch
-                const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
-                const headers = getAuthHeaders(activeRemoteLibrary.token, myUserToken)
-
-                const targetPage = reset ? 1 : page + 1
-                const params = new URLSearchParams()
-                params.append('page', targetPage.toString())
-                params.append('limit', LIMIT.toString())
-                if (filterOptions.searchQuery) params.append('search', filterOptions.searchQuery)
-                if (filterOptions.selectedTags.length > 0) params.append('tags', filterOptions.selectedTags.join(','))
-                if (filterOptions.selectedFolders.length > 0) params.append('folders', filterOptions.selectedFolders.join(','))
-                if (filterOptions.selectedRatings.length > 0) params.append('ratings', filterOptions.selectedRatings.join(','))
-                if (filterOptions.fileType && filterOptions.fileType !== 'all') params.append('type', filterOptions.fileType)
-
-                console.log(`[loadMediaFiles] Fetching remote media... Params: ${params.toString()}`)
-
-                const response = await fetch(`${baseUrl}/api/media?${params.toString()}`, {
-                    headers
-                })
-
-                if (!response.ok) {
-                    if (response.status === 403) {
-                        addNotification({ type: 'error', title: 'Insufficient Permissions', message: 'You do not have permission to perform this action.' })
-                    }
-                    throw new Error('Failed to fetch remote media')
-                }
-
-                const data = await response.json()
-                const transformed = transformRemoteMedia(Array.isArray(data.media) ? data.media : [], activeRemoteLibrary)
-
-                if (reset) {
-                    setMediaFiles(transformed)
-                } else {
-                    setMediaFiles(prev => [...prev, ...transformed])
-                }
-
-                setPage(targetPage)
-                setHasMore(transformed.length === LIMIT)
-
-                // Measure time
-                const endTime = performance.now()
-                const duration = (endTime - startTime) / 1000
-                setLoadingTime(duration)
-
-                if (reset) {
-                    addNotification({
-                        type: 'info',
-                        title: 'Load Complete',
-                        message: `Loaded ${transformed.length} items in ${duration.toFixed(2)}s`,
-                        duration: 3000
-                    })
-                }
-
-            } else {
-                // Local Library
-                const targetPage = reset ? 1 : page + 1
-                // Assuming local API supports pagination (getMediaFiles signature: page, limit, filters)
-                // Existing api.getMediaFiles(page, limit, filters)
-                const result = await api.getMediaFiles(targetPage, LIMIT, filterOptions)
-
-
-                // Local API likely returns { media: [], total: number } based on standard pagination
-                // If it returns array directly (old behavior), we might need to adjust.
-                // Looking at Step 20 line 42: getMediaFiles(page?: number, limit?: number, filters?: any): Promise<any>
-                // And server.ts line 235: returns { media, total, ... }
-                // So local IPC likely mirrors this? 
-                // Wait, useLibrary uses api.getMediaFiles().
-                // Let's assume api returns the object. If previously it returned array, existing code `Array.isArray(files) ? files : []` handles array.
-                // But if it returns object, `Array.isArray(result)` is false.
-
-                const newFiles = Array.isArray(result) ? result : (result.media || [])
-
-                if (reset) {
-                    setMediaFiles(newFiles)
-                } else {
-                    setMediaFiles(prev => [...prev, ...newFiles])
-                }
-
-                setPage(targetPage)
-                setHasMore(newFiles.length === LIMIT) // Approximate check
-
-                // Measure time
-                const endTime = performance.now()
-                const duration = (endTime - startTime) / 1000
-                setLoadingTime(duration)
             }
+
+            const targetPage = reset ? 1 : page + 1
+            const result = await api.getMediaFiles(targetPage, LIMIT, filterOptions)
+
+            let newFiles = Array.isArray(result) ? result : (result.media || [])
+
+            // リモートライブラリの場合は、画像パス等をリモートURLへ置換
+            if (activeRemoteLibrary) {
+                newFiles = transformRemoteMedia(newFiles, activeRemoteLibrary)
+            }
+
+            if (reset) {
+                setMediaFiles(newFiles)
+            } else {
+                setMediaFiles(prev => [...prev, ...newFiles])
+            }
+
+            setPage(targetPage)
+            setHasMore(newFiles.length === LIMIT) // Approximate check
+
+            // Measure time
+            const endTime = performance.now()
+            const duration = (endTime - startTime) / 1000
+            setLoadingTime(duration)
         } catch (error: any) {
             console.error('Failed to load media files:', error)
-            // Do not re-throw if it's just a background fetch failing, but maybe notify?
+            // Do not re-throw if it's just a background fetch failing, but maybe notify...
         } finally {
             loadingRef.current = false
             setLoading(false)
@@ -423,60 +340,23 @@ export function useLibrary() {
 
     // タグ読み込み
     const loadTags = useCallback(async () => {
-        if (activeRemoteLibrary) {
-            if (!isUserTokenLoaded) return
-            if (!myUserToken) {
-                console.warn('[loadTags] User token is empty. Skipping request.')
-                return
-            }
-            try {
-                const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
-                const response = await fetch(`${baseUrl}/api/tags`, {
-                    headers: getAuthHeaders(activeRemoteLibrary.token, myUserToken)
-                })
-                if (response.ok) {
-                    const data = await response.json()
-                    setTags(Array.isArray(data) ? data : [])
-                }
-            } catch (e) {
-                console.error('Failed to load remote tags', e)
-            }
-        } else {
-            try {
-                const loadedTags = await api.getTags()
-                setTags(Array.isArray(loadedTags) ? loadedTags : [])
-            } catch (error) {
-                console.error('Failed to load tags:', error)
-            }
+        try {
+            const loadedTags = await api.getTags()
+            setTags(Array.isArray(loadedTags) ? loadedTags : [])
+        } catch (error) {
+            console.error('Failed to load tags:', error)
         }
-    }, [activeRemoteLibrary, myUserToken, isUserTokenLoaded])
+    }, [])
 
-    // タググループ読み込み (現在リモートAPI未実装のためスキップまたは実装が必要。一旦スキップ)
+    // タググループ（親タグカテゴリ等）読み込み
     const loadTagGroups = useCallback(async () => {
-        if (activeRemoteLibrary) {
-            if (!isUserTokenLoaded) return
-            if (!myUserToken) return
-            try {
-                const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
-                const response = await fetch(`${baseUrl}/api/tag-groups`, {
-                    headers: getAuthHeaders(activeRemoteLibrary.token, myUserToken)
-                })
-                if (response.ok) {
-                    const data = await response.json()
-                    setTagGroups(Array.isArray(data) ? data : [])
-                }
-            } catch (e) {
-                console.error('Failed to load remote tag groups', e)
-            }
-            return
-        }
         try {
             const loadedGroups = await api.getTagGroups()
             setTagGroups(Array.isArray(loadedGroups) ? loadedGroups : [])
         } catch (error) {
             console.error('Failed to load tag groups:', error)
         }
-    }, [activeRemoteLibrary, myUserToken, isUserTokenLoaded])
+    }, [])
 
 
     // フォルダー選択とスキャン
@@ -1386,13 +1266,22 @@ export function useLibrary() {
     }, [])
 
     // リモートライブラリへの切り替え
-    const switchToRemoteLibrary = useCallback((lib: RemoteLibrary) => {
+    const switchToRemoteLibrary = useCallback(async (lib: RemoteLibrary) => {
         // IDが同じでもURLが違う場合は更新を許可する
         if (activeRemoteLibrary?.id === lib.id && activeRemoteLibrary.url === lib.url && !activeLibrary) {
             return
         }
 
-        // 接続テストを行ってから切り替える
+        try {
+            const cachePath = await api.getRemoteCachePath(lib.id)
+            if (cachePath) {
+                // バックエンドでこのパスをアクティブなデータベースとして開く
+                await api.setActiveLibrary(cachePath)
+            }
+        } catch (e) {
+            console.error('Failed to set remote cache as active library:', e)
+        }
+
         setActiveLibrary(null)
         setActiveRemoteLibrary(lib)
         localStorage.setItem('activeRemoteLibrary', JSON.stringify(lib)) // 状態を保存
