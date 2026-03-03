@@ -7,6 +7,8 @@ import { ShortcutContext, useShortcut } from '../contexts/ShortcutContext'
 import { api } from '../api'
 import './LibraryList.css'
 
+const listThumbnailUrlCache = new Map<string, string>()
+
 interface LibraryListProps {
     mediaFiles: MediaFile[]
     selectedIds: number[]
@@ -81,19 +83,28 @@ const ListThumbnail: React.FC<{ media: MediaFile, thumbnailMode: 'speed' | 'qual
     const [isLoaded, setIsLoaded] = useState(false);
 
     useEffect(() => {
-        setSrc(null);
-        setIsLoaded(false);
+        const cacheKey = `${media.id}|${thumbnailMode}|${media.thumbnail_path || ''}`
+        const cached = listThumbnailUrlCache.get(cacheKey)
+        if (cached) {
+            setSrc(cached)
+            setIsLoaded(true)
+        } else {
+            setSrc(null);
+            setIsLoaded(false);
+        }
         if (!media.thumbnail_path) return;
 
         let timeoutId: NodeJS.Timeout | null = null;
         const update = () => {
             const url = toMediaUrl(media.thumbnail_path!)
             const separator = url.includes('?') ? '&' : '?'
-            setSrc(thumbnailMode === 'speed' ? `${url}${separator}width=48` : url);
+            const resolved = thumbnailMode === 'speed' ? `${url}${separator}width=48` : url
+            listThumbnailUrlCache.set(cacheKey, resolved)
+            setSrc(resolved);
         };
 
         if (thumbnailMode === 'speed') {
-            timeoutId = setTimeout(update, 150);
+            timeoutId = setTimeout(update, cached ? 0 : 30);
         } else {
             update();
         }
@@ -167,6 +178,7 @@ export const LibraryList: React.FC<LibraryListProps> = ({
         pushScope('library');
         return () => popScope('library');
     }, [pushScope, popScope]);
+
 
     // Handle Keyboard Navigation
     const handleNavigation = useCallback((direction: 'up' | 'down') => {

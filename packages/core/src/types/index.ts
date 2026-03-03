@@ -1,4 +1,4 @@
-export interface MediaFile {
+﻿export interface MediaFile {
     uniqueId?: string
     id: number
     file_path: string
@@ -34,7 +34,7 @@ export interface MediaComment {
     id: number
     mediaId: number
     text: string
-    time: number // 再生位置（秒）
+    time: number // ms
     nickname?: string
     createdAt: string
 }
@@ -85,17 +85,17 @@ export interface FilterOptions {
     excludedSysDirs: string[] // Renamed from excludedFolders
     folderFilterMode: 'and' | 'or'
     filterType: 'all' | 'uncategorized' | 'untagged' | 'recent' | 'random' | 'trash' | 'tag_manager'
-    fileType: 'all' | 'video' | 'audio' // 内部フィルタリング用として残す
+    fileType: 'all' | 'video' | 'audio' // 蜀・Κ繝輔ぅ繝ｫ繧ｿ繝ｪ繝ｳ繧ｰ逕ｨ縺ｨ縺励※谿九☆
     sortOrder: 'name' | 'date' | 'size' | 'duration' | 'last_played' | 'rating' | 'modified' | 'artist' | 'tags' | 'random'
     sortDirection: 'asc' | 'desc'
-    selectedRatings: number[] // 0-5, 0 は「評価なし」
+    selectedRatings: number[] // 0-5, 0 means unrated
     excludedRatings: number[]
     selectedExtensions: string[]
     excludedExtensions: string[]
     selectedArtists: string[]
     excludedArtists: string[]
-    durationMin?: number | null // 秒
-    durationMax?: number | null // 秒
+    durationMin?: number | null // seconds
+    durationMax?: number | null // seconds
     dateModifiedMin?: string | null // YYYY-MM-DD
     dateModifiedMax?: string | null // YYYY-MM-DD
 }
@@ -232,12 +232,11 @@ export interface AuditLogEntry {
     timestamp: string
 }
 
-export interface ElectronAPI {
-    // ファイル操作汎用
+export interface DesktopAPI {
+    // 繝輔ぃ繧､繝ｫ謫堺ｽ懈ｱ守畑
     selectFile: (options?: any) => Promise<string | null>
 
-    // ライブラリ管理
-    createLibrary: (name: string, parentPath: string) => Promise<Library>
+    // 繝ｩ繧､繝悶Λ繝ｪ邂｡逅・    createLibrary: (name: string, parentPath: string) => Promise<Library>
     openLibrary: () => Promise<Library | null>
     getLibraries: () => Promise<Library[]>
     setActiveLibrary: (libraryPath: string) => Promise<void>
@@ -281,19 +280,17 @@ export interface ElectronAPI {
     refreshMediaMetadata: (ids: number[]) => Promise<void>
     deleteFileSystemFiles: (paths: string[]) => Promise<number>
 
-    // キャプチャ
+    // 繧ｭ繝｣繝励メ繝｣
     onTriggerFrameCapture: (callback: (action: string) => void) => () => void
     copyFrameToClipboard: (dataUrl: string) => Promise<boolean>
     saveCapturedFrame: (dataUrl: string) => Promise<boolean>
     setCapturedThumbnail: (mediaId: number, dataUrl: string) => Promise<string | null>
 
-    // コメント
-    addComment: (mediaId: number, text: string, time: number) => Promise<MediaComment>
+    // 繧ｳ繝｡繝ｳ繝・    addComment: (mediaId: number, text: string, time: number) => Promise<MediaComment>
     getComments: (mediaId: number) => Promise<MediaComment[]>
     generatePreviews: (mediaId: number) => Promise<string[]>
 
-    // ファイル操作
-    openPath: (filePath: string) => Promise<void>
+    // 繝輔ぃ繧､繝ｫ謫堺ｽ・    openPath: (filePath: string) => Promise<void>
     openExternal: (url: string) => Promise<void>
     showItemInFolder: (filePath: string) => Promise<void>
     openWith: (filePath: string) => Promise<void>
@@ -312,54 +309,48 @@ export interface ElectronAPI {
     copyMediaToLibrary: (mediaIds: number[], libraryPath: string, settings: LibraryTransferSettings, options?: { notificationId?: string }) => Promise<{ success: boolean; message?: string }>
     updateRemoteProfile: (url: string, token: string, nickname: string, iconUrl?: string) => Promise<{ success: boolean; message?: string }>;
 
-    // クリップボード
-    copyFileToClipboard: (filePath: string) => Promise<boolean>
+    // 繧ｯ繝ｪ繝・・繝懊・繝・    copyFileToClipboard: (filePath: string) => Promise<boolean>
 
-    // タググループ操作
-    getTagGroups: () => Promise<TagGroup[]>
+    // 繧ｿ繧ｰ繧ｰ繝ｫ繝ｼ繝玲桃菴・    getTagGroups: () => Promise<TagGroup[]>
     createTagGroup: (name: string) => Promise<TagGroup>
     deleteTagGroup: (id: number) => Promise<void>
     renameTagGroup: (id: number, newName: string) => Promise<void>
-    // ライブラリ管理
-    refreshLibrary: () => Promise<boolean>
-    onRefreshProgress: (callback: (current: number, total: number) => void) => void
+    // 繝ｩ繧､繝悶Λ繝ｪ邂｡逅・    refreshLibrary: () => Promise<boolean>
+    onRefreshProgress: (callback: (current: number, total: number) => void) => () => void
     updateTagGroup: (tagId: number, groupId: number | null) => Promise<void>
     getAuditLogs: (libraryPath?: string) => Promise<AuditLogEntry[]>
 
-    // ネイティブファイルドラッグ（同期的）
-    startDrag: (filePaths: string[]) => void
+    // 繝阪う繝・ぅ繝悶ヵ繧｡繧､繝ｫ繝峨Λ繝・げ・亥酔譛溽噪・・    startDrag: (filePaths: string[]) => void
 
-    // === ネットワーク共有 ===
-    // サーバー設定
-    getServerConfig: () => Promise<ServerConfig>
+    // === 繝阪ャ繝医Ρ繝ｼ繧ｯ蜈ｱ譛・===
+    // 繧ｵ繝ｼ繝舌・險ｭ螳・    getServerConfig: () => Promise<ServerConfig>
     updateServerConfig: (updates: Partial<ServerConfig>) => Promise<void>
     resetHostSecret: () => Promise<string>
 
-    // サーバー操作
-    startServer: () => Promise<{ success: boolean; error?: string }>
+    // 繧ｵ繝ｼ繝舌・謫堺ｽ・    startServer: () => Promise<{ success: boolean; error?: string }>
     stopServer: () => Promise<{ success: boolean; error?: string }>
     getServerStatus: () => Promise<boolean>
 
-    // ユーザー管理
-    getSharedUsers: () => Promise<SharedUser[]>
+    // 繝ｦ繝ｼ繧ｶ繝ｼ邂｡逅・    getSharedUsers: () => Promise<SharedUser[]>
     getRemoteSharedUsers: (params: { url: string; userToken: string; accessToken: string }) => Promise<SharedUser[]>
     addSharedUser: (user: Omit<SharedUser, 'id' | 'createdAt' | 'lastAccessAt'>) => Promise<SharedUser>
     deleteSharedUser: (userId: string) => Promise<void>
     updateSharedUser: (userId: string, updates: Partial<SharedUser>) => Promise<void>
 
-    // プラグイン API
+    // 繝励Λ繧ｰ繧､繝ｳ API
     showNotification: (options: { title: string; message: string }) => void
     showMessageBox: (options: ExtensionMessageBoxOptions) => Promise<{ response: number }>
     updateMedia: (mediaId: number, updates: any) => Promise<MediaFile | null>
     getSelectedMedia: () => Promise<MediaFile[]>
 
-    // クライアント機能
+    // 繧ｯ繝ｩ繧､繧｢繝ｳ繝域ｩ溯・
     getHardwareId: () => Promise<string>
     generateUserToken: () => Promise<string>
 
-    // クライアント設定
-    getClientConfig: () => Promise<ClientConfig>
+    // 繧ｯ繝ｩ繧､繧｢繝ｳ繝郁ｨｭ螳・    getClientConfig: () => Promise<ClientConfig>
     updateClientConfig: (updates: Partial<ClientConfig>) => Promise<ClientConfig>
+    installPlugin: () => Promise<{ installed?: string[]; skipped?: string[]; error?: string }>
+    uninstallPlugin: (pluginId: string) => Promise<{ success: boolean; error?: string }>
     selectDownloadDirectory: () => Promise<string | null>
     testConnection: (url: string, token: string) => Promise<{ success: boolean; message?: string }>
     addRemoteLibrary: (name: string, url: string, token: string) => Promise<any>
@@ -381,7 +372,7 @@ export interface ElectronAPI {
     syncRemoteLibrary: (url: string, token: string, remoteId: string) => Promise<{ success: boolean; message?: string }>
     getRemoteCachePath: (remoteId: string) => Promise<string | null>
 
-    // === 自動アップデート ===
+    // === 閾ｪ蜍輔い繝・・繝・・繝・===
     checkForUpdates: () => Promise<any>
     downloadUpdate: () => Promise<any>
     quitAndInstall: () => Promise<void>
@@ -389,12 +380,11 @@ export interface ElectronAPI {
 
     on: (channel: string, func: (...args: any[]) => void) => () => void
 
-    // ウィンドウ操作
-    minimizeWindow: () => Promise<void>
+    // 繧ｦ繧｣繝ｳ繝峨え謫堺ｽ・    minimizeWindow: () => Promise<void>
     maximizeWindow: () => Promise<void>
     closeWindow: () => Promise<void>
 
-    // アプリケーション情報
+    // 繧｢繝励Μ繧ｱ繝ｼ繧ｷ繝ｧ繝ｳ諠・ｱ
     getAppVersion: () => Promise<string>
 
     // FFmpeg
@@ -403,8 +393,7 @@ export interface ElectronAPI {
     updateFFmpeg: (url: string) => Promise<boolean>
     onFFmpegUpdateProgress: (callback: (progress: number) => void) => () => void
 
-    // その他
-    focusWindow: () => Promise<void>
+    // 縺昴・莉・    focusWindow: () => Promise<void>
 
     // Discord RPC
     updateDiscordActivity: (activity: any) => Promise<void>
@@ -422,17 +411,14 @@ export interface ElectronAPI {
     seekAudio: (time: number) => Promise<void>
     setAudioVolume: (volume: number) => Promise<void>
 
-    // ニコニココメント（廃止・プラグイン化）
-    // fetchNicoComments, getNicoComments was removed
+    // 繝九さ繝九さ繧ｳ繝｡繝ｳ繝茨ｼ亥ｻ・ｭ｢繝ｻ繝励Λ繧ｰ繧､繝ｳ蛹厄ｼ・    // fetchNicoComments, getNicoComments was removed
 
-    // プラグイン・拡張機能操作
-    pluginFetch: (url: string, options?: any) => Promise<{ ok: boolean; status: number; statusText: string; data?: any; error?: boolean }>;
+    // 繝励Λ繧ｰ繧､繝ｳ繝ｻ諡｡蠑ｵ讖溯・謫堺ｽ・    pluginFetch: (url: string, options?: any) => Promise<{ ok: boolean; status: number; statusText: string; data?: any; error?: boolean }>;
     savePluginMediaData: (mediaId: number, pluginId: string, data: any) => Promise<boolean>;
     loadPluginMediaData: (mediaId: number, pluginId: string) => Promise<any>;
     getPluginScripts: () => Promise<PluginInfo[]>;
 
-    // コメントファイルI/O（動画横保存）
-    saveAssociatedData: (mediaFilePath: string, data: any) => Promise<boolean>;
+    // 繧ｳ繝｡繝ｳ繝医ヵ繧｡繧､繝ｫI/O・亥虚逕ｻ讓ｪ菫晏ｭ假ｼ・    saveAssociatedData: (mediaFilePath: string, data: any) => Promise<boolean>;
     loadAssociatedData: (mediaFilePath: string) => Promise<any>;
 }
 
@@ -479,16 +465,15 @@ export interface LibraryTransferSettings {
 }
 
 // ---------------------------------------------------------------------------
-// 拡張機能・プラグインAPI用 型定義
+// Plugin API types
 // ---------------------------------------------------------------------------
 
-// プラグインから取得される汎用データのインターフェース
 export interface ExtensionResource {
     id: string | number;
-    time?: number;     // タイムライン上の位置（秒）
-    type?: string;     // データ種別 (comment, chapter, etc.)
-    content: string;   // コンテンツ本文
-    [key: string]: any; // その他のプラグイン固有データ
+    time?: number;
+    type?: string;
+    content: string;
+    [key: string]: any;
 }
 
 export interface ExtensionButton {
@@ -497,7 +482,7 @@ export interface ExtensionButton {
     icon?: string;
     disabled?: boolean;
     isActive?: boolean;
-    onClick: (context: { media: MediaFile, updateMedia?: (media: MediaFile) => void }) => void;
+    onClick: (context: { media: MediaFile; updateMedia?: (media: MediaFile) => void }) => void;
 }
 
 export interface PlayerOverlayContext {
@@ -529,10 +514,10 @@ export interface ExtensionUIHooks {
 }
 
 export interface ObscuraPlugin {
-    id: string;        // 例: 'niconico'
-    name: string;      // 例: '拡張機能'
-    canHandle: (url: string) => boolean; // このURLを処理可能か判定
-    fetchData: (mediaId: number, url: string) => Promise<ExtensionResource[]>; // データ取得処理
+    id: string;
+    name: string;
+    canHandle: (url: string) => boolean;
+    fetchData: (mediaId: number, url: string) => Promise<ExtensionResource[]>;
     uiHooks?: ExtensionUIHooks;
 }
 
@@ -540,13 +525,8 @@ export interface ObscuraAPI {
     registerPlugin: (plugin: ObscuraPlugin) => void;
     unregisterPlugin?: (pluginId: string) => void;
     getPlugins: () => ObscuraPlugin[];
-
-
-    // プレイヤーオーバーレイAPI
     registerPlayerOverlay: (id: string, callback: (canvas: HTMLCanvasElement, media: MediaFile, context: PlayerOverlayContext) => void) => void;
     unregisterPlayerOverlay: (id: string) => void;
-
-    // メディア操作 (Eagle 互換)
     media: {
         get: (id: number) => Promise<MediaFile | null>;
         getSelected: () => Promise<MediaFile | null>;
@@ -556,40 +536,32 @@ export interface ObscuraAPI {
         removeTag: (mediaId: number, tagId: number) => Promise<void>;
         import: (filePaths: string[]) => Promise<MediaFile[]>;
     };
-
-    // UI 操作
     ui: {
         showNotification: (options: ExtensionNotificationOptions) => void;
         showMessageBox: (options: ExtensionMessageBoxOptions) => Promise<{ response: number }>;
         copyToClipboard: (text: string) => void;
     };
-
     system: {
         fetch: (url: string, options?: any) => Promise<any>;
         saveMediaData: (mediaId: number, pluginId: string, data: any) => Promise<boolean>;
         loadMediaData: (mediaId: number, pluginId: string) => Promise<any>;
-        // 各種データ保存用 (旧 saveCommentFile)
         saveAssociatedData: (mediaFilePath: string, data: any) => Promise<boolean>;
         loadAssociatedData: (mediaFilePath: string) => Promise<any>;
         openPath: (path: string) => Promise<void>;
         openExternal: (url: string) => Promise<void>;
-
-        // プラグイン用永続ストレージ
         storage: {
             get: (key: string) => Promise<any>;
             set: (key: string, value: any) => Promise<void>;
         };
     };
-
-    // イベント
-    on: (event: 'selection-changed' | 'item-info-updated' | 'theme-changed', callback: (...args: any[]) => void) => () => void;
+    on: (event: string, callback: (...args: any[]) => void) => void;
 }
 
-// グローバルオブジェクトの型拡張
+// 繧ｰ繝ｭ繝ｼ繝舌Ν繧ｪ繝悶ず繧ｧ繧ｯ繝医・蝙区僑蠑ｵ
 declare global {
     interface Window {
         ObscuraAPI: ObscuraAPI;
-        electronAPI: ElectronAPI; // 既存の定義
+        obscuraAPI?: DesktopAPI;
     }
 }
 
@@ -625,7 +597,7 @@ export interface ClientConfig {
     downloadPath: string
     theme: 'dark' | 'light' | 'system'
     customThemes?: Theme[]
-    activeThemeId?: string // 適用中のカスタムテーマID (themeが'custom'の場合などに使用)
+    activeThemeId?: string // 驕ｩ逕ｨ荳ｭ縺ｮ繧ｫ繧ｹ繧ｿ繝繝・・繝曵D (theme縺・custom'縺ｮ蝣ｴ蜷医↑縺ｩ縺ｫ菴ｿ逕ｨ)
     language: 'ja' | 'en'
     remoteLibraries: RemoteLibrary[]
     myUserToken?: string
@@ -736,6 +708,7 @@ export const defaultViewSettings: ViewSettings = {
 
 declare global {
     interface Window {
-        electronAPI: ElectronAPI
+        obscuraAPI?: DesktopAPI
     }
 }
+

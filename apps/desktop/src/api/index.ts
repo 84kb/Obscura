@@ -1,5 +1,5 @@
-import { IMediaLibraryAPI } from './types';
-import { ElectronAdapter } from './electron-adapter';
+﻿import { IMediaLibraryAPI } from './types';
+import { DesktopAdapter } from './desktop-adapter';
 import { AndroidAdapter } from './android-adapter';
 
 import { Capacitor } from '@capacitor/core';
@@ -7,24 +7,20 @@ import { Capacitor } from '@capacitor/core';
 let apiInstance: IMediaLibraryAPI;
 
 const isNative = Capacitor.isNativePlatform();
-const isElectron = 'electronAPI' in window;
+const hasDesktopBridge = 'obscuraAPI' in (window as any);
 
 if (isNative) {
     console.log('[API] Using Android Adapter');
     apiInstance = new AndroidAdapter();
-} else if (isElectron) {
-    console.log('[API] Using Electron Adapter');
-    apiInstance = new ElectronAdapter();
+} else if (hasDesktopBridge) {
+    console.log('[API] Using Desktop Adapter');
+    apiInstance = new DesktopAdapter();
 } else {
-    // Fallback or should use ElectronMock (which effectively adds electronAPI before this runs? 
-    // No, mock adds electronAPI, so isElectron becomes true.
-    // We already handle mock injection in main.tsx.
-    // If mock is NOT injected but we are on web (e.g. native check failed?)
-    // Default to Android/Mock?
-    // Let's assume if it's not Native and has electronAPI, it's Electron (or Mock).
-    // If neither, we might be in trouble, but let's stick to current logic + Native check.
-    console.log('[API] Using Electron Adapter (Fallback)');
-    apiInstance = new ElectronAdapter();
+    // Fallback for web tests/development where bridge is injected later.
+    console.log('[API] Using Desktop Adapter (Fallback)');
+    apiInstance = new DesktopAdapter();
 }
 
 export const api = apiInstance;
+
+

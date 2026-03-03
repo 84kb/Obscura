@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ブラウザ検証用モックElectron API
  * Electron環境外でUIを検証するためのモック実装
  */
@@ -84,7 +84,7 @@ const storage = {
 }
 
 // モックAPI実装
-export const mockElectronAPI = {
+export const mockDesktopAPI = {
     // ファイル操作
     selectFile: async (_options?: any) => null,
 
@@ -297,11 +297,8 @@ export const mockElectronAPI = {
 
 
 
-export function initMockElectronAPI(): void {
-    const isElectron = navigator.userAgent.toLowerCase().includes('electron')
-    if (isElectron) return
-    if (typeof window !== 'undefined' && !window.electronAPI) {
-        // @ts-ignore
-        window.electronAPI = mockElectronAPI
+export function initMockDesktopAPI(): void {
+    if (typeof window !== 'undefined' && !(window as any).obscuraAPI) {
+        ; (window as any).obscuraAPI = mockDesktopAPI
     }
 }

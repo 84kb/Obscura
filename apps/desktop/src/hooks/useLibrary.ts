@@ -22,7 +22,9 @@ export function useLibrary() {
     const [page, setPage] = useState(1)
     const [hasMore, setHasMore] = useState(true)
     const [loadingTime, setLoadingTime] = useState<number | null>(null)
-    const LIMIT = 100
+    // Compatibility mode: many features assume a full in-memory dataset.
+    // Keep full fetch until list/filter/folder features are fully server-paginated.
+    const FULL_FETCH_LIMIT = 100000
     const loadingRef = useRef(false) // Prevent concurrent loads
     const [filterOptions, setFilterOptions] = useState<FilterOptions>({
         searchQuery: '',
@@ -280,8 +282,8 @@ export function useLibrary() {
     const loadMediaFiles = useCallback(async (reset = true, _silent = false) => {
         if (loadingRef.current) return
 
-        // If loading more (reset=false) and no more items, skip
-        if (!reset && !hasMore) return
+        // In full-fetch compatibility mode, incremental paging is disabled.
+        if (!reset) return
 
         loadingRef.current = true
         const startTime = performance.now()
@@ -302,8 +304,8 @@ export function useLibrary() {
                 }
             }
 
-            const targetPage = reset ? 1 : page + 1
-            const result = await api.getMediaFiles(targetPage, LIMIT, filterOptions)
+            const targetPage = 1
+            const result = await api.getMediaFiles(targetPage, FULL_FETCH_LIMIT, filterOptions)
 
             let newFiles = Array.isArray(result) ? result : (result.media || [])
 
@@ -312,14 +314,10 @@ export function useLibrary() {
                 newFiles = transformRemoteMedia(newFiles, activeRemoteLibrary)
             }
 
-            if (reset) {
-                setMediaFiles(newFiles)
-            } else {
-                setMediaFiles(prev => [...prev, ...newFiles])
-            }
+            setMediaFiles(newFiles)
 
-            setPage(targetPage)
-            setHasMore(newFiles.length === LIMIT) // Approximate check
+            setPage(1)
+            setHasMore(false)
 
             // Measure time
             const endTime = performance.now()
@@ -332,11 +330,11 @@ export function useLibrary() {
             loadingRef.current = false
             setLoading(false)
         }
-    }, [activeRemoteLibrary, activeLibrary, transformRemoteMedia, myUserToken, isUserTokenLoaded, page, hasMore, addNotification, filterOptions])
+    }, [activeRemoteLibrary, activeLibrary, transformRemoteMedia, myUserToken, isUserTokenLoaded, addNotification, filterOptions])
 
     const loadMore = useCallback(() => {
-        loadMediaFiles(false)
-    }, [loadMediaFiles])
+        // no-op in full-fetch compatibility mode
+    }, [])
 
     // タグ読み込み
     const loadTags = useCallback(async () => {
@@ -865,6 +863,28 @@ export function useLibrary() {
 
     // フィルタリングされたメディアファイル
     const filteredMediaFiles = useMemo(() => {
+        const hasExtraFilters =
+            !!filterOptions.searchQuery ||
+            filterOptions.fileType !== 'all' ||
+            (filterOptions.selectedTags?.length || 0) > 0 ||
+            (filterOptions.excludedTags?.length || 0) > 0 ||
+            (filterOptions.selectedFolders?.length || 0) > 0 ||
+            (filterOptions.excludedFolders?.length || 0) > 0 ||
+            (filterOptions.selectedRatings?.length || 0) > 0 ||
+            (filterOptions.excludedRatings?.length || 0) > 0 ||
+            (filterOptions.selectedExtensions?.length || 0) > 0 ||
+            (filterOptions.excludedExtensions?.length || 0) > 0 ||
+            (filterOptions.selectedArtists?.length || 0) > 0 ||
+            (filterOptions.excludedArtists?.length || 0) > 0 ||
+            !!filterOptions.dateModifiedMin ||
+            !!filterOptions.dateModifiedMax
+
+        // Fast path for random tab with no extra filters.
+        // Keeps behavior while bypassing expensive generic filter pipeline.
+        if (filterOptions.filterType === 'random' && !hasExtraFilters) {
+            return shuffleArray(mediaFiles.filter(m => !m.is_deleted), randomSeed)
+        }
+
         let result = [...mediaFiles]
 
         // 基本フィルター (Trash以外はis_deletedを除外)
@@ -1359,17 +1379,23 @@ export function useLibrary() {
             try {
                 if (isFirstLoad) setLoadingProgress(20)
                 await loadMediaFiles()
-                if (isFirstLoad) setLoadingProgress(60)
-                await Promise.all([loadTags(), loadTagGroups(), loadFolders()])
-                if (isFirstLoad) setLoadingProgress(100)
-            } finally {
                 if (isFirstLoad) {
-                    // プログレスバーが100%に到達したアニメーションを見せるため少し待つ
+                    setLoadingProgress(100)
+                    isInitialLoadDone.current = true
+                    // Prioritize first paint of media list; load metadata after UI is interactive.
                     setTimeout(() => {
                         setLoading(false)
                         setLoadingProgress(0)
-                        isInitialLoadDone.current = true
-                    }, 400)
+                    }, 120)
+                    void Promise.all([loadTags(), loadTagGroups(), loadFolders()]).catch((e) => {
+                        console.error('Failed to load metadata in background:', e)
+                    })
+                } else {
+                    await Promise.all([loadTags(), loadTagGroups(), loadFolders()])
+                }
+            } finally {
+                if (isFirstLoad) {
+                    // Already finalized during first-load fast path.
                 }
             }
         }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useContext, useRef } from 'react'
+﻿import { useState, useEffect, useCallback, useContext, useRef } from 'react'
 import { api } from '../api'
 import { AppSettings, Library, ClientConfig, AutoImportPath, Theme, ThemeColors } from '@obscura/core'
 import { ShortcutContext, ShortcutAction } from '../contexts/ShortcutContext'
@@ -134,8 +134,8 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
     // 拡張機能一覧の取得
     useEffect(() => {
-        if (activeCategory === 'extensions' && window.electronAPI) {
-            window.electronAPI.getPluginScripts().then(scripts => {
+        if (activeCategory === 'extensions') {
+            api.getPluginScripts().then(scripts => {
                 setAvailablePlugins(scripts || [])
             }).catch(e => console.error('[Settings] Failed to load plugin scripts:', e))
         }
@@ -251,8 +251,8 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     const [availableLibraries, setAvailableLibraries] = useState<{ name: string; path: string }[]>([])
 
     useEffect(() => {
-        if (activeCategory === 'import' && window.electronAPI) {
-            (window.electronAPI as any).getLibraries()
+        if (activeCategory === 'import') {
+            api.getLibraries()
                 .then((libs: any[]) => setAvailableLibraries(libs))
                 .catch((e: any) => console.error('Failed to get libraries:', e))
         }
@@ -1940,8 +1940,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }
 
     const handleAddWatchPath = async () => {
-        if (!window.electronAPI) return
-        const path = await (window.electronAPI as any).selectFolder()
+        const path = await api.selectFolder()
         if (path) {
             // Check dupes
             if (clientConfig?.autoImport.watchPaths.some((p: AutoImportPath) => p.path === path)) {
@@ -1967,7 +1966,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                 }
             }
             setClientConfig(newConfig);
-            (window.electronAPI as any).updateClientConfig(newConfig)
+            updateClientConfig({ autoImport: newConfig.autoImport })
         }
     }
 
@@ -1981,7 +1980,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
             }
         }
         setClientConfig(newConfig);
-        (window.electronAPI as any).updateClientConfig(newConfig)
+        updateClientConfig({ autoImport: newConfig.autoImport })
     }
 
     const handleUpdateWatchPath = (id: string, updates: Partial<AutoImportPath>) => {
@@ -1996,7 +1995,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
             }
         }
         setClientConfig(newConfig);
-        (window.electronAPI as any).updateClientConfig(newConfig)
+        updateClientConfig({ autoImport: newConfig.autoImport })
     }
 
     const renderImportSettings = () => {
@@ -2128,7 +2127,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     }
                                 }
                                 setClientConfig(newConfig)
-                                if (window.electronAPI) (window.electronAPI as any).updateClientConfig(newConfig)
+                                updateClientConfig({ libraryTransferSettings: newConfig.libraryTransferSettings })
                             }
 
                             return (
@@ -2191,7 +2190,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     onChange={(e) => {
                                         const newConfig = { ...clientConfig, discordRichPresenceEnabled: e.target.checked }
                                         setClientConfig(newConfig);
-                                        (window.electronAPI as any).updateClientConfig({ discordRichPresenceEnabled: e.target.checked })
+                                        updateClientConfig({ discordRichPresenceEnabled: e.target.checked })
                                     }}
                                 />
                                 <span className="slider"></span>
@@ -2207,21 +2206,20 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
 
     const handleSaveProfile = async () => {
-        if (!window.electronAPI) return
         try {
-            await window.electronAPI.updateClientConfig({
+            await api.updateClientConfig({
                 nickname: nickname.trim(),
                 iconUrl: selectedIcon
             })
             // 更新後のconfを再取得して反映
-            const config = await window.electronAPI.getClientConfig()
+            const config = await api.getClientConfig()
             setClientConfig(config)
 
             // リモートライブラリへのプロファイル同期
             if (config.remoteLibraries && config.remoteLibraries.length > 0) {
                 console.log('[Profile] Syncing profile to remote libraries...')
                 Promise.all(config.remoteLibraries.map(lib =>
-                    window.electronAPI.updateRemoteProfile(lib.url, lib.token, nickname.trim(), selectedIcon)
+                    api.updateRemoteProfile(lib.url, lib.token, nickname.trim(), selectedIcon)
                         .then(res => {
                             if (!res.success) console.warn(`[Profile] Failed to sync to ${lib.name}:`, res.message)
                             else console.log(`[Profile] Synced to ${lib.name}`)
@@ -2413,20 +2411,19 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                 className="btn btn-secondary"
                                 style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '8px 16px' }}
                                 onClick={async () => {
-                                    if (!window.electronAPI) return
                                     try {
-                                        const result = await (window.electronAPI as any).installPlugin()
+                                        const result = await api.installPlugin()
                                         if (result.error) {
                                             console.error('[Settings] Plugin install error:', result.error)
                                             return
                                         }
                                         // インストール成功時にリストを再取得
-                                        if (result.installed?.length > 0) {
-                                            const scripts = await window.electronAPI.getPluginScripts()
+                                        if ((result.installed?.length ?? 0) > 0) {
+                                            const scripts = await api.getPluginScripts()
                                             setAvailablePlugins(scripts || [])
                                         }
-                                        if (result.skipped?.length > 0) {
-                                            alert(`以下のファイルは既に存在するためスキップされました:\n${result.skipped.join('\n')}`)
+                                        if ((result.skipped?.length ?? 0) > 0) {
+                                            alert(`以下のファイルは既に存在するためスキップされました:\n${(result.skipped ?? []).join('\n')}`)
                                         }
                                     } catch (e) {
                                         console.error('[Settings] Plugin install failed:', e)
@@ -2489,9 +2486,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                                                     extensions: newExtensions
                                                                 }
                                                                 onUpdateSettings(newConfig)
-                                                                if (window.electronAPI) {
-                                                                    (window.electronAPI as any).updateClientConfig(newConfig)
-                                                                }
+                                                                updateClientConfig({ extensions: newExtensions } as any)
                                                             }}
                                                         />
                                                         <span className="slider"></span>
@@ -2501,11 +2496,10 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                                         style={{ marginLeft: '8px', color: 'var(--danger, #e74c3c)', borderColor: 'var(--danger, #e74c3c)', padding: '4px 10px', fontSize: '12px' }}
                                                         onClick={async () => {
                                                             if (!confirm(`「${title}」を削除しますか？\nこの操作は元に戻せません。`)) return
-                                                            if (!window.electronAPI) return
                                                             try {
-                                                                const result = await (window.electronAPI as any).uninstallPlugin(plugin.id)
+                                                                const result = await api.uninstallPlugin(plugin.id)
                                                                 if (result.success) {
-                                                                    const scripts = await window.electronAPI.getPluginScripts()
+                                                                    const scripts = await api.getPluginScripts()
                                                                     setAvailablePlugins(scripts || [])
                                                                 } else {
                                                                     alert(`削除に失敗しました: ${result.error}`)

@@ -5,6 +5,45 @@ import { useShortcut } from '../contexts/ShortcutContext'
 import { useAudioEngine } from './useAudioEngine'
 import { api } from '../api'
 
+type PlayerClientConfig = {
+    exclusiveMode?: boolean
+    useMpvAudio?: boolean
+    enableMpvForVideo?: boolean
+}
+
+let cachedPlayerClientConfig: PlayerClientConfig | null = null
+let pendingPlayerClientConfigPromise: Promise<PlayerClientConfig> | null = null
+
+async function getPlayerClientConfigFast(): Promise<PlayerClientConfig> {
+    if (cachedPlayerClientConfig) return cachedPlayerClientConfig
+    if (pendingPlayerClientConfigPromise) return pendingPlayerClientConfigPromise
+
+    pendingPlayerClientConfigPromise = api.getClientConfig()
+        .then((c: any) => {
+            const next: PlayerClientConfig = {
+                exclusiveMode: !!c?.exclusiveMode,
+                useMpvAudio: !!c?.useMpvAudio,
+                enableMpvForVideo: !!c?.enableMpvForVideo,
+            }
+            cachedPlayerClientConfig = next
+            return next
+        })
+        .catch(() => {
+            const fallback: PlayerClientConfig = {
+                exclusiveMode: false,
+                useMpvAudio: false,
+                enableMpvForVideo: false,
+            }
+            cachedPlayerClientConfig = fallback
+            return fallback
+        })
+        .finally(() => {
+            pendingPlayerClientConfigPromise = null
+        })
+
+    return pendingPlayerClientConfigPromise
+}
+
 interface UsePlayerProps {
     mode?: string | null
     playlist?: any | null
@@ -57,7 +96,7 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
     const [_exclusiveMode, setExclusiveMode] = useState(false)
     const [useMpvAudio, setUseMpvAudio] = useState(false)
     const [enableMpvForVideo, setEnableMpvForVideo] = useState(false)
-    const [configLoaded, setConfigLoaded] = useState(false)
+    const configLoaded = true
 
     const isMpv = useMpvAudio && (
         media?.file_type === 'audio' ||
@@ -65,14 +104,10 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
     )
 
     useEffect(() => {
-        api.getClientConfig().then(c => {
+        getPlayerClientConfigFast().then((c) => {
             setExclusiveMode(!!c.exclusiveMode)
             setUseMpvAudio(!!c.useMpvAudio)
             setEnableMpvForVideo(!!c.enableMpvForVideo)
-            setConfigLoaded(true)
-        }).catch(() => {
-            // Fallback or ignore if API not available/implemented
-            setConfigLoaded(true)
         })
     }, [])
 
@@ -228,7 +263,7 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
         if (isMpv) {
             // MPV doesn't expose mute easy toggle via IPC without property get/set, or we track state.
             // We track state in isMuted.
-            // window.electronAPI.setMute(!isMuted) -- need to implement if needed, or just vol 0
+            // Mute behavior is currently represented by setting volume to 0.
             // For now just toggle UI state, actual volume control handles it via changeVolume?
             // Or set volume to 0?
             // Let's assume user just wants UI update for now, or use setVolume(0) if muted.
@@ -247,7 +282,7 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
     const changePlaybackRate = (rate: number) => {
         if (isMpv) {
             setPlaybackRate(rate)
-            // window.electronAPI.setSpeed(rate) // TODO: Implement if needed
+            // Playback speed bridge can be added later if needed.
             return
         }
 
@@ -542,7 +577,7 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
             if (media.thumbnail_path) {
                 // ローカルパスをブラウザが扱えるURLに変換
                 // ローカルパスをブラウザが扱えるURLに変換
-                // window.electronAPIが存在する場合のみ有効（レンダラープロセス）
+                // Valid only when running in the desktop renderer context.
                 const artUrl = toMediaUrl(media.thumbnail_path)
 
                 // media:// 等のカスタムスキームは MediaSession で警告が出る可能性があるため Blob URL に変換
@@ -710,4 +745,3 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
         configLoaded
     }
 }
-

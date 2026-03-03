@@ -1,8 +1,10 @@
-import { useState, useEffect, useRef } from 'react'
+﻿import { useState, useEffect, useRef } from 'react'
 import { MediaFile, ItemInfoType } from '@obscura/core'
 import { api } from '../api'
 import './MediaCard.css'
 import { toMediaUrl } from '../utils/fileUrl'
+
+const thumbnailUrlCache = new Map<string, string>()
 
 interface MediaCardProps extends React.HTMLAttributes<HTMLDivElement> {
     media: MediaFile
@@ -23,6 +25,7 @@ interface MediaCardProps extends React.HTMLAttributes<HTMLDivElement> {
     thumbnailMode?: 'speed' | 'quality'
     width?: number
     onDragGetPaths?: (id: string) => string[]
+    priorityLoad?: boolean
 }
 
 export function MediaCard({
@@ -44,40 +47,56 @@ export function MediaCard({
     thumbnailMode = 'speed',
     width = 250,
     onDragGetPaths,
+    priorityLoad = false,
     ...props
 }: MediaCardProps) {
     const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null)
     const [isLoaded, setIsLoaded] = useState(false)
-    const mouseDownHandled = useRef(false) // MouseDownで選択処理を行ったかを追跡
+    const mouseDownHandled = useRef(false) // MouseDown縺ｧ驕ｸ謚槫・逅・ｒ陦後▲縺溘°繧定ｿｽ霍｡
 
-    // サムネイルがない場合は自動生成をトリガー（品質優先モードの場合のみ）
+    // 繧ｵ繝繝阪う繝ｫ縺後↑縺・ｴ蜷医・閾ｪ蜍慕函謌舌ｒ繝医Μ繧ｬ繝ｼ・亥刀雉ｪ蜆ｪ蜈医Δ繝ｼ繝峨・蝣ｴ蜷医・縺ｿ・・
     useEffect(() => {
         let timeoutId: NodeJS.Timeout | null = null;
+        const cacheKey = `${media.id}|${thumbnailMode}|${width}|${media.thumbnail_path || ''}`
+        const cachedUrl = thumbnailUrlCache.get(cacheKey)
 
-        // メディアが変わったらリセット
-        setIsLoaded(false);
-        setThumbnailUrl(null);
+        if (cachedUrl) {
+            setThumbnailUrl(cachedUrl)
+            setIsLoaded(true)
+        } else {
+            setIsLoaded(false);
+            setThumbnailUrl(null);
+        }
 
         const updateThumbnail = () => {
-            // propが変わったときにURLを更新
             if (media.thumbnail_path) {
                 const url = toMediaUrl(media.thumbnail_path)
                 const separator = url.includes('?') ? '&' : '?'
-                setThumbnailUrl(thumbnailMode === 'speed' ? `${url}${separator}width=${width}` : url)
+                const isServerThumb = /\/api\/thumbnails\//.test(url)
+                const resolved = thumbnailMode === 'speed' && isServerThumb ? `${url}${separator}width=320` : url
+                const perf = (window as any).__obscuraRandomPerf
+                if (perf && !perf.firstThumbRequestLogged) {
+                    perf.firstThumbRequestLogged = true
+                    const elapsed = performance.now() - Number(perf.start || 0)
+                    console.log(`[Perf][Random] first thumbnail request in ${elapsed.toFixed(1)}ms (mediaId=${media.id})`)
+                }
+                thumbnailUrlCache.set(cacheKey, resolved)
+                setThumbnailUrl(resolved)
             } else if (thumbnailMode === 'quality' && media.file_type === 'video') {
                 api.generateThumbnail(media.id, media.file_path)
                     .then((path: string | null) => {
                         if (path) {
-                            setThumbnailUrl(toMediaUrl(path))
+                            const resolved = toMediaUrl(path)
+                            thumbnailUrlCache.set(cacheKey, resolved)
+                            setThumbnailUrl(resolved)
                         }
                     })
                     .catch((err: Error) => console.error('Thumbnail generation failed:', err))
             }
         };
 
-        // 高速スクロール対策: 150ms待機してからリクエスト
         if (thumbnailMode === 'speed') {
-            timeoutId = setTimeout(updateThumbnail, 150);
+            timeoutId = setTimeout(updateThumbnail, cachedUrl ? 0 : 30);
         } else {
             updateThumbnail();
         }
@@ -87,7 +106,7 @@ export function MediaCard({
         };
     }, [media.id, media.file_path, media.thumbnail_path, media.file_type, thumbnailMode, width])
 
-    // ファイルタイプに応じたアイコン
+    // 繝輔ぃ繧､繝ｫ繧ｿ繧､繝励↓蠢懊§縺溘い繧､繧ｳ繝ｳ
     const getIcon = () => {
         if (media.file_type === 'video') {
             return (
@@ -104,7 +123,7 @@ export function MediaCard({
         }
     }
 
-    // 時間フォーマット
+    // 譎る俣繝輔か繝ｼ繝槭ャ繝・
     const formatDuration = (seconds: number | null) => {
         if (!seconds) return ''
         const mins = Math.floor(seconds / 60)
@@ -112,7 +131,7 @@ export function MediaCard({
         return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
     }
 
-    // ファイルサイズフォーマット
+    // 繝輔ぃ繧､繝ｫ繧ｵ繧､繧ｺ繝輔か繝ｼ繝槭ャ繝・
     const formatFileSize = (bytes: number) => {
         if (bytes < 1024) return `${bytes} B`
         if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -120,27 +139,27 @@ export function MediaCard({
         return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
     }
 
-    // 日付フォーマット
+    // 譌･莉倥ヵ繧ｩ繝ｼ繝槭ャ繝・
     const formatDate = (dateString: string | undefined | null) => {
         if (!dateString) return ''
         const date = new Date(dateString)
         return date.toLocaleDateString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric' })
     }
 
-    // 評価表示
+    // 隧穂ｾ｡陦ｨ遉ｺ
     const formatRating = (rating: number | undefined) => {
-        if (!rating) return '未評価'
-        return '★'.repeat(rating) + '☆'.repeat(5 - rating)
+        if (!rating) return '譛ｪ隧穂ｾ｡'
+        return '\u2605'.repeat(rating) + '\u2606'.repeat(5 - rating)
     }
 
-    // タグ表示
+    // 繧ｿ繧ｰ陦ｨ遉ｺ
     const formatTags = (tags: { id: number; name: string }[] | undefined) => {
-        if (!tags || tags.length === 0) return 'タグなし'
+        if (!tags || tags.length === 0) return '\u30BF\u30B0\u306A\u3057'
         if (tags.length <= 2) return tags.map(t => t.name).join(', ')
         return `${tags[0].name}, ${tags[1].name}...`
     }
 
-    // アイテム情報を取得
+    // 繧｢繧､繝・Β諠・ｱ繧貞叙蠕・
     const getItemInfo = (): string => {
         switch (itemInfoType) {
             case 'duration':
@@ -160,7 +179,7 @@ export function MediaCard({
         }
     }
 
-    // ファイル拡張子を取得
+    // 繝輔ぃ繧､繝ｫ諡｡蠑ｵ蟄舌ｒ蜿門ｾ・
     const getFileExtension = () => {
         const ext = media.file_name.split('.').pop()?.toUpperCase() || ''
         return ext
@@ -174,15 +193,15 @@ export function MediaCard({
         onContextMenu?.(e)
     }
 
-    // infoが表示されるかどうか
+    // info縺瑚｡ｨ遉ｺ縺輔ｌ繧九°縺ｩ縺・°
     const hasVisibleInfo = showName || (showItemInfo && getItemInfo())
 
-    // ネイティブファイルドラッグ開始
+    // 繝阪う繝・ぅ繝悶ヵ繧｡繧､繝ｫ繝峨Λ繝・げ髢句ｧ・
     const handleDragStart = (e: React.DragEvent) => {
         const dragPaths = onDragGetPaths ? onDragGetPaths(String(media.id)) : [media.file_path]
         console.log('[MediaCard] Drag start triggered for:', dragPaths)
 
-        // 内部ドラッグ開始を通知
+        // 蜀・Κ繝峨Λ繝・げ髢句ｧ九ｒ騾夂衍
         onInternalDragStart?.()
 
         e.preventDefault()
@@ -195,39 +214,51 @@ export function MediaCard({
         }
     }
 
-    // ドラッグ終了時
+    // 繝峨Λ繝・げ邨ゆｺ・凾
     const handleDragEnd = (_e: React.DragEvent) => {
-        // 内部ドラッグ終了を通知
+        // 蜀・Κ繝峨Λ繝・げ邨ゆｺ・ｒ騾夂衍
         onInternalDragEnd?.()
     }
 
-    // マウスダウン時の伝播を止めて、LibraryGridの範囲選択ロジックが走らないようにする to fix selection clear issue on drag
-    // かつ、未選択アイテムの場合は即座に選択状態にする（ドラッグ開始に間に合わせるため）
+    // 繝槭え繧ｹ繝繧ｦ繝ｳ譎ゅ・莨晄眺繧呈ｭ｢繧√※縲´ibraryGrid縺ｮ遽・峇驕ｸ謚槭Ο繧ｸ繝・け縺瑚ｵｰ繧峨↑縺・ｈ縺・↓縺吶ｋ to fix selection clear issue on drag
+    // 縺九▽縲∵悴驕ｸ謚槭い繧､繝・Β縺ｮ蝣ｴ蜷医・蜊ｳ蠎ｧ縺ｫ驕ｸ謚樒憾諷九↓縺吶ｋ・医ラ繝ｩ繝・げ髢句ｧ九↓髢薙↓蜷医ｏ縺帙ｋ縺溘ａ・・
     const handleMouseDown = (e: React.MouseEvent) => {
-        if (e.button === 0) { // 左クリックのみ
+        if (e.button === 0) { // 蟾ｦ繧ｯ繝ｪ繝・け縺ｮ縺ｿ
             e.stopPropagation()
 
             if (!isSelected) {
-                // 未選択時はここで選択処理を実行
-                // これによりドラッグ開始時には「選択済み」扱いになる
+                // 譛ｪ驕ｸ謚樊凾縺ｯ縺薙％縺ｧ驕ｸ謚槫・逅・ｒ螳溯｡・
+                // 縺薙ｌ縺ｫ繧医ｊ繝峨Λ繝・げ髢句ｧ区凾縺ｫ縺ｯ縲碁∈謚樊ｸ医∩縲肴桶縺・↓縺ｪ繧・
                 onClick(e)
                 mouseDownHandled.current = true
             } else {
-                // 既に選択済みの場合は何もしない（ドラッグ待機）
-                // マウスアップ（クリック）時に選択解除等の処理が走る
+                // 譌｢縺ｫ驕ｸ謚樊ｸ医∩縺ｮ蝣ｴ蜷医・菴輔ｂ縺励↑縺・ｼ医ラ繝ｩ繝・げ蠕・ｩ滂ｼ・
+                // 繝槭え繧ｹ繧｢繝・・・医け繝ｪ繝・け・画凾縺ｫ驕ｸ謚櫁ｧ｣髯､遲峨・蜃ｦ逅・′襍ｰ繧・
                 mouseDownHandled.current = false
             }
         }
     }
 
     const handleClick = (e: React.MouseEvent) => {
-        // MouseDownですでに処理済みの場合はスキップ
+        // MouseDown縺ｧ縺吶〒縺ｫ蜃ｦ逅・ｸ医∩縺ｮ蝣ｴ蜷医・繧ｹ繧ｭ繝・・
         if (mouseDownHandled.current) {
             mouseDownHandled.current = false
             return
         }
         onClick(e)
     }
+
+    const handleThumbnailLoad = () => {
+        setIsLoaded(true)
+        const perf = (window as any).__obscuraRandomPerf
+        if (!perf || perf.firstThumbLogged) return
+        perf.firstThumbLogged = true
+        const elapsed = performance.now() - Number(perf.start || 0)
+        console.log(`[Perf][Random] first thumbnail loaded in ${elapsed.toFixed(1)}ms (mediaId=${media.id})`)
+    }
+
+    const imgLoadingMode: 'eager' | 'lazy' = priorityLoad ? 'eager' : 'lazy'
+    const imgPriorityProps = priorityLoad ? ({ fetchpriority: 'high' } as any) : ({} as any)
 
     return (
         <div
@@ -249,7 +280,7 @@ export function MediaCard({
                     transition: 'background-color 0.3s ease'
                 }}
             >
-                {/* ファイルタイプバッジ（左上） - showExtensionLabelで制御 */}
+                {/* 繝輔ぃ繧､繝ｫ繧ｿ繧､繝励ヰ繝・ず・亥ｷｦ荳奇ｼ・- showExtensionLabel縺ｧ蛻ｶ蠕｡ */}
                 {showExtensionLabel && (
                     <div className="media-card-badge">
                         {getFileExtension()}
@@ -260,9 +291,10 @@ export function MediaCard({
                     <img
                         src={thumbnailUrl}
                         alt={media.file_name}
-                        loading="lazy"
+                        loading={imgLoadingMode}
                         decoding="async"
-                        onLoad={() => setIsLoaded(true)}
+                        {...imgPriorityProps}
+                        onLoad={handleThumbnailLoad}
                         style={{
                             opacity: isLoaded ? 1 : 0,
                             transition: 'opacity 0.3s ease'
@@ -274,15 +306,15 @@ export function MediaCard({
                     </div>
                 )}
             </div>
-            {/* ファイル情報（下部） */}
+            {/* 繝輔ぃ繧､繝ｫ諠・ｱ・井ｸ矩Κ・・*/}
             {hasVisibleInfo && (
                 <div className="media-card-info">
                     {showName && <div className="media-card-title" title={media.file_name}>
                         {isRenaming ? (
                             <textarea
                                 defaultValue={(() => {
-                                    // 拡張子を除いた名前を表示
-                                    // 拡張子を除いた名前を表示
+                                    // 諡｡蠑ｵ蟄舌ｒ髯､縺・◆蜷榊燕繧定｡ｨ遉ｺ
+                                    // 諡｡蠑ｵ蟄舌ｒ髯､縺・◆蜷榊燕繧定｡ｨ遉ｺ
                                     const displayValue = media.title || media.file_name
                                     const lastDotIndex = displayValue.lastIndexOf('.')
                                     if (lastDotIndex > 0) {
@@ -303,7 +335,7 @@ export function MediaCard({
                                     resize: 'none',
                                     overflow: 'hidden',
                                     minHeight: '20px',
-                                    maxHeight: '80px', // 約4行分
+                                    maxHeight: '80px', // 邏・陦悟・
                                     lineHeight: '1.4',
                                     width: '100%',
                                     boxSizing: 'border-box',
@@ -312,7 +344,7 @@ export function MediaCard({
                                 onClick={(e) => e.stopPropagation()}
                                 onFocus={(e) => {
                                     e.target.select()
-                                    // 高さを自動調整
+                                    // 鬮倥＆繧定・蜍戊ｪｿ謨ｴ
                                     e.target.style.height = 'auto'
                                     e.target.style.height = e.target.scrollHeight + 'px'
                                 }}
@@ -328,7 +360,7 @@ export function MediaCard({
                                         return
                                     }
 
-                                    // 拡張子を復元して保存
+                                    // 諡｡蠑ｵ蟄舌ｒ蠕ｩ蜈・＠縺ｦ菫晏ｭ・
                                     const displayValue = media.title || media.file_name
                                     const lastDotIndex = displayValue.lastIndexOf('.')
                                     let newName = baseName
@@ -345,7 +377,7 @@ export function MediaCard({
                                 }}
                                 onKeyDown={(e) => {
                                     if (e.key === 'Enter') {
-                                        e.preventDefault() // 改行を防止
+                                        e.preventDefault() // 謾ｹ陦後ｒ髦ｲ豁｢
                                         e.currentTarget.blur()
                                     } else if (e.key === 'Escape') {
                                         onRenameCancel?.()

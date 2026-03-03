@@ -76,12 +76,12 @@ Exit criteria:
 ## Workstreams
 
 ### WS1 Build and Tooling
-- [ ] Scripts: `tauri:dev`, `tauri:build`.
+- [x] Scripts: `tauri:dev`, `tauri:build`.
 - [ ] CI job for Tauri Windows build.
 - [ ] Artifact naming and release path updates.
 
 ### WS2 Runtime API Surface
-- [ ] Catalog current IPC handlers from `apps/desktop/electron/main.ts` and `preload.cjs`.
+- [x] Catalog current IPC handlers from legacy Electron implementation (completed before removal).
 - [ ] Mark each API as `native-tauri`, `sidecar`, or `defer`.
 - [ ] Implement a typed transport facade on frontend.
 

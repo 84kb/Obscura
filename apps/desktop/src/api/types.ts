@@ -67,7 +67,11 @@ export interface IMediaLibraryAPI {
     openWith(filePath: string): Promise<void>;
     copyFile(filePath: string): Promise<void>;
     copyToClipboard(text: string): Promise<void>;
+    showNotification(options: { title: string; message: string }): void;
+    showMessageBox(options: any): Promise<{ response: number }>;
     renameMedia(mediaId: number, newName: string): Promise<MediaFile | null>;
+    updateMedia(mediaId: number, updates: any): Promise<MediaFile | null>;
+    getSelectedMedia(): Promise<MediaFile[]>;
     updateRating(mediaId: number, rating: number): Promise<void>;
     backfillMetadata(): Promise<number>;
     updateArtist(mediaId: number, artist: string | null): Promise<void>;
@@ -89,7 +93,7 @@ export interface IMediaLibraryAPI {
     renameTagGroup(id: number, newName: string): Promise<void>;
     // ライブラリ管理
     refreshLibrary(): Promise<boolean>;
-    onRefreshProgress(callback: (current: number, total: number) => void): void;
+    onRefreshProgress(callback: (current: number, total: number) => void): () => void;
     updateTagGroup(tagId: number, groupId: number | null): Promise<void>;
     getAuditLogs(libraryPath?: string): Promise<AuditLogEntry[]>;
 
@@ -121,6 +125,9 @@ export interface IMediaLibraryAPI {
     // クライアント設定
     getClientConfig(): Promise<ClientConfig>;
     updateClientConfig(updates: Partial<ClientConfig>): Promise<ClientConfig>;
+    getPluginScripts(): Promise<any[]>;
+    installPlugin(): Promise<{ installed?: string[]; skipped?: string[]; error?: string }>;
+    uninstallPlugin(pluginId: string): Promise<{ success: boolean; error?: string }>;
     selectDownloadDirectory(): Promise<string | null>;
     testConnection(url: string, token: string): Promise<{ success: boolean; message?: string; libraryName?: string }>;
     addRemoteLibrary(name: string, url: string, token: string): Promise<any>;
@@ -138,6 +145,7 @@ export interface IMediaLibraryAPI {
     addRemoteMediaParent(url: string, token: string, childId: number, parentId: number): Promise<void>;
     removeRemoteMediaParent(url: string, token: string, childId: number, parentId: number): Promise<void>;
     searchRemoteMediaFiles(url: string, token: string, query: string, targets?: any): Promise<{ id: number; file_name: string; title?: string; thumbnail_path?: string | null }[]>;
+    updateRemoteProfile(url: string, token: string, nickname: string, iconUrl?: string): Promise<{ success: boolean; message?: string }>;
 
     syncRemoteLibrary(url: string, token: string, remoteId: string): Promise<{ success: boolean; message?: string }>;
     getRemoteCachePath(remoteId: string): Promise<string | null>;
@@ -170,6 +178,13 @@ export interface IMediaLibraryAPI {
     // Discord RPC
     updateDiscordActivity(activity: any): Promise<void>;
     clearDiscordActivity(): Promise<void>;
+
+    // Plugin system
+    pluginFetch(url: string, options?: any): Promise<{ ok: boolean; status: number; statusText: string; data?: any; error?: boolean }>;
+    savePluginMediaData(mediaId: number, pluginId: string, data: any): Promise<boolean>;
+    loadPluginMediaData(mediaId: number, pluginId: string): Promise<any>;
+    saveAssociatedData(mediaFilePath: string, data: any): Promise<boolean>;
+    loadAssociatedData(mediaFilePath: string): Promise<any>;
 
     getAuditLogs(libraryPath: string): Promise<any[]>;
 

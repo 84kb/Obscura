@@ -31,14 +31,6 @@ export function LibraryModal({ onClose, onCreateLibrary, onOpenLibrary }: Librar
         e.preventDefault()
         if (!libraryName.trim()) return
 
-        // Electron APIの確認
-        /*
-        if (!window.electronAPI) {
-            setError('この機能はElectronアプリでのみ利用可能です。ブラウザではなく、Electronウィンドウを使用してください。')
-            return
-        }
-        */
-
         setIsCreating(true)
         setError(null)
         try {

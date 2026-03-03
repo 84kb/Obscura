@@ -95,6 +95,13 @@ export class AndroidAdapter implements IMediaLibraryAPI {
 
     async getClientConfig(): Promise<ClientConfig> { throw new Error('Not implemented'); }
     async updateClientConfig(_updates: Partial<ClientConfig>): Promise<ClientConfig> { throw new Error('Not implemented'); }
+    async getPluginScripts(): Promise<any[]> { return []; }
+    async installPlugin(): Promise<{ installed?: string[]; skipped?: string[]; error?: string }> {
+        return { installed: [], skipped: [], error: 'Not supported on Android' };
+    }
+    async uninstallPlugin(_pluginId: string): Promise<{ success: boolean; error?: string }> {
+        return { success: false, error: 'Not supported on Android' };
+    }
 
     async testConnection(_url: string, _token: string): Promise<any> { }
     async addRemoteLibrary(_name: string, _url: string, _token: string): Promise<any> { }
@@ -111,6 +118,7 @@ export class AndroidAdapter implements IMediaLibraryAPI {
     async addRemoteMediaParent(_url: string, _token: string, _childId: number, _parentId: number): Promise<void> { }
     async removeRemoteMediaParent(_url: string, _token: string, _childId: number, _parentId: number): Promise<void> { }
     async searchRemoteMediaFiles(_url: string, _token: string, _query: string, _options?: any): Promise<any[]> { return []; }
+    async updateRemoteProfile(_url: string, _token: string, _nickname: string, _iconUrl?: string): Promise<{ success: boolean; message?: string }> { return { success: false }; }
     async syncRemoteLibrary(_url: string, _token: string, _remoteId: string): Promise<{ success: boolean; message?: string }> { return { success: false }; }
     async getRemoteCachePath(_remoteId: string): Promise<string | null> { return null; }
 
@@ -120,8 +128,12 @@ export class AndroidAdapter implements IMediaLibraryAPI {
     async openWith(_filePath: string): Promise<void> { }
     async copyFile(_filePath: string): Promise<void> { }
     async copyToClipboard(_text: string): Promise<void> { }
+    showNotification(_options: { title: string; message: string }): void { }
+    async showMessageBox(_options: any): Promise<{ response: number }> { return { response: 0 }; }
     async copyFileToClipboard(_filePath: string): Promise<boolean> { return false; }
     async startDrag(_filePaths: string[]): Promise<void> { }
+    async updateMedia(_mediaId: number, _updates: any): Promise<MediaFile | null> { return null; }
+    async getSelectedMedia(): Promise<MediaFile[]> { return []; }
 
     async checkForUpdates(): Promise<any> { return { available: false }; }
     async downloadUpdate(): Promise<any> { }
@@ -136,6 +148,13 @@ export class AndroidAdapter implements IMediaLibraryAPI {
 
     async updateDiscordActivity(_activity: any): Promise<void> { }
     async clearDiscordActivity(): Promise<void> { }
+    async pluginFetch(_url: string, _options?: any): Promise<{ ok: boolean; status: number; statusText: string; data?: any; error?: boolean }> {
+        return { ok: false, status: 0, statusText: 'Not supported', error: true };
+    }
+    async savePluginMediaData(_mediaId: number, _pluginId: string, _data: any): Promise<boolean> { return false; }
+    async loadPluginMediaData(_mediaId: number, _pluginId: string): Promise<any> { return null; }
+    async saveAssociatedData(_mediaFilePath: string, _data: any): Promise<boolean> { return false; }
+    async loadAssociatedData(_mediaFilePath: string): Promise<any> { return null; }
 
     async getFFmpegInfo(): Promise<any> { return {}; }
     async checkFFmpegUpdate(): Promise<any> { return {}; }

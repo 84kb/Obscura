@@ -1,11 +1,11 @@
-import { IMediaLibraryAPI } from './types';
+﻿import { IMediaLibraryAPI } from './types';
 import {
     Library, MediaFile, Tag, TagGroup, Folder, MediaComment,
     AuditLogEntry, ServerConfig, SharedUser, ClientConfig, LibraryTransferSettings
 } from '@obscura/core';
 
-export class ElectronAdapter implements IMediaLibraryAPI {
-    private api = window.electronAPI;
+export class DesktopAdapter implements IMediaLibraryAPI {
+    private api = (window as any).obscuraAPI;
 
     async selectFile(options?: any): Promise<string | null> {
         return this.api.selectFile(options);
@@ -211,8 +211,24 @@ export class ElectronAdapter implements IMediaLibraryAPI {
         return this.api.copyToClipboard(text);
     }
 
+    showNotification(options: { title: string; message: string }): void {
+        this.api.showNotification(options);
+    }
+
+    async showMessageBox(options: any): Promise<{ response: number }> {
+        return this.api.showMessageBox(options);
+    }
+
     async renameMedia(mediaId: number, newName: string): Promise<MediaFile | null> {
         return this.api.renameMedia(mediaId, newName);
+    }
+
+    async updateMedia(mediaId: number, updates: any): Promise<MediaFile | null> {
+        return this.api.updateMedia(mediaId, updates);
+    }
+
+    async getSelectedMedia(): Promise<MediaFile[]> {
+        return this.api.getSelectedMedia();
     }
 
     async updateRating(mediaId: number, rating: number): Promise<void> {
@@ -245,10 +261,10 @@ export class ElectronAdapter implements IMediaLibraryAPI {
 
     async searchMediaFiles(query: string): Promise<{ id: number; file_name: string; title?: string; thumbnail_path?: string | null }[]> {
         return this.api.searchMediaFiles(query); // Argument mismatch in original implementation? Types say (query) in searchMediaFiles, but preload has (query, targets) as well? Let's check type definition.
-        // ElectronAPI says: searchMediaFiles: (query: string) => ...
+        // DesktopAPI says: searchMediaFiles: (query: string) => ...
         // Preload says: searchMediaFiles: (query, targets) => ipcRenderer.invoke('search-media-files', query, targets)
         // Main says: ipcMain.handle('search-media-files', query, targets) ... (Not shown in main.ts view, but inferred)
-        // src/types/index.ts ElectronAPI says `searchMediaFiles: (query: string) => ...`
+        // src/types/index.ts DesktopAPI says `searchMediaFiles: (query: string) => ...`
         // So I will stick to the interface definition for now.
     }
 
@@ -284,8 +300,8 @@ export class ElectronAdapter implements IMediaLibraryAPI {
         return this.api.refreshLibrary();
     }
 
-    onRefreshProgress(callback: (current: number, total: number) => void): void {
-        this.api.onRefreshProgress(callback);
+    onRefreshProgress(callback: (current: number, total: number) => void): () => void {
+        return this.api.onRefreshProgress(callback);
     }
 
     async updateTagGroup(tagId: number, groupId: number | null): Promise<void> {
@@ -360,6 +376,18 @@ export class ElectronAdapter implements IMediaLibraryAPI {
         return this.api.updateClientConfig(updates);
     }
 
+    async getPluginScripts(): Promise<any[]> {
+        return this.api.getPluginScripts();
+    }
+
+    async installPlugin(): Promise<{ installed?: string[]; skipped?: string[]; error?: string }> {
+        return this.api.installPlugin();
+    }
+
+    async uninstallPlugin(pluginId: string): Promise<{ success: boolean; error?: string }> {
+        return this.api.uninstallPlugin(pluginId);
+    }
+
     async selectDownloadDirectory(): Promise<string | null> {
         return this.api.selectDownloadDirectory();
     }
@@ -421,16 +449,16 @@ export class ElectronAdapter implements IMediaLibraryAPI {
     }
 
     async searchRemoteMediaFiles(url: string, token: string, query: string, targets?: any): Promise<{ id: number; file_name: string; title?: string; thumbnail_path?: string | null }[]> {
-        return await window.electronAPI.searchRemoteMediaFiles(url, token, query, targets);
+        return await this.api.searchRemoteMediaFiles(url, token, query, targets);
     }
 
     // Remote Cache Sync
     async syncRemoteLibrary(url: string, token: string, remoteId: string): Promise<{ success: boolean; message?: string }> {
-        return await window.electronAPI.syncRemoteLibrary(url, token, remoteId);
+        return await this.api.syncRemoteLibrary(url, token, remoteId);
     }
 
     async getRemoteCachePath(remoteId: string): Promise<string | null> {
-        return await window.electronAPI.getRemoteCachePath(remoteId);
+        return await this.api.getRemoteCachePath(remoteId);
     }
 
     async updateRemoteProfile(url: string, token: string, nickname: string, iconUrl?: string): Promise<{ success: boolean; message?: string }> {
@@ -501,6 +529,26 @@ export class ElectronAdapter implements IMediaLibraryAPI {
         return this.api.clearDiscordActivity();
     }
 
+    async pluginFetch(url: string, options?: any): Promise<{ ok: boolean; status: number; statusText: string; data?: any; error?: boolean }> {
+        return this.api.pluginFetch(url, options);
+    }
+
+    async savePluginMediaData(mediaId: number, pluginId: string, data: any): Promise<boolean> {
+        return this.api.savePluginMediaData(mediaId, pluginId, data);
+    }
+
+    async loadPluginMediaData(mediaId: number, pluginId: string): Promise<any> {
+        return this.api.loadPluginMediaData(mediaId, pluginId);
+    }
+
+    async saveAssociatedData(mediaFilePath: string, data: any): Promise<boolean> {
+        return this.api.saveAssociatedData(mediaFilePath, data);
+    }
+
+    async loadAssociatedData(mediaFilePath: string): Promise<any> {
+        return this.api.loadAssociatedData(mediaFilePath);
+    }
+
     async getAudioDevices(): Promise<{ name: string; description: string }[]> {
         return this.api.getAudioDevices();
     }
@@ -537,3 +585,4 @@ export class ElectronAdapter implements IMediaLibraryAPI {
         return this.api.setAudioVolume(volume);
     }
 }
+

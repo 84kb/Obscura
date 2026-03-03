@@ -24,7 +24,6 @@
     },
     "include": [
         "apps/*/src",
-        "apps/*/electron",
         "packages/*/src"
     ],
     "references": [

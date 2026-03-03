@@ -74,6 +74,7 @@ export function LibraryGrid({
         };
     }, []);
 
+
     const setContainerRef = (node: HTMLDivElement | null) => {
         containerRef.current = node;
 
@@ -395,6 +396,8 @@ export function LibraryGrid({
         };
     }, [dragStart]);
 
+    const { itemWidth, itemHeight, cellWidth, columnCount } = getLayoutInfo();
+
     if (mediaFiles.length === 0) {
         return (
             <div className="library-empty">
@@ -425,8 +428,6 @@ export function LibraryGrid({
             height={Math.abs(dragStart.y - dragEnd.y)}
         />
     );
-
-    const { itemWidth, itemHeight, cellWidth, columnCount } = getLayoutInfo();
 
     const handleDragGetPaths = (draggedIdStr: string) => {
         const draggedId = Number(draggedIdStr) // ID型変換 (string -> number)
@@ -459,7 +460,7 @@ export function LibraryGrid({
             <VGrid
                 ref={gridRef}
                 id="library-vgrid-container"
-                key={`${gridSize}-${columnCount}-${containerSize.width}-${mediaFiles.length}-${mediaFiles[0]?.id || 'empty'}`}
+                key={`${gridSize}-${columnCount}-${containerSize.width}-${mediaFiles.length}`}
                 onScroll={(scrollTop: number) => {
                     // Calculate and store the index of the item at the top of the viewport
                     // scrollTop = PADDING + rowIndex * (itemHeight + GAP)
@@ -519,6 +520,7 @@ export function LibraryGrid({
                                 onRenameSubmit={(newName) => onRenameSubmit?.(media.id, newName)}
                                 onRenameCancel={onRenameCancel}
                                 onDragGetPaths={handleDragGetPaths}
+                                priorityLoad={index < columnCount * 2}
                             />
                         </div>
                     );

@@ -23,8 +23,11 @@ import './styles/index.css'
 import './styles/drag-overlay.css'
 import { LoadingOverlay } from './components/LoadingOverlay'
 import { getAuthHeaders, getAuthQuery } from './utils/auth'
+import { toMediaUrl } from './utils/fileUrl'
 import { api } from './api'
 import { initializePluginSystem, loadPluginScripts } from './api/plugin-system'
+
+const ENABLE_RANDOM_THUMB_PREFETCH = false
 
 const DEFAULT_SETTINGS: AppSettings = {
     autoPlay: true,
@@ -122,28 +125,46 @@ function AppContent() {
     // サイドバーのアイテム数計算
     const sidebarCounts = useMemo(() => {
         const counts: { [key: string]: number } = {}
-        // allMediaFilesがまだロードされていない場合は空を返す
         if (!allMediaFiles) return counts
 
-        const activeFiles = allMediaFiles.filter(m => !m.is_deleted)
-        const trashFiles = allMediaFiles.filter(m => m.is_deleted)
+        let activeCount = 0
+        let trashCount = 0
+        let uncategorizedCount = 0
+        let untaggedCount = 0
 
-        counts['all'] = activeFiles.length
-        counts['trash'] = trashFiles.length
-        counts['uncategorized'] = activeFiles.filter(m => !m.folders || m.folders.length === 0).length
-        counts['untagged'] = activeFiles.filter(m => !m.tags || m.tags.length === 0).length
-        counts['tags'] = tags.length // タグの総数
+        const folderCounts = new Map<number, number>()
+        for (const f of folders) folderCounts.set(f.id, 0)
 
+        for (const media of allMediaFiles) {
+            if (media.is_deleted) {
+                trashCount += 1
+                continue
+            }
 
-        // Folders (activeFiles の中からカウント)
-        folders.forEach(f => {
-            counts[`folder-${f.id}`] = activeFiles.filter(m => m.folders?.some(mf => mf.id === f.id)).length
-        })
+            activeCount += 1
+            if (!media.folders || media.folders.length === 0) uncategorizedCount += 1
+            if (!media.tags || media.tags.length === 0) untaggedCount += 1
+
+            for (const mf of media.folders || []) {
+                if (!folderCounts.has(mf.id)) continue
+                folderCounts.set(mf.id, (folderCounts.get(mf.id) || 0) + 1)
+            }
+        }
+
+        counts['all'] = activeCount
+        counts['trash'] = trashCount
+        counts['uncategorized'] = uncategorizedCount
+        counts['untagged'] = untaggedCount
+        counts['tags'] = tags.length
+        for (const f of folders) {
+            counts[`folder-${f.id}`] = folderCounts.get(f.id) || 0
+        }
 
         return counts
     }, [allMediaFiles, folders, tags])
 
     const { addNotification, removeNotification, updateProgress } = useNotification()
+    const prefetchedRandomThumbsRef = useRef<Set<string>>(new Set())
 
 
     // Socket.io 接続 (リモートライブラリ選択時のみ)
@@ -154,47 +175,135 @@ function AppContent() {
         accessToken: activeRemoteLibrary?.token
     })
 
-
-    // データ読み込み (ライブラリ切り替え時などに再実行)
+    // Perf marker for random tab switch diagnostics.
     useEffect(() => {
+        if (filterOptions.filterType !== 'random') {
+            delete (window as any).__obscuraRandomPerf
+            return
+        }
+        const start = performance.now()
+        ; (window as any).__obscuraRandomPerf = {
+            start,
+            listReadyLogged: false,
+            firstThumbLogged: false,
+            prefetchStarted: false,
+            firstThumbRequestLogged: false,
+        }
+        console.log(`[Perf][Random] switch start t=${start.toFixed(1)}ms`)
+    }, [filterOptions.filterType])
+
+    useEffect(() => {
+        if (filterOptions.filterType !== 'random') return
+        if (!mediaFiles || mediaFiles.length === 0) return
+        const perf = (window as any).__obscuraRandomPerf
+        if (!perf || perf.listReadyLogged) return
+        perf.listReadyLogged = true
+        const elapsed = performance.now() - Number(perf.start || 0)
+        console.log(`[Perf][Random] list ready in ${elapsed.toFixed(1)}ms (items=${mediaFiles.length})`)
+    }, [filterOptions.filterType, mediaFiles.length])
+
+    // Random tab thumbnail prefetch (delayed sequential) to smooth UI load.
+    useEffect(() => {
+        if (!ENABLE_RANDOM_THUMB_PREFETCH) return
+        if (filterOptions.filterType !== 'random') return
+        if (!mediaFiles || mediaFiles.length === 0) return
+
+        const candidates = mediaFiles
+            .slice(0, 140)
+            .map(m => m.thumbnail_path)
+            .filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
+
+        if (candidates.length === 0) return
+        const perf = (window as any).__obscuraRandomPerf
+        if (perf?.prefetchStarted) return
+        if (perf) perf.prefetchStarted = true
+        console.log(`[Perf][Random] prefetch queue start (count=${candidates.length})`)
+
+        let cancelled = false
+        const DELAY_MS = 90
+        let loadedCount = 0
+
+        const loadOne = (rawPath: string) => {
+            const base = toMediaUrl(rawPath)
+            const separator = base.includes('?') ? '&' : '?'
+            const isServerThumb = /\/api\/thumbnails\//.test(base)
+            const url = isServerThumb ? `${base}${separator}width=320` : base
+            if (prefetchedRandomThumbsRef.current.has(url)) return
+            prefetchedRandomThumbsRef.current.add(url)
+
+            void new Promise<void>((resolve) => {
+                const img = new Image()
+                let settled = false
+                const done = () => {
+                    if (settled) return
+                    settled = true
+                    resolve()
+                }
+                img.onload = done
+                img.onerror = done
+                img.src = url
+                // Do not block queue by a slow first request.
+                setTimeout(done, 1200)
+            })
+                .finally(() => {
+                    loadedCount += 1
+                    if (loadedCount === 1 || loadedCount % 20 === 0) {
+                        const perfNow = (window as any).__obscuraRandomPerf
+                        const elapsed = perfNow ? performance.now() - Number(perfNow.start || 0) : 0
+                        console.log(`[Perf][Random] prefetched ${loadedCount}/${candidates.length} (${elapsed.toFixed(1)}ms)`)
+                    }
+                })
+        }
+
+        const runSequential = async () => {
+            for (let i = 0; i < candidates.length; i += 1) {
+                if (cancelled) return
+                loadOne(candidates[i])
+                if (cancelled) return
+                await new Promise<void>((resolve) => {
+                    setTimeout(() => resolve(), DELAY_MS)
+                })
+            }
+        }
+
+        void runSequential()
+        return () => { cancelled = true }
+    }, [filterOptions.filterType, mediaFiles])
+
+
+    // リモート接続時のみ初期同期を実行
+    useEffect(() => {
+        if (!activeRemoteLibrary) return
+
         const loadAll = async () => {
             try {
-                // リモートライブラリの場合は接続確認してから読み込み
-                if (activeRemoteLibrary) {
-                    if (!myUserToken) {
-                        console.log('[App] Waiting for user token before connecting to remote library...')
-                        return
-                    }
-                    const { waitForRemoteConnection } = await import('./utils/remoteHealth')
-                    const connectedUrl = await waitForRemoteConnection(activeRemoteLibrary, myUserToken)
+                if (!myUserToken) {
+                    console.log('[App] Waiting for user token before connecting to remote library...')
+                    return
+                }
+                const { waitForRemoteConnection } = await import('./utils/remoteHealth')
+                const connectedUrl = await waitForRemoteConnection(activeRemoteLibrary, myUserToken)
 
-                    if (!connectedUrl) {
-                        alert(`リモートライブラリ "${activeRemoteLibrary.name}" への接続に失敗しました。\nサーバーが起動していないか、ネットワークに問題があります。`)
-                        return
-                    }
+                if (!connectedUrl) {
+                    alert(`リモートライブラリ "${activeRemoteLibrary.name}" への接続に失敗しました。\nサーバーが起動していないか、ネットワークに問題があります。`)
+                    return
+                }
 
-                    // URLが正規化（プロトコル変更など）された場合は更新
-                    const originalUrl = activeRemoteLibrary.url.replace(/\/$/, '')
-                    const newUrl = connectedUrl.replace(/\/$/, '')
-
-                    if (originalUrl !== newUrl) {
-                        console.log(`[App] Protocol switch detected: ${originalUrl} -> ${newUrl} `)
-                        const updatedLib = { ...activeRemoteLibrary, url: newUrl }
-                        await switchToRemoteLibrary(updatedLib)
-                    }
+                const originalUrl = activeRemoteLibrary.url.replace(/\/$/, '')
+                const newUrl = connectedUrl.replace(/\/$/, '')
+                if (originalUrl !== newUrl) {
+                    console.log(`[App] Protocol switch detected: ${originalUrl} -> ${newUrl} `)
+                    const updatedLib = { ...activeRemoteLibrary, url: newUrl }
+                    await switchToRemoteLibrary(updatedLib)
                 }
 
                 await refreshLibrary()
-                await loadFolders()
-                // 他のデータも必要に応じて
             } catch (e: any) {
-                if (activeRemoteLibrary) {
-                    alert(`リモートライブラリ "${activeRemoteLibrary.name}" への接続に失敗しました。\nサーバーが起動していないか、ネットワークに問題があります。`)
-                }
+                alert(`リモートライブラリ "${activeRemoteLibrary.name}" への接続に失敗しました。\nサーバーが起動していないか、ネットワークに問題があります。`)
             }
         }
         loadAll()
-    }, [refreshLibrary, loadFolders, activeRemoteLibrary, myUserToken, switchToRemoteLibrary])
+    }, [refreshLibrary, activeRemoteLibrary, myUserToken, switchToRemoteLibrary])
 
     // Socketイベントハンドリング
     useEffect(() => {
@@ -245,7 +354,7 @@ function AppContent() {
             // In ElectronAdapter: this.api.on(channel, func)
             // Default electronAPI.on passes (event, ...args).
             // So existing code: (data) => ... seems wrong if it receives event first?
-            // Let's assume api.on behaves same as window.electronAPI.on
+            // Let's assume api.on behaves same as api.on
             if (data && data.id && typeof data.progress === 'number') {
                 updateProgress(data.id, data.progress)
             }
@@ -411,6 +520,8 @@ function AppContent() {
     const [isDragging, setIsDragging] = useState(false)
     const isInternalDrag = useRef(false)
     const dragCounter = useRef(0)
+    const dragOverlayHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const lastDragActivityAt = useRef(0)
     const [gridSize, setGridSize] = useState<number>(settings.gridSize)
     const [viewMode, setViewMode] = useState<'grid' | 'list'>(settings.viewMode)
 
@@ -439,8 +550,31 @@ function AppContent() {
 
     // ドラッグ＆ドロップ状態のグローバル管理
     useEffect(() => {
+        const clearDragOverlayHideTimer = () => {
+            if (dragOverlayHideTimer.current) {
+                clearTimeout(dragOverlayHideTimer.current)
+                dragOverlayHideTimer.current = null
+            }
+        }
+
+        const scheduleDragOverlayHide = (delayMs = 250) => {
+            clearDragOverlayHideTimer()
+            dragOverlayHideTimer.current = setTimeout(() => {
+                dragCounter.current = 0
+                setIsDragging(false)
+                document.body.classList.remove('dragging-file')
+                isInternalDrag.current = false
+            }, delayMs)
+        }
+
+        const markDragActivity = () => {
+            lastDragActivityAt.current = Date.now()
+        }
+
         const handleGlobalDragEnter = (e: DragEvent) => {
             e.preventDefault()
+            clearDragOverlayHideTimer()
+            markDragActivity()
             dragCounter.current++
             console.log('[Global D&D] DragEnter:', dragCounter.current, 'isInternal:', isInternalDrag.current)
 
@@ -462,6 +596,8 @@ function AppContent() {
 
         const handleGlobalDragOver = (e: DragEvent) => {
             e.preventDefault()
+            clearDragOverlayHideTimer()
+            markDragActivity()
             if (e.dataTransfer) {
                 e.dataTransfer.dropEffect = 'copy'
             }
@@ -477,16 +613,13 @@ function AppContent() {
 
         const handleGlobalDragLeave = (e: DragEvent) => {
             e.preventDefault()
+            markDragActivity()
             dragCounter.current--
             console.log('[Global D&D] DragLeave:', dragCounter.current)
 
             if (dragCounter.current <= 0) {
                 dragCounter.current = 0
-                if (isDraggingRef.current) {
-                    console.log('[Global D&D] Hiding overlay')
-                    setIsDragging(false)
-                    document.body.classList.remove('dragging-file')
-                }
+                scheduleDragOverlayHide(80)
             }
         }
 
@@ -498,8 +631,10 @@ function AppContent() {
 
             // 状態リセット
             dragCounter.current = 0
+            markDragActivity()
             setIsDragging(false)
             document.body.classList.remove('dragging-file')
+            clearDragOverlayHideTimer()
             // Drop後に確実にリセット
             isInternalDrag.current = false
 
@@ -515,7 +650,9 @@ function AppContent() {
             }
 
             const files = Array.from(e.dataTransfer?.files || [])
-            const filePaths = files.map(file => (file as any).path)
+            const filePaths = files
+                .map(file => (file as any).path)
+                .filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
             console.log('[Global D&D] Global Dropped paths:', filePaths)
 
             // ライブラリに既に存在するファイルを除外（内部ドラッグの誤検出対策）
@@ -544,9 +681,11 @@ function AppContent() {
         const handleGlobalDragEnd = () => {
             console.log('[Global D&D] Global DragEnd')
             dragCounter.current = 0
+            markDragActivity()
             setIsDragging(false)
             // isInternalDrag.current = false // DELETE: ネイティブドラッグ開始時に誤って呼ばれる可能性大
             document.body.classList.remove('dragging-file')
+            clearDragOverlayHideTimer()
         }
 
         const handleMouseDown = () => {
@@ -556,6 +695,7 @@ function AppContent() {
                 setIsDragging(false)
                 isInternalDrag.current = false
                 document.body.classList.remove('dragging-file')
+                clearDragOverlayHideTimer()
             }
         }
 
@@ -572,8 +712,14 @@ function AppContent() {
                     dragCounter.current = 0
                     setIsDragging(false)
                     document.body.classList.remove('dragging-file')
+                    clearDragOverlayHideTimer()
                 }, 500)
             }
+        }
+
+        const handleWindowBlur = () => {
+            markDragActivity()
+            scheduleDragOverlayHide(0)
         }
 
         // 基本的に capture: true で preventDefault を確実に行う
@@ -587,6 +733,7 @@ function AppContent() {
         window.addEventListener('dragend', handleGlobalDragEnd, { capture: false })
         window.addEventListener('mousedown', handleMouseDown, { capture: false })
         window.addEventListener('focus', handleFocusReset)
+        window.addEventListener('blur', handleWindowBlur)
 
         return () => {
             window.removeEventListener('dragenter', handleGlobalDragEnter, { capture: false })
@@ -596,8 +743,24 @@ function AppContent() {
             window.removeEventListener('dragend', handleGlobalDragEnd, { capture: false })
             window.removeEventListener('mousedown', handleMouseDown, { capture: false })
             window.removeEventListener('focus', handleFocusReset)
+            window.removeEventListener('blur', handleWindowBlur)
+            clearDragOverlayHideTimer()
         }
     }, [importMedia])
+
+    useEffect(() => {
+        if (!isDragging) return
+        const timer = setInterval(() => {
+            const idleMs = Date.now() - (lastDragActivityAt.current || 0)
+            if (idleMs > 450) {
+                dragCounter.current = 0
+                setIsDragging(false)
+                document.body.classList.remove('dragging-file')
+                isInternalDrag.current = false
+            }
+        }, 120)
+        return () => clearInterval(timer)
+    }, [isDragging])
 
     useEffect(() => {
         const handleTriggerImport = (_: any, filePaths: string[]) => {
@@ -612,11 +775,14 @@ function AppContent() {
             }
 
             // Refを使用して最新の状態を確認
-            if ((hasActiveLibraryRef.current || activeRemoteLibraryRef.current) && filePaths.length > 0) {
+            const safeFilePaths = (Array.isArray(filePaths) ? filePaths : [])
+                .filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
+
+            if ((hasActiveLibraryRef.current || activeRemoteLibraryRef.current) && safeFilePaths.length > 0) {
                 // ライブラリに既に存在するファイルを除外（重複防止の安全策）
                 const normalizePath = (p: string) => p.replace(/\\/g, '/').toLowerCase()
                 const existingPaths = new Set(allMediaFilesRef.current.map(m => normalizePath(m.file_path)))
-                const newFilePaths = filePaths.filter(p => {
+                const newFilePaths = safeFilePaths.filter(p => {
                     const normalized = normalizePath(p)
                     return !existingPaths.has(normalized)
                 })
@@ -659,6 +825,9 @@ function AppContent() {
         let unsubscribeAutoImport: (() => void) | undefined
         let unsubscribeAutoImportCollision: (() => void) | undefined
         let unsubscribeExportProgress: (() => void) | undefined
+        let unsubscribeNativeDragOver: (() => void) | undefined
+        let unsubscribeNativeDragCancel: (() => void) | undefined
+        let unsubscribeNativeDragDrop: (() => void) | undefined
 
         if (api && api.on) {
             unsubscribeTrigger = api.on('trigger-import', (_e: any, filePaths: string[]) => handleTriggerImport(null, filePaths))
@@ -670,6 +839,25 @@ function AppContent() {
                     updateProgress(data.id, data.progress)
                 }
             })
+            unsubscribeNativeDragOver = api.on('native-file-drag-over', () => {
+                lastDragActivityAt.current = Date.now()
+                if (!isInternalDrag.current) {
+                    setIsDragging(true)
+                    document.body.classList.add('dragging-file')
+                }
+            })
+            unsubscribeNativeDragCancel = api.on('native-file-drag-cancel', () => {
+                lastDragActivityAt.current = Date.now()
+                dragCounter.current = 0
+                setIsDragging(false)
+                document.body.classList.remove('dragging-file')
+            })
+            unsubscribeNativeDragDrop = api.on('native-file-drag-drop', () => {
+                lastDragActivityAt.current = Date.now()
+                dragCounter.current = 0
+                setIsDragging(false)
+                document.body.classList.remove('dragging-file')
+            })
         }
 
         // クリーンアップ
@@ -678,6 +866,9 @@ function AppContent() {
             if (unsubscribeAutoImport) unsubscribeAutoImport()
             if (unsubscribeAutoImportCollision) unsubscribeAutoImportCollision()
             if (unsubscribeExportProgress) unsubscribeExportProgress()
+            if (unsubscribeNativeDragOver) unsubscribeNativeDragOver()
+            if (unsubscribeNativeDragCancel) unsubscribeNativeDragCancel()
+            if (unsubscribeNativeDragDrop) unsubscribeNativeDragDrop()
         }
     }, [importMedia, refreshLibrary, addNotification])
 
@@ -777,7 +968,7 @@ function AppContent() {
                     // ニックネームが未設定の場合、ローカルのニックネームが設定されていれば自動同期
                     if (!profile.nickname && clientConfig?.nickname) {
                         console.log(`[App] Auto-syncing profile to remote library: ${activeRemoteLibrary.name}`)
-                        await (window.electronAPI as any).updateRemoteProfile(
+                        await (api as any).updateRemoteProfile(
                             activeRemoteLibrary.url,
                             activeRemoteLibrary.token,
                             clientConfig.nickname,
@@ -941,21 +1132,21 @@ function AppContent() {
 
     const handleOpenDefault = async () => {
         if (contextMenu?.media) {
-            await window.electronAPI.openPath(contextMenu.media.file_path)
+            await api.openPath(contextMenu.media.file_path)
         }
         closeContextMenu()
     }
 
     const handleOpenWith = async () => {
         if (contextMenu?.media) {
-            await window.electronAPI.openWith(contextMenu.media.file_path)
+            await api.openWith(contextMenu.media.file_path)
         }
         closeContextMenu()
     }
 
     const handleShowInExplorer = async () => {
         if (contextMenu?.media) {
-            await window.electronAPI.showItemInFolder(contextMenu.media.file_path)
+            await api.showItemInFolder(contextMenu.media.file_path)
         }
         closeContextMenu()
     }
@@ -973,7 +1164,7 @@ function AppContent() {
         })
 
         try {
-            const result = await window.electronAPI.exportMedia(media.id, { notificationId })
+            const result = await api.exportMedia(media.id, { notificationId })
 
             // 完了したら通知を削除
             removeNotification(notificationId)
@@ -1047,7 +1238,7 @@ function AppContent() {
                 const filePaths = filesToTransfer.map(f => f.file_path)
 
                 // アップロード実行 (メタデータ付き)
-                const result = await window.electronAPI.uploadRemoteMedia(
+                const result = await api.uploadRemoteMedia(
                     remoteLib.url,
                     remoteLib.token,
                     filePaths,
@@ -1087,8 +1278,8 @@ function AppContent() {
         // 以下、ローカル転送処理 (既存)
         // クライアント設定から転送設定を取得
         let config: ClientConfig | null = null
-        if (window.electronAPI) {
-            config = await (window.electronAPI as any).getClientConfig()
+        if (api) {
+            config = await (api as any).getClientConfig()
         }
 
         const settings = config?.libraryTransferSettings || {
@@ -1114,7 +1305,7 @@ function AppContent() {
         })
 
         try {
-            const result = await window.electronAPI.copyMediaToLibrary(targetMediaIds, libraryId, settings, { notificationId })
+            const result = await api.copyMediaToLibrary(targetMediaIds, libraryId, settings, { notificationId })
 
             removeNotification(notificationId)
 
@@ -1154,7 +1345,9 @@ function AppContent() {
     const handleDropOnFolder = async (folderId: number, files: FileList) => {
         if (!files || files.length === 0) return
 
-        const filePaths = Array.from(files).map(f => (f as any).path)
+        const filePaths = Array.from(files)
+            .map(f => (f as any).path)
+            .filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
 
         if (isInternalDrag.current) {
             // 内部ドラッグ：既存のメディアファイルを特定して追加
@@ -1192,14 +1385,14 @@ function AppContent() {
 
     const handleCopy = async () => {
         if (contextMenu?.media) {
-            await window.electronAPI.copyFile(contextMenu.media.file_path)
+            await api.copyFile(contextMenu.media.file_path)
         }
         closeContextMenu()
     }
 
     const handleCopyPath = async () => {
         if (contextMenu?.media) {
-            await window.electronAPI.copyToClipboard(contextMenu.media.file_path)
+            await api.copyToClipboard(contextMenu.media.file_path)
         }
         closeContextMenu()
     }
@@ -1234,7 +1427,7 @@ function AppContent() {
                 // Future: Remote API call
                 throw new Error('リモートライブラリの個別更新はまだサポートされていません')
             } else {
-                await window.electronAPI.refreshMediaMetadata(targetIds)
+                await api.refreshMetadata(targetIds)
             }
 
             removeNotification(notificationId)
@@ -1283,8 +1476,8 @@ function AppContent() {
         if (activeRemoteLibrary) {
             await api.addRemoteMediaParent(activeRemoteLibrary.url, activeRemoteLibrary.token, childId, parentId)
             reloadLibrary()
-        } else if (window.electronAPI) {
-            await (window.electronAPI as any).addMediaParent(childId, parentId)
+        } else if (api) {
+            await (api as any).addMediaParent(childId, parentId)
             refreshLibrary()
         }
     }
@@ -1293,8 +1486,8 @@ function AppContent() {
         if (activeRemoteLibrary) {
             await api.removeRemoteMediaParent(activeRemoteLibrary.url, activeRemoteLibrary.token, childId, parentId)
             reloadLibrary()
-        } else if (window.electronAPI) {
-            await (window.electronAPI as any).removeMediaParent(childId, parentId)
+        } else if (api) {
+            await (api as any).removeMediaParent(childId, parentId)
             refreshLibrary()
         }
     }
@@ -1303,8 +1496,8 @@ function AppContent() {
         if (activeRemoteLibrary) {
             return await api.searchRemoteMediaFiles(activeRemoteLibrary.url, activeRemoteLibrary.token, query, targets)
         }
-        if (!window.electronAPI) return []
-        return await (window.electronAPI as any).searchMediaFiles(query, targets)
+        if (!api) return []
+        return await (api as any).searchMediaFiles(query, targets)
     }
 
     const renderMainContent = () => {
@@ -1469,7 +1662,7 @@ function AppContent() {
                             renamingMediaId={renamingMediaId}
                             onRenameSubmit={async (id, newName) => {
                                 // DB更新
-                                await window.electronAPI.renameMedia(id, newName)
+                                await api.renameMedia(id, newName)
                                 setRenamingMediaId(null)
                                 refreshLibrary()
                             }}
@@ -1512,7 +1705,7 @@ function AppContent() {
     // メタデータバックフィル
     useEffect(() => {
         if (activeLibrary) {
-            window.electronAPI.backfillMetadata()
+            api.backfillMetadata()
                 .then(count => {
                     if (count > 0) {
                         console.log(`[App] Backfilled metadata for ${count} videos.`)
@@ -1683,7 +1876,7 @@ function AppContent() {
                     onRefreshMetadata={!activeRemoteLibrary ? handleRefreshMetadata : undefined}
                     onExport={!activeRemoteLibrary ? handleExport : undefined}
                     onDownload={activeRemoteLibrary ? async () => {
-                        if (!contextMenu?.media || !window.electronAPI) return
+                        if (!contextMenu?.media || !api) return
                         const media = contextMenu.media
                         const downloadUrl = media.file_path
                         const filename = media.file_name || 'download.mp4'
@@ -1698,7 +1891,7 @@ function AppContent() {
                         closeContextMenu()
 
                         try {
-                            const result = await (window.electronAPI as any).downloadRemoteMedia(downloadUrl, filename, { notificationId })
+                            const result = await (api as any).downloadRemoteMedia(downloadUrl, filename, { notificationId })
                             removeNotification(notificationId)
 
                             if (result.success) {
@@ -1783,5 +1976,13 @@ function AppContent() {
         </div>
     )
 }
+
+
+
+
+
+
+
+
 
 

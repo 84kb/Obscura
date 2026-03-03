@@ -2,11 +2,11 @@
     "name": "@obscura/desktop",
     "version": "0.7.15",
     "private": true,
-    "main": "dist-electron/main.cjs",
+    "main": "dist-tauri/index.html",
     "scripts": {
-        "dev": "vite",
-        "build": "tsc && vite build && electron-builder",
-        "preview": "vite preview"
+        "dev": "vite --config ../../vite.tauri.config.ts",
+        "build": "vite build --config ../../vite.tauri.config.ts",
+        "preview": "vite preview --host"
     },
     "dependencies": {
         "@obscura/core": "*"

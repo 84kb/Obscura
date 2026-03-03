@@ -20,8 +20,7 @@ function walk(dir, ext = /\.(ts|tsx)$/) {
 }
 
 const files = [
-    ...walk('apps/desktop/src'),
-    ...walk('apps/desktop/electron')
+    ...walk('apps/desktop/src')
 ];
 
 let updatedCount = 0;

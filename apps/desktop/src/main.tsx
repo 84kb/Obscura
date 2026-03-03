@@ -1,7 +1,8 @@
-import React, { Suspense, lazy } from 'react'
+﻿import React, { Suspense, lazy } from 'react'
 import ReactDOM from 'react-dom/client'
 // import App from './App' // Lazy loaded below
-import { initMockElectronAPI } from './utils/mockElectronAPI'
+import { initMockDesktopAPI } from './utils/mockDesktopAPI'
+import { initTauriDesktopBridge } from './utils/tauriDesktopBridge'
 
 import { NotificationProvider } from './contexts/NotificationContext'
 import { NotificationContainer } from './components/Notification/NotificationContainer'
@@ -13,19 +14,20 @@ import './styles/mobile.css' // Ensure mobile styles are available if needed, th
 const App = lazy(() => import('./App'))
 const MobileApp = lazy(() => import('./mobile/MobileApp'))
 
-// ブラウザ環境でElectron APIがない場合はモックを注入
-if (!Capacitor.isNativePlatform()) {
-    initMockElectronAPI()
+// 繝悶Λ繧ｦ繧ｶ迺ｰ蠅・〒Desktop API縺後↑縺・ｴ蜷医・繝｢繝・け繧呈ｳｨ蜈･
+initTauriDesktopBridge()
+
+if (!Capacitor.isNativePlatform() && !(window as any).obscuraAPI) {
+    initMockDesktopAPI()
 }
 
-// テーマの即時適用は index.html のインラインスクリプトで処理済み
-// （CSS読み込みより前に実行されるため、Ctrl+Rでもフラッシュしない）
-
+// 繝・・繝槭・蜊ｳ譎る←逕ｨ縺ｯ index.html 縺ｮ繧､繝ｳ繝ｩ繧､繝ｳ繧ｹ繧ｯ繝ｪ繝励ヨ縺ｧ蜃ｦ逅・ｸ医∩
+// ・・SS隱ｭ縺ｿ霎ｼ縺ｿ繧医ｊ蜑阪↓螳溯｡後＆繧後ｋ縺溘ａ縲，trl+R縺ｧ繧ゅヵ繝ｩ繝・す繝･縺励↑縺・ｼ・
 // Check for mobile platform
 const isMobile = Capacitor.isNativePlatform() || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 import NiconiComments from '@xpadev-net/niconicomments'
-// @ts-ignore: プラグインから利用可能にするためグローバルに公開
+// @ts-ignore expose for plugin runtime
 window.NiconiComments = NiconiComments;
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -38,3 +40,5 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         </NotificationProvider>
     </React.StrictMode>
 )
+
+

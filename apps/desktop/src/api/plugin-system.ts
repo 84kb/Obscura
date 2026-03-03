@@ -1,4 +1,5 @@
 import { ObscuraPlugin, AppSettings, MediaFile, PlayerOverlayContext, ObscuraAPI } from '@obscura/core';
+import { api } from './index';
 
 export function initializePluginSystem() {
     if (window.ObscuraAPI) {
@@ -63,75 +64,88 @@ export function initializePluginSystem() {
 
         media: {
             get: async (id: number) => {
-                return await window.electronAPI.getMediaFile(id);
+                return await api.getMediaFile(id);
             },
             getSelected: async () => {
-                const selected = await window.electronAPI.getSelectedMedia();
+                const selected = await api.getSelectedMedia();
                 return selected[0] || null;
             },
             getSelection: async () => {
-                return await window.electronAPI.getSelectedMedia();
+                return await api.getSelectedMedia();
             },
             update: async (id: number, updates: Partial<MediaFile>) => {
-                return await window.electronAPI.updateMedia(id, updates);
+                return await api.updateMedia(id, updates);
             },
             addTag: async (mediaId: number, tagId: number) => {
-                return await window.electronAPI.addTagToMedia(mediaId, tagId);
+                return await api.addTagToMedia(mediaId, tagId);
             },
             removeTag: async (mediaId: number, tagId: number) => {
-                return await window.electronAPI.removeTagFromMedia(mediaId, tagId);
+                return await api.removeTagFromMedia(mediaId, tagId);
             },
             import: async (filePaths: string[]) => {
-                return await window.electronAPI.importMedia(filePaths);
+                return await api.importMedia(filePaths);
             }
         },
 
         ui: {
             showNotification: (options: any) => {
-                window.electronAPI.showNotification({
+                api.showNotification({
                     title: options.title,
                     message: options.description || options.message || ''
                 });
             },
             showMessageBox: async (options: any) => {
-                return await window.electronAPI.showMessageBox(options);
+                return await api.showMessageBox(options);
             },
             copyToClipboard: async (text: string) => {
-                await window.electronAPI.copyToClipboard(text);
+                await api.copyToClipboard(text);
             }
         },
 
         system: {
             fetch: async (url: string, options?: any) => {
-                return await window.electronAPI.pluginFetch(url, options);
+                return await api.pluginFetch(url, options);
             },
             saveMediaData: async (mediaId: number, pluginId: string, data: any) => {
-                return await window.electronAPI.savePluginMediaData(mediaId, pluginId, data);
+                return await api.savePluginMediaData(mediaId, pluginId, data);
             },
             loadMediaData: async (mediaId: number, pluginId: string) => {
-                return await window.electronAPI.loadPluginMediaData(mediaId, pluginId);
+                return await api.loadPluginMediaData(mediaId, pluginId);
             },
             saveAssociatedData: async (mediaFilePath: string, data: any) => {
-                return await window.electronAPI.saveAssociatedData(mediaFilePath, data);
+                return await api.saveAssociatedData(mediaFilePath, data);
             },
             loadAssociatedData: async (mediaFilePath: string) => {
-                return await window.electronAPI.loadAssociatedData(mediaFilePath);
+                return await api.loadAssociatedData(mediaFilePath);
             },
             openPath: async (path: string) => {
-                await window.electronAPI.openPath(path);
+                await api.openPath(path);
             },
             openExternal: async (url: string) => {
-                await window.electronAPI.openExternal(url);
+                await api.openExternal(url);
             },
             storage: {
-                get: async (_key: string) => null, // TODO
-                set: async (_key: string, _value: any) => { } // TODO
+                get: async (key: string) => {
+                    try {
+                        const raw = localStorage.getItem(`obscura_plugin_storage:${key}`);
+                        return raw == null ? null : JSON.parse(raw);
+                    } catch {
+                        return null;
+                    }
+                },
+                set: async (key: string, value: any) => {
+                    try {
+                        localStorage.setItem(`obscura_plugin_storage:${key}`, JSON.stringify(value));
+                    } catch {
+                        // Ignore storage failures to keep plugin runtime stable.
+                    }
+                }
             }
         },
 
         on: (event: any, callback: (...args: any[]) => void) => {
             const wrappedCallback = (_e: any, ...args: any[]) => callback(...args);
-            return window.electronAPI.on(event, wrappedCallback);
+            return api.on(event, wrappedCallback);
         }
     };
 
@@ -151,7 +165,7 @@ const loadedScripts = new Set<string>();
 
 export async function loadPluginScripts(config?: AppSettings) {
     try {
-        const scripts = await window.electronAPI.getPluginScripts();
+        const scripts = await api.getPluginScripts();
         if (!scripts || scripts.length === 0) return;
 
         for (const script of scripts) {
