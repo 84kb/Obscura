@@ -272,3 +272,12 @@
 - `npm run build:tauri:web`
 - `node --check scripts/tauri-sidecar.cjs`
 - `cargo check --no-default-features`
+
+## 14. Round 1 レビュー補完（2026-03-05追記）
+- Review会議の未解決チェックリスト（デザイン委任 1-4）の実行正本を以下に固定する。
+  - `docs/ROUND1_REVIEW_SUPPLEMENT_DESIGN_QA_OPS_2026-03-05.md`
+- デザイン成果物（`dominant_color` / `.library` / アプリ内モーダル仕様）は以下を正本とする。
+  - `docs/ROUND_DESIGN_SUPPLEMENT_PLAN_2026-03-05.md`
+  - `docs/ROUND_DESIGN_DELIVERABLE_2026-03-05.md`
+  - `docs/templates/library_color_name_validation_20samples.csv`
+- 受入判定は QA/運営の実測証跡（E2E + 回帰 + ゲート値）再提出後に最終化する。
