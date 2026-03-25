@@ -1305,11 +1305,19 @@ function AppContent() {
                 e.preventDefault()
                 setShowSettingsModal(true)
             }
+
+            // Developer Tools (F12): opt-in via settings.
+            if (e.key === 'F12' && Boolean(clientConfig?.enableF12DeveloperTools)) {
+                e.preventDefault()
+                api.toggleDeveloperTools().catch((err) => {
+                    console.error('Failed to toggle developer tools:', err)
+                })
+            }
         }
 
         document.addEventListener('keydown', handleKeyDown)
         return () => document.removeEventListener('keydown', handleKeyDown)
-    }, [selectedMediaIds, moveToTrash, filterOptions.filterType])
+    }, [selectedMediaIds, moveToTrash, filterOptions.filterType, clientConfig?.enableF12DeveloperTools])
 
     // スペースキーで再生 (ライブラリで選択中、かつプレイヤーが開いていない場合)
     // プレイヤーが開いている場合はShortcutContextのscope='player'が優先されるため、ここでは発火しない(はず)
@@ -2244,7 +2252,6 @@ function AppContent() {
         </div>
     )
 }
-
 
 
 

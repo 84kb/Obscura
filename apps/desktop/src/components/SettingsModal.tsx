@@ -2001,6 +2001,28 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, language = 
                 <h3 className="settings-page-title">{tr('開発者ツール', 'Developer Tools')}</h3>
 
                 <section className="settings-section">
+                    <h4 className="section-title">{tr('アプリ内開発支援', 'In-app Developer Support')}</h4>
+                    <div className="settings-card">
+                        <div className="settings-row">
+                            <div className="settings-info">
+                                <span className="settings-label">{tr('F12でDeveloper Toolsを開く', 'Open Developer Tools with F12')}</span>
+                                <span className="settings-description">
+                                    {tr('有効時のみ、F12キーでWebViewのDeveloper Toolsを開閉します。', 'When enabled, press F12 to toggle WebView Developer Tools.')}
+                                </span>
+                            </div>
+                            <label className="toggle-switch">
+                                <input
+                                    type="checkbox"
+                                    checked={Boolean(clientConfig?.enableF12DeveloperTools)}
+                                    onChange={(e) => updateClientConfig({ enableF12DeveloperTools: e.target.checked } as any)}
+                                />
+                                <span className="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </section>
+
+                <section className="settings-section">
                     <h4 className="section-title">{tr('API 接続情報', 'API Connection')}</h4>
                     <div className="settings-card">
                         <div className="settings-row-vertical">

@@ -2539,13 +2539,23 @@ function handleRequest(req) {
 
   if (method === 'create_library_dir') {
     try {
-      const name = String(params?.name || '').trim()
+      const rawName = String(params?.name || '').trim()
       const parentPath = String(params?.parentPath || '').trim()
-      if (!name || !parentPath) {
+      if (!rawName || !parentPath) {
         send({ id, ok: false, error: 'create_library_dir requires name and parentPath' })
         return
       }
-      const target = path.join(parentPath, name)
+      const withExt = rawName.toLowerCase().endsWith('.library') ? rawName : `${rawName}.library`
+      // Windows-invalid chars and trailing dots/spaces break folder creation on some machines.
+      const safeName = withExt
+        .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+        .replace(/[. ]+$/g, '')
+        .trim()
+      if (!safeName) {
+        send({ id, ok: false, error: 'invalid library name' })
+        return
+      }
+      const target = path.join(parentPath, safeName)
       ensureDir(target)
       send({ id, ok: true, result: target })
     } catch (err) {

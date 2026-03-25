@@ -624,6 +624,7 @@ export interface ClientConfig {
     iconUrl?: string
     libraryTransferSettings?: LibraryTransferSettings
     enableGPUAcceleration?: boolean
+    enableF12DeveloperTools?: boolean
     audioDevice?: string
     exclusiveMode?: boolean
     useMpvAudio?: boolean

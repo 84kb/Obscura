@@ -1416,6 +1416,7 @@ export function useLibrary() {
             await loadFolders()
         } catch (error) {
             console.error('Failed to create library:', error)
+            throw error
         }
     }, [loadLibraries, loadMediaFiles, loadTags, loadFolders])
 
@@ -1433,10 +1434,11 @@ export function useLibrary() {
                 await loadFolders()
                 return library
             }
+            return null
         } catch (error) {
             console.error('Failed to open library:', error)
+            throw error
         }
-        return null
     }, [loadLibraries, loadMediaFiles, loadTags, loadFolders])
 
     // 初期読み込み (ライブラリ自体のロード)

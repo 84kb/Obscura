@@ -1,6 +1,6 @@
 [package]
 name = "obscura-tauri"
-version = "0.8.5"
+version = "0.8.12"
 description = "Obscura Tauri host"
 authors = ["84kb"]
 license = "MIT"
@@ -13,7 +13,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = { version = "2", features = ["protocol-asset"] }
+tauri = { version = "2", features = ["protocol-asset", "devtools"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"

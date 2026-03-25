@@ -1,4 +1,4 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { api } from '../api'
 import './LibraryModal.css'
 
@@ -13,15 +13,34 @@ export function LibraryModal({ onClose, onCreateLibrary, onOpenLibrary }: Librar
     const [isCreating, setIsCreating] = useState(false)
     const [error, setError] = useState<string | null>(null)
 
+    const toErrorDetail = (e: unknown): string => {
+        if (typeof e === 'string') return e
+        if (e && typeof e === 'object') {
+            const anyErr = e as any
+            if (typeof anyErr.message === 'string' && anyErr.message.trim()) return anyErr.message
+            if (typeof anyErr.error === 'string' && anyErr.error.trim()) return anyErr.error
+            if (typeof anyErr.cause === 'string' && anyErr.cause.trim()) return anyErr.cause
+            try {
+                return JSON.stringify(anyErr)
+            } catch {
+                return ''
+            }
+        }
+        return ''
+    }
+
     const handleOpen = async () => {
         setIsCreating(true)
+        setError(null)
         try {
             const result = await onOpenLibrary()
             if (result) {
                 onClose()
             }
-        } catch (e) {
-            setError('ライブラリを開けませんでした。')
+        } catch (e: unknown) {
+            const detailText = toErrorDetail(e)
+            const detail = detailText ? `: ${detailText}` : ''
+            setError(`ライブラリを開けませんでした${detail}`)
         } finally {
             setIsCreating(false)
         }
@@ -34,15 +53,16 @@ export function LibraryModal({ onClose, onCreateLibrary, onOpenLibrary }: Librar
         setIsCreating(true)
         setError(null)
         try {
-            // エクスプローラーでフォルダー選択
             const parentPath = await api.selectFolder()
-            if (parentPath) {
-                await onCreateLibrary(libraryName.trim(), parentPath)
-                onClose()
-            }
-        } catch (error) {
-            console.error('Failed to create library:', error)
-            setError('ライブラリの作成に失敗しました。')
+            if (!parentPath) return
+
+            await onCreateLibrary(libraryName.trim(), parentPath)
+            onClose()
+        } catch (e: unknown) {
+            console.error('Failed to create library:', e)
+            const detailText = toErrorDetail(e)
+            const detail = detailText ? `: ${detailText}` : ''
+            setError(`ライブラリの作成に失敗しました${detail}`)
         } finally {
             setIsCreating(false)
         }
@@ -54,8 +74,9 @@ export function LibraryModal({ onClose, onCreateLibrary, onOpenLibrary }: Librar
                 <div className="library-modal-header">
                     <h2 className="library-modal-title">新しいライブラリを作成</h2>
                     <button className="library-modal-close" onClick={onClose}>
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 17.59 13.41 12z" />
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18" />
+                            <line x1="6" y1="6" x2="18" y2="18" />
                         </svg>
                     </button>
                 </div>
@@ -91,7 +112,7 @@ export function LibraryModal({ onClose, onCreateLibrary, onOpenLibrary }: Librar
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" />
                         </svg>
-                        <span>保存場所を選択すると、選択したフォルダー内に「{libraryName || 'ライブラリ名'}.library」フォルダーが作成されます</span>
+                        <span>保存先を選択すると「{libraryName || 'ライブラリ名'}.library」フォルダを作成します。</span>
                     </div>
 
                     <div className="library-modal-actions">
@@ -117,7 +138,7 @@ export function LibraryModal({ onClose, onCreateLibrary, onOpenLibrary }: Librar
                             className="btn btn-primary"
                             disabled={!libraryName.trim() || isCreating}
                         >
-                            {isCreating ? '作成中...' : '保存場所を選択'}
+                            {isCreating ? '作成中...' : '保存先を選択'}
                         </button>
                     </div>
                 </form>

@@ -146,6 +146,7 @@ export class AndroidAdapter implements IMediaLibraryAPI {
     async maximizeWindow(): Promise<void> { }
     async closeWindow(): Promise<void> { }
     async focusWindow(): Promise<void> { }
+    async toggleDeveloperTools(): Promise<void> { }
 
     async updateDiscordActivity(_activity: any): Promise<void> { }
     async clearDiscordActivity(): Promise<void> { }

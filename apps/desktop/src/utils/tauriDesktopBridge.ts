@@ -46,6 +46,7 @@ function getFallbackConfig() {
         autoImport: { enabled: false, watchPaths: [] },
         thumbnailMode: 'speed' as const,
         discordRichPresenceEnabled: false,
+        enableF12DeveloperTools: false,
         libraryViewSettings: {},
     }
 }
@@ -1310,6 +1311,9 @@ export function initTauriDesktopBridge(): void {
         },
         focusWindow: async () => {
             await invoke('window_focus')
+        },
+        toggleDeveloperTools: async () => {
+            await invoke('window_toggle_devtools')
         },
         updateDiscordActivity: async (activity: any) => {
             try {

@@ -1,16 +1,16 @@
 ﻿#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Mutex;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
 use serde::Serialize;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter, Manager, State, Window};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow, Window};
 
 #[derive(Serialize)]
 struct BasicResult {
@@ -22,6 +22,7 @@ struct SidecarProcess {
     child: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
+    stderr: BufReader<ChildStderr>,
 }
 
 #[derive(Default)]
@@ -60,10 +61,11 @@ fn sidecar_script_path(app: &AppHandle) -> Result<PathBuf, String> {
         return Ok(dev_path);
     }
 
-    if let Ok(resource_dir) = app.path().resource_dir() {
+    for root in sidecar_search_roots(app) {
         let bundled_candidates = [
-            resource_dir.join("scripts").join("tauri-sidecar.cjs"),
-            resource_dir.join("tauri-sidecar.cjs"),
+            root.join("scripts").join("tauri-sidecar.cjs"),
+            root.join("tauri-sidecar.cjs"),
+            root.join("_up_").join("scripts").join("tauri-sidecar.cjs"),
         ];
         for bundled in bundled_candidates {
             if bundled.exists() {
@@ -79,11 +81,30 @@ fn sidecar_script_path(app: &AppHandle) -> Result<PathBuf, String> {
     Err("sidecar script not found".to_string())
 }
 
-fn sidecar_plugin_dir(app: &AppHandle) -> PathBuf {
+fn sidecar_search_roots(app: &AppHandle) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+
     if let Ok(resource_dir) = app.path().resource_dir() {
-        let bundled = resource_dir.join("plugins");
-        if bundled.exists() {
-            return bundled;
+        roots.push(resource_dir);
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            roots.push(exe_dir.to_path_buf());
+            roots.push(exe_dir.join("resources"));
+        }
+    }
+
+    roots
+}
+
+fn sidecar_plugin_dir(app: &AppHandle) -> PathBuf {
+    for root in sidecar_search_roots(app) {
+        let candidates = [root.join("plugins"), root.join("_up_").join("plugins")];
+        for bundled in candidates {
+            if bundled.exists() {
+                return bundled;
+            }
         }
     }
 
@@ -93,16 +114,18 @@ fn sidecar_plugin_dir(app: &AppHandle) -> PathBuf {
 }
 
 fn sidecar_node_binary(app: &AppHandle) -> String {
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        let node_name = if cfg!(target_os = "windows") {
-            "node.exe"
-        } else {
-            "node"
-        };
-        // Keep compatibility with both legacy and current bundle layouts.
+    let node_name = if cfg!(target_os = "windows") {
+        "node.exe"
+    } else {
+        "node"
+    };
+
+    for root in sidecar_search_roots(app) {
         let bundled_candidates = [
-            resource_dir.join("bin").join(node_name),
-            resource_dir.join("build").join("bin").join(node_name),
+            root.join("bin").join(node_name),
+            root.join("build").join("bin").join(node_name),
+            root.join("_up_").join("build").join("bin").join(node_name),
+            root.join("_up_").join("bin").join(node_name),
         ];
         for bundled in bundled_candidates {
             if bundled.exists() {
@@ -151,13 +174,60 @@ fn ensure_sidecar_running(app: &AppHandle, state: &SidecarState) -> Result<(), S
     let node_bin = sidecar_node_binary(app);
 
     let mut cmd = Command::new(&node_bin);
-    cmd.arg(script_path)
+    // Robust sidecar bootstrap:
+    // 1) try explicit env path (if valid file)
+    // 2) fallback to common installer/dev locations relative to cwd and execPath
+    // This avoids environment-specific path resolution issues (e.g. value becoming `C:`).
+    cmd.arg("-e")
+        .arg(
+            r#"
+(() => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const candidates = [];
+  const push = (v) => { if (typeof v === 'string' && v.trim()) candidates.push(v.trim()); };
+  push(process.env.OBSCURA_SIDECAR_SCRIPT);
+  const cwd = process.cwd();
+  const exeDir = path.dirname(process.execPath || '');
+  [
+    path.join(cwd, 'scripts', 'tauri-sidecar.cjs'),
+    path.join(cwd, 'tauri-sidecar.cjs'),
+    path.join(cwd, '_up_', 'scripts', 'tauri-sidecar.cjs'),
+    path.join(cwd, 'resources', 'scripts', 'tauri-sidecar.cjs'),
+    path.join(cwd, 'resources', '_up_', 'scripts', 'tauri-sidecar.cjs'),
+    path.join(exeDir, 'scripts', 'tauri-sidecar.cjs'),
+    path.join(exeDir, '_up_', 'scripts', 'tauri-sidecar.cjs'),
+    path.join(exeDir, 'resources', 'scripts', 'tauri-sidecar.cjs'),
+    path.join(exeDir, 'resources', '_up_', 'scripts', 'tauri-sidecar.cjs'),
+  ].forEach(push);
+  let lastErr = '';
+  for (const p of candidates) {
+    try {
+      if (!fs.existsSync(p)) continue;
+      const st = fs.statSync(p);
+      if (!st.isFile()) continue;
+      require(p);
+      return;
+    } catch (e) {
+      lastErr = (e && e.stack) ? String(e.stack) : String(e);
+    }
+  }
+  throw new Error(`Failed to locate/load tauri-sidecar.cjs. cwd=${cwd}, execPath=${process.execPath}, envScript=${process.env.OBSCURA_SIDECAR_SCRIPT || ''}, lastErr=${lastErr}`);
+})();
+"#,
+        )
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .env("OBSCURA_TAURI_SIDECAR", "1")
+        .env("OBSCURA_SIDECAR_SCRIPT", script_path)
         .env("OBSCURA_PLUGIN_DIR", plugin_dir)
         .env("OBSCURA_SIDECAR_DATA_DIR", data_dir);
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            cmd.current_dir(exe_dir);
+        }
+    }
     #[cfg(target_os = "windows")]
     {
         // CREATE_NO_WINDOW
@@ -176,11 +246,16 @@ fn ensure_sidecar_running(app: &AppHandle, state: &SidecarState) -> Result<(), S
         .stdout
         .take()
         .ok_or_else(|| "failed to acquire sidecar stdout".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "failed to acquire sidecar stderr".to_string())?;
 
     *guard = Some(SidecarProcess {
         child,
         stdin,
         stdout: BufReader::new(stdout),
+        stderr: BufReader::new(stderr),
     });
 
     Ok(())
@@ -298,7 +373,13 @@ async fn sidecar_request(
             .map_err(|e| format!("sidecar read failed: {e}"))?;
 
         if bytes == 0 {
-            return Err("sidecar closed stdout".to_string());
+            let mut stderr_text = String::new();
+            let _ = proc_ref.stderr.read_to_string(&mut stderr_text);
+            let detail = stderr_text.trim();
+            if detail.is_empty() {
+                return Err("sidecar closed stdout".to_string());
+            }
+            return Err(format!("sidecar closed stdout: {}", detail));
         }
 
         let parsed: Value = serde_json::from_str(line.trim())
@@ -359,6 +440,16 @@ fn window_focus(window: Window) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn window_toggle_devtools(webview: WebviewWindow) -> Result<(), String> {
+    if webview.is_devtools_open() {
+        webview.close_devtools();
+    } else {
+        webview.open_devtools();
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn read_client_config(app: AppHandle) -> Result<String, String> {
     let path = client_config_path(&app)?;
     if !path.exists() {
@@ -400,6 +491,7 @@ fn main() {
             window_toggle_maximize,
             window_close,
             window_focus,
+            window_toggle_devtools,
             read_client_config,
             write_client_config,
         ])

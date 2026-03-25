@@ -525,6 +525,10 @@ export class DesktopAdapter implements IMediaLibraryAPI {
         return this.api.focusWindow();
     }
 
+    async toggleDeveloperTools(): Promise<void> {
+        return this.api.toggleDeveloperTools();
+    }
+
     async updateDiscordActivity(activity: any): Promise<void> {
         return this.api.updateDiscordActivity(activity);
     }

@@ -175,6 +175,7 @@ export interface IMediaLibraryAPI {
 
     // その他
     focusWindow(): Promise<void>;
+    toggleDeveloperTools(): Promise<void>;
 
     // Discord RPC
     updateDiscordActivity(activity: any): Promise<void>;

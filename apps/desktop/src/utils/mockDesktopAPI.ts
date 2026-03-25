@@ -244,6 +244,7 @@ export const mockDesktopAPI = {
         autoImport: { enabled: false, watchPaths: [] },
         thumbnailMode: 'speed' as const,
         discordRichPresenceEnabled: false,
+        enableF12DeveloperTools: false,
         libraryViewSettings: {}
     }),
     updateClientConfig: async (_updates: Partial<ClientConfig>): Promise<ClientConfig> => ({
@@ -255,6 +256,7 @@ export const mockDesktopAPI = {
         autoImport: { enabled: false, watchPaths: [] },
         thumbnailMode: 'speed' as const,
         discordRichPresenceEnabled: false,
+        enableF12DeveloperTools: false,
         libraryViewSettings: {}
     }),
     selectDownloadDirectory: async () => null,
@@ -290,6 +292,7 @@ export const mockDesktopAPI = {
     onFFmpegUpdateProgress: (_callback: (progress: number) => void) => () => { },
 
     focusWindow: async () => { },
+    toggleDeveloperTools: async () => { },
 
     // Discord
     updateDiscordActivity: async (_activity: any) => { },
