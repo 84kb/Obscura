@@ -1,6 +1,7 @@
-import { MediaFile, MediaComment } from '@obscura/core'
+﻿import { MediaFile, MediaComment } from '@obscura/core'
 import React from 'react'
 import { useSortable } from '@dnd-kit/sortable'
+import { t as i18nT, AppLanguage } from '../i18n'
 
 // --- Types ---
 export interface InspectorSectionProps {
@@ -30,7 +31,7 @@ export function InspectorSection({
         isDragging
     } = useSortable({ id })
 
-    // スケール変換を無効にし、translateのみを使用することでアスペクト比の変化を防ぐ
+    // translate only to avoid aspect-ratio distortion
     const style = {
         transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
         transition,
@@ -71,6 +72,7 @@ export function InspectorSection({
 // --- Content Components (Extracted from Inspector.tsx) ---
 
 export const InfoSectionContent = ({
+    language = 'ja',
     media,
     hoverRating,
     currentRating,
@@ -79,8 +81,11 @@ export const InfoSectionContent = ({
     onUpdateRating,
     formatFileSize,
     formatTime,
-    formatDate
+    formatDate,
+    infoVisibility,
+    extensionInfoRows
 }: {
+    language?: AppLanguage
     media: MediaFile[],
     hoverRating: number | null,
     currentRating: number,
@@ -89,12 +94,83 @@ export const InfoSectionContent = ({
     onUpdateRating?: (id: number, rating: number) => void,
     formatFileSize: (b: number) => string,
     formatTime: (s: number) => string,
-    formatDate: (d: string) => string
+    formatDate: (d: string) => string,
+    infoVisibility?: {
+        rating?: boolean
+        resolution?: boolean
+        duration?: boolean
+        fileSize?: boolean
+        importedAt?: boolean
+        createdAt?: boolean
+        modifiedAt?: boolean
+        audioBitrate?: boolean
+        framerate?: boolean
+        formatName?: boolean
+        codecId?: boolean
+    },
+    extensionInfoRows?: Array<{
+        id: string
+        label: string
+        value: string | number | boolean | null | undefined
+    }>
 }) => {
+    const visible = {
+        rating: infoVisibility?.rating ?? true,
+        resolution: infoVisibility?.resolution ?? true,
+        duration: infoVisibility?.duration ?? true,
+        fileSize: infoVisibility?.fileSize ?? true,
+        importedAt: infoVisibility?.importedAt ?? true,
+        createdAt: infoVisibility?.createdAt ?? true,
+        modifiedAt: infoVisibility?.modifiedAt ?? true,
+        audioBitrate: infoVisibility?.audioBitrate ?? true,
+        framerate: infoVisibility?.framerate ?? true,
+        formatName: infoVisibility?.formatName ?? true,
+        codecId: infoVisibility?.codecId ?? true
+    }
+
+    const formatBitrate = (bitrate?: number) => {
+        if (!Number.isFinite(Number(bitrate)) || Number(bitrate) <= 0) return '-'
+        return `${Math.round(Number(bitrate) / 1000)} kbps`
+    }
+
+    const formatFramerate = (fps?: number) => {
+        if (!Number.isFinite(Number(fps)) || Number(fps) <= 0) return '-'
+        return `${Number(fps).toFixed(2)} fps`
+    }
+
+    const formatContainer = (value?: string) => {
+        const raw = String(value || '').trim()
+        if (!raw) return '-'
+        const low = raw.toLowerCase()
+        if (low === 'mp4' || low.includes('mov,mp4,m4a,3gp,3g2,mj2') || low.includes('mpeg-4')) {
+            return 'MPEG-4'
+        }
+        if (low === 'mkv' || low.includes('matroska')) {
+            return 'Matroska'
+        }
+        return raw
+    }
+
+    const formatCodecId = (value?: string) => {
+        const raw = String(value || '').trim()
+        if (!raw) return '-'
+        const low = raw.toLowerCase()
+        if (low === '[0][0][0][0]' || low === '0x00000000') {
+            return '-'
+        }
+        if (low === 'h264' || low === 'avc' || low === 'avc/h.264') {
+            return 'avc1'
+        }
+        if (low === 'h265' || low === 'hevc') {
+            return 'hvc1'
+        }
+        return raw
+    }
+
     return (
         <div className="info-section">
-            <div className="info-row">
-                <span className="info-label">評価</span>
+            {visible.rating && <div className="info-row">
+                <span className="info-label">{i18nT(language, 'inspector.rating')}</span>
                 <div className="inspector-rating-stars" onMouseLeave={() => setHoverRating(null)}>
                     {[1, 2, 3, 4, 5].map(star => (
                         <span
@@ -111,59 +187,93 @@ export const InfoSectionContent = ({
                         >★</span>
                     ))}
                 </div>
-            </div>
+            </div>}
             {media.length === 1 && (
                 <>
-                    {(media[0].width && media[0].height) ? (
+                    {visible.resolution && (media[0].width && media[0].height) ? (
                         <div className="info-row">
-                            <span className="info-label">解像度</span>
+                            <span className="info-label">{i18nT(language, 'inspector.resolution')}</span>
                             <span className="info-value-inline">{media[0].width} x {media[0].height}</span>
                         </div>
                     ) : null}
-                    <div className="info-row">
-                        <span className="info-label">再生時間</span>
+                    {visible.duration && <div className="info-row">
+                        <span className="info-label">{i18nT(language, 'inspector.duration')}</span>
                         <span className="info-value-inline">{media[0].duration ? formatTime(media[0].duration) : '-'}</span>
-                    </div>
+                    </div>}
                 </>
             )}
-            <div className="info-row">
-                <span className="info-label">ファイルサイズ</span>
+            {visible.fileSize && <div className="info-row">
+                <span className="info-label">{i18nT(language, 'inspector.fileSize')}</span>
                 <span className="info-value-inline">
                     {media.length === 1
                         ? formatFileSize(media[0].file_size)
-                        : `${formatFileSize(media.reduce((acc, m) => acc + m.file_size, 0))} (合計)`}
+                        : `${formatFileSize(media.reduce((acc, m) => acc + m.file_size, 0))} (${i18nT(language, 'inspector.total')})`}
                 </span>
-            </div>
+            </div>}
             {media.length === 1 && (
                 <>
-                    <div className="info-row">
-                        <span className="info-label">追加日</span>
-                        <span className="info-value-inline">{formatDate(media[0].created_at)}</span>
-                    </div>
-                    {media[0].created_date && (
+                    {visible.audioBitrate && (
                         <div className="info-row">
-                            <span className="info-label">作成日</span>
+                            <span className="info-label">{i18nT(language, 'inspector.audioBitrate')}</span>
+                            <span className="info-value-inline">{formatBitrate(media[0].audio_bitrate)}</span>
+                        </div>
+                    )}
+                    {visible.framerate && (
+                        <div className="info-row">
+                            <span className="info-label">{i18nT(language, 'inspector.frameRate')}</span>
+                            <span className="info-value-inline">{formatFramerate(media[0].framerate)}</span>
+                        </div>
+                    )}
+                    {visible.formatName && (
+                        <div className="info-row">
+                            <span className="info-label">{i18nT(language, 'inspector.fileFormat')}</span>
+                            <span className="info-value-inline">{formatContainer(media[0].format_name)}</span>
+                        </div>
+                    )}
+                    {visible.codecId && (
+                        <div className="info-row">
+                            <span className="info-label">{i18nT(language, 'inspector.codecId')}</span>
+                            <span className="info-value-inline">{formatCodecId(media[0].codec_id)}</span>
+                        </div>
+                    )}
+                    {visible.importedAt && <div className="info-row">
+                        <span className="info-label">{i18nT(language, 'inspector.importedAt')}</span>
+                        <span className="info-value-inline">{formatDate(media[0].created_at)}</span>
+                    </div>}
+                    {visible.createdAt && media[0].created_date && (
+                        <div className="info-row">
+                            <span className="info-label">{i18nT(language, 'inspector.createdAt')}</span>
                             <span className="info-value-inline">{formatDate(media[0].created_date)}</span>
                         </div>
                     )}
-                    {media[0].modified_date && (
+                    {visible.modifiedAt && media[0].modified_date && (
                         <div className="info-row">
-                            <span className="info-label">変更日</span>
+                            <span className="info-label">{i18nT(language, 'inspector.modifiedAt')}</span>
                             <span className="info-value-inline">{formatDate(media[0].modified_date)}</span>
                         </div>
                     )}
                 </>
             )}
+            {extensionInfoRows && extensionInfoRows
+                .filter((row) => row && row.value !== null && row.value !== undefined && String(row.value).trim() !== '')
+                .map((row) => (
+                    <div className="info-row" key={row.id}>
+                        <span className="info-label">{row.label}</span>
+                        <span className="info-value-inline">{String(row.value)}</span>
+                    </div>
+                ))}
         </div>
     )
 }
 
 export const CommentSectionContent = ({
+    language = 'ja',
     comments,
     formatTime,
     providers,
     extensionButtons
 }: {
+    language?: AppLanguage
     comments: MediaComment[],
     formatTime: (s: number) => string,
     providers?: Array<{ id: string; name: string; onClick: () => void; isFetching: boolean; disabled: boolean }>,
@@ -189,12 +299,12 @@ export const CommentSectionContent = ({
                                 <polyline points="7 10 12 15 17 10" />
                                 <line x1="12" y1="15" x2="12" y2="3" />
                             </svg>
-                            {p.isFetching ? '取得中...' : `${p.name}からコメントを取得`}
+                            {p.isFetching ? i18nT(language, 'inspector.fetching') : i18nT(language, 'inspector.fetchCommentsFrom', { name: p.name })}
                         </button>
                     ))}
                     {providers.every(p => p.disabled) && (
                         <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px', textAlign: 'center', opacity: 0.8 }}>
-                            URL欄に対応するURLを入力してください
+                            {i18nT(language, 'inspector.enterUrlHint')}
                         </p>
                     )}
                 </div>
@@ -221,7 +331,7 @@ export const CommentSectionContent = ({
                 </div>
             )}
             {comments.length === 0 ? (
-                <div className="no-comments">コメントはありません</div>
+                <div className="no-comments">{i18nT(language, 'inspector.noComments')}</div>
             ) : (
                 comments.map(c => (
                     <div key={c.id} className="comment-item">
@@ -244,21 +354,27 @@ export const PlaylistSectionContent = ({
     onPlay,
     toMediaUrl,
     formatTime,
-    formatFileSize
+    formatFileSize,
+    prevVisibleCount = 1,
+    nextVisibleCount = 10
 }: {
     currentContextMedia: MediaFile[],
     playingMedia: MediaFile,
     onPlay: (m: MediaFile) => void,
     toMediaUrl: (path: string) => string,
     formatTime: (s: number) => string,
-    formatFileSize: (b: number) => string
+    formatFileSize: (b: number) => string,
+    prevVisibleCount?: number
+    nextVisibleCount?: number
 }) => {
 
     const currentIndex = currentContextMedia.findIndex(m => m.id === playingMedia.id)
     if (currentIndex === -1) return null
 
-    const start = Math.max(0, currentIndex - 1)
-    const end = Math.min(currentContextMedia.length, currentIndex + 11) // Current + 10 next
+    const safePrev = Math.max(0, Math.min(50, Number(prevVisibleCount || 0)))
+    const safeNext = Math.max(0, Math.min(50, Number(nextVisibleCount || 0)))
+    const start = Math.max(0, currentIndex - safePrev)
+    const end = Math.min(currentContextMedia.length, currentIndex + safeNext + 1)
     const playlistItems = currentContextMedia.slice(start, end)
 
     return (
@@ -302,20 +418,22 @@ export const PlaylistSectionContent = ({
 }
 
 export const RelationSectionContent = ({
+    language = 'ja',
     media,
     toMediaUrl,
     onRemoveParent,
     onSelectMedia,
     onOpenPicker
 }: {
+    language?: AppLanguage
     media: MediaFile[],
     toMediaUrl: (path: string) => string,
     onRemoveParent: (childId: number, parentId: number) => void,
     onSelectMedia: (m: MediaFile) => void,
     onOpenPicker: (rect: DOMRect) => void
 }) => {
-    // 複数選択時は編集不可
-    if (media.length !== 1) return <div className="no-comments">複数選択時は編集できません</div>
+    // 単一選択時のみ表示
+    if (media.length !== 1) return <div className="no-comments">{i18nT(language, 'inspector.singleSelectOnly')}</div>
 
     const item = media[0]
     const parents = item.parents || []
@@ -333,12 +451,12 @@ export const RelationSectionContent = ({
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 4 }}>
                     <path d="M12 5v14M5 12l7 7 7-7" />
                 </svg>
-                親子登録
+                {i18nT(language, 'inspector.registerRelations')}
             </button>
 
-            {/* 親作品（複数対応） */}
+            {/* 親作品 */}
             <div className="relation-group-header">
-                親作品 ({parentCount})
+                {i18nT(language, 'inspector.parentWorks')} ({parentCount})
             </div>
             <div className="relation-group">
                 {parents.length > 0 ? (
@@ -366,13 +484,13 @@ export const RelationSectionContent = ({
                         </div>
                     ))
                 ) : (
-                    <div className="no-relation-placeholder">親作品はありません</div>
+                    <div className="no-relation-placeholder">{i18nT(language, 'inspector.parentEmpty')}</div>
                 )}
             </div>
 
             {/* 子作品 */}
             <div className="relation-group-header">
-                子作品 ({childrenCount})
+                {i18nT(language, 'inspector.childWorks')} ({childrenCount})
             </div>
             <div className="relation-group">
                 <div className="children-list">
@@ -399,7 +517,7 @@ export const RelationSectionContent = ({
                             </button>
                         </div>
                     ))}
-                    {(!item.children || item.children.length === 0) && <div className="no-relation-placeholder">子作品はありません</div>}
+                    {(!item.children || item.children.length === 0) && <div className="no-relation-placeholder">{i18nT(language, 'inspector.childEmpty')}</div>}
                 </div>
             </div>
         </div>
@@ -417,12 +535,14 @@ const DefaultSearchTargets = {
 type SearchTargets = typeof DefaultSearchTargets
 
 export const MediaPicker = ({
+    language = 'ja',
     onSelect,
     onClose,
     onSearch,
     toMediaUrl,
     style
 }: {
+    language?: AppLanguage
     onSelect: (media: any, type: 'parent' | 'child') => void
     onClose: () => void
     onSearch: (query: string, targets: SearchTargets) => Promise<any[]>
@@ -466,7 +586,7 @@ export const MediaPicker = ({
                     <button
                         className={`media-picker-search-btn ${isOptionsOpen ? 'active' : ''}`}
                         onClick={() => setIsOptionsOpen(!isOptionsOpen)}
-                        title="検索範囲"
+                        title={i18nT(language, 'inspector.searchOptions')}
                     >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <circle cx="11" cy="11" r="8"></circle>
@@ -478,7 +598,7 @@ export const MediaPicker = ({
                     </button>
                     <input
                         type="text"
-                        placeholder="動画を検索..."
+                        placeholder={i18nT(language, 'inspector.searchByTitle')}
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                         autoFocus
@@ -487,13 +607,13 @@ export const MediaPicker = ({
 
                 {isOptionsOpen && (
                     <div className="picker-search-options-dropdown">
-                        <div className="picker-search-options-header">検索範囲</div>
+                        <div className="picker-search-options-header">{i18nT(language, 'inspector.searchOptions')}</div>
                         {[
-                            { key: 'name', label: '名前' },
-                            { key: 'folder', label: 'フォルダ' },
-                            { key: 'artist', label: '投稿者' },
-                            { key: 'tags', label: 'タグ' },
-                            { key: 'description', label: '説明' },
+                            { key: 'name', label: i18nT(language, 'inspector.name') },
+                            { key: 'folder', label: i18nT(language, 'inspector.folder') },
+                            { key: 'artist', label: i18nT(language, 'inspector.artist') },
+                            { key: 'tags', label: i18nT(language, 'inspector.tags') },
+                            { key: 'description', label: i18nT(language, 'inspector.description') },
                         ].map((opt) => (
                             <div
                                 key={opt.key}
@@ -510,8 +630,8 @@ export const MediaPicker = ({
                 )}
             </div>
             <div className="media-picker-content">
-                {loading && <div className="picker-loading">検索中...</div>}
-                {!loading && results.length === 0 && query.length > 0 && <div className="picker-no-results">見つかりませんでした</div>}
+                {loading && <div className="picker-loading">{i18nT(language, 'inspector.searching')}</div>}
+                {!loading && results.length === 0 && query.length > 0 && <div className="picker-no-results">{i18nT(language, 'inspector.noResults')}</div>}
                 <div className="picker-results-list">
                     {results.map(item => (
                         <div key={item.id} className="picker-result-item">
@@ -534,7 +654,7 @@ export const MediaPicker = ({
                                         onSelect(item, 'parent')
                                     }}
                                 >
-                                    親に追加
+                                    {i18nT(language, 'inspector.addAsParent')}
                                 </button>
                                 <button
                                     className="picker-action-btn child"
@@ -543,7 +663,7 @@ export const MediaPicker = ({
                                         onSelect(item, 'child')
                                     }}
                                 >
-                                    子に追加
+                                    {i18nT(language, 'inspector.addAsChild')}
                                 </button>
                             </div>
                         </div>

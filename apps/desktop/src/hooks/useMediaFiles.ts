@@ -27,7 +27,11 @@ export function useMediaFiles(
 
         return mediaList.map(m => ({
             ...m,
-            thumbnail_path: m.thumbnail_path ? `${baseUrl}/api/thumbnails/${m.id}?userToken=${userToken}&accessToken=${accessToken}` : '',
+            thumbnail_path: m.thumbnail_path
+                ? (/^https?:\/\//i.test(String(m.thumbnail_path))
+                    ? String(m.thumbnail_path)
+                    : `${baseUrl}/api/thumbnails/${m.id}?userToken=${userToken}&accessToken=${accessToken}`)
+                : '',
             file_path: `${baseUrl}/api/stream/${m.id}?userToken=${userToken}&accessToken=${accessToken}`,
         }))
     }, [myUserToken])

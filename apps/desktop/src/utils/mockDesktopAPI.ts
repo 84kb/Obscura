@@ -163,7 +163,7 @@ export const mockDesktopAPI = {
     updateLastPlayed: async (_id: number) => { },
 
     // Import
-    importMedia: async (_filePaths: string[]) => [],
+    importMedia: async (_filePaths: string[], _options?: { deleteSource?: boolean; importSource?: string }) => [],
     checkImportDuplicates: async (_filePaths: string[]) => [],
     checkEntryDuplicates: async (_mediaId: number) => [],
 
@@ -172,6 +172,7 @@ export const mockDesktopAPI = {
     copyFrameToClipboard: async (_dataUrl: string) => true,
     saveCapturedFrame: async (_dataUrl: string) => true,
     setCapturedThumbnail: async (_mediaId: number, _dataUrl: string) => null,
+    captureFrameDataUrl: async (_filePath: string, _timeSeconds: number) => null,
 
     // Comment
     addComment: async (mediaId: number, text: string, time: number): Promise<MediaComment> => ({

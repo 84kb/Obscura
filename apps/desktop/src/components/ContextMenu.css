@@ -3,8 +3,9 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    padding: 6px 0;
-    min-width: 200px;
+    padding: 4px 0;
+    min-width: 176px;
+    overflow: hidden;
     z-index: 10000;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
     animation: contextMenuFadeIn 0.15s ease-out;
@@ -25,9 +26,10 @@
 .context-menu-item {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 8px 14px;
-    font-size: 13px;
+    gap: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    line-height: 1.25;
     color: var(--text-main);
     cursor: pointer;
     transition: background 0.15s ease;
@@ -66,7 +68,7 @@
 .context-menu-separator {
     height: 1px;
     background: var(--border);
-    margin: 6px 0;
+    margin: 4px 0;
 }
 
 /* サブメニュー */
@@ -85,8 +87,9 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    padding: 6px 0;
+    padding: 4px 0;
     min-width: 160px;
+    overflow: hidden;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
     opacity: 0;
     visibility: hidden;

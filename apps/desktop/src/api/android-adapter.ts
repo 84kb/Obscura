@@ -61,7 +61,7 @@ export class AndroidAdapter implements IMediaLibraryAPI {
     async updateTagGroup(_tagId: number, _groupId: number | null): Promise<void> { }
 
     async checkImportDuplicates(_filePaths: string[]): Promise<any[]> { return []; }
-    async importMedia(_filePaths: string[]): Promise<MediaFile[]> { return []; }
+    async importMedia(_filePaths: string[], _options?: { deleteSource?: boolean; importSource?: string }): Promise<MediaFile[]> { return []; }
     async checkEntryDuplicates(_mediaId: number): Promise<any[]> { return []; }
     async findLibraryDuplicates(_criteria?: any): Promise<any[]> { return []; }
     async refreshMetadata(_ids: number[]): Promise<void> { }
@@ -74,6 +74,7 @@ export class AndroidAdapter implements IMediaLibraryAPI {
     async copyFrameToClipboard(_dataUrl: string): Promise<boolean> { return false; }
     async saveCapturedFrame(_dataUrl: string): Promise<boolean> { return false; }
     async setCapturedThumbnail(_mediaId: number, _dataUrl: string): Promise<string | null> { return null; }
+    async captureFrameDataUrl(_filePath: string, _timeSeconds: number): Promise<string | null> { return null; }
 
     async addComment(_mediaId: number, _text: string, _time: number): Promise<MediaComment> { throw new Error('Not implemented'); }
     async getComments(_mediaId: number): Promise<MediaComment[]> { return []; }

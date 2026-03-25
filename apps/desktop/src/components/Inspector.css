@@ -159,7 +159,8 @@
     padding: var(--spacing-sm) var(--spacing-md);
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    justify-content: flex-start;
+    align-items: stretch;
 }
 
 /* タグ/ジャンル共通 */
@@ -508,6 +509,21 @@
 
 .description-preview-html a:hover {
     text-decoration: underline;
+}
+
+.description-editor-html {
+    min-height: 86px;
+    cursor: text;
+    overflow-y: auto;
+    max-height: 320px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.5;
+}
+
+.description-editor-html:empty::before {
+    content: "説明を入力...";
+    color: var(--text-muted);
 }
 
 /* ゴミ箱アクション */

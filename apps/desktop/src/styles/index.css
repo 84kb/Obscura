@@ -128,6 +128,28 @@ textarea,
   background: color-mix(in srgb, var(--primary), transparent 95%);
 }
 
+.btn-outline-secondary {
+  background: transparent;
+  border: 1.5px solid var(--border);
+  color: var(--text-main);
+}
+
+.btn-outline-secondary:hover {
+  background: var(--bg-hover);
+  border-color: color-mix(in srgb, var(--text-muted), transparent 35%);
+}
+
+.btn-outline-danger {
+  background: transparent;
+  border: 1.5px solid var(--danger, #e74c3c);
+  color: var(--danger, #e74c3c);
+}
+
+.btn-outline-danger:hover {
+  background: color-mix(in srgb, var(--danger, #e74c3c), transparent 88%);
+  border-color: var(--danger, #e74c3c);
+}
+
 .btn-full {
   width: 100%;
 }

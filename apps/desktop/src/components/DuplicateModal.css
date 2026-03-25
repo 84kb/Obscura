@@ -4,7 +4,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: rgba(0, 0, 0, 0.85);
+    background-color: color-mix(in srgb, #000, transparent 15%);
     /* Slightly darker */
     display: flex;
     justify-content: center;
@@ -16,7 +16,7 @@
 }
 
 .duplicate-modal {
-    background-color: #1a1a1a;
+    background-color: var(--bg-card);
     width: 800px;
     max-width: 95vw;
     border-radius: 12px;
@@ -24,7 +24,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    border: 1px solid #333;
+    border: 1px solid var(--border);
 }
 
 .duplicate-modal-header {
@@ -32,20 +32,20 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background-color: #1a1a1a;
+    background-color: var(--bg-card);
 }
 
 .duplicate-modal-header h3 {
     margin: 0;
     font-size: 14px;
     font-weight: 700;
-    color: #fff;
+    color: var(--text-main);
 }
 
 .close-btn {
     background: none;
     border: none;
-    color: #666;
+    color: var(--text-muted);
     font-size: 20px;
     cursor: pointer;
     line-height: 1;
@@ -53,7 +53,7 @@
 }
 
 .close-btn:hover {
-    color: #fff;
+    color: var(--text-main);
 }
 
 .duplicate-comparison {
@@ -61,12 +61,12 @@
     padding: 30px 40px;
     /* More horizontal padding as in image */
     gap: 20px;
-    background-color: #1a1a1a;
+    background-color: var(--bg-card);
 }
 
 .duplicate-card {
     flex: 1;
-    background-color: #222;
+    background-color: var(--bg-dark);
     border-radius: 8px;
     overflow: hidden;
     display: flex;
@@ -77,7 +77,7 @@
 }
 
 .duplicate-card.active {
-    border-color: #3b82f6;
+    border-color: var(--primary);
 }
 
 .preview-container {
@@ -166,7 +166,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    border-top: 1px solid #222;
+    border-top: 1px solid var(--border);
 }
 
 .option-group {
@@ -178,19 +178,19 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    color: #ddd;
+    color: var(--text-main);
     font-size: 13px;
     cursor: pointer;
 }
 
 .radio-option input {
-    accent-color: #3b82f6;
+    accent-color: var(--primary);
     width: 14px;
     height: 14px;
 }
 
 .confirm-btn {
-    background-color: #1e70e0;
+    background-color: var(--primary);
     color: white;
     border: none;
     padding: 8px 20px;
@@ -201,7 +201,92 @@
 }
 
 .confirm-btn:hover {
-    background-color: #2563eb;
+    filter: brightness(1.08);
+}
+
+.confirm-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.cancel-btn {
+    padding: 8px 16px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-main);
+    border-radius: 4px;
+    cursor: pointer;
+    margin-right: 10px;
+}
+
+.cancel-btn:hover {
+    background: var(--bg-hover);
+}
+
+.confirm-btn.danger {
+    background-color: var(--danger, #e74c3c);
+    border: 1px solid color-mix(in srgb, var(--danger, #e74c3c), #000 20%);
+}
+
+.duplicate-search-modal {
+    max-width: 450px;
+}
+
+.duplicate-modal-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 15px;
+}
+
+.duplicate-modal-tab-btn {
+    flex: 1;
+    padding: 10px;
+    background: transparent;
+    color: var(--text-muted);
+    border: none;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+}
+
+.duplicate-modal-tab-btn.active {
+    background: color-mix(in srgb, var(--bg-main), var(--bg-hover) 25%);
+    color: var(--text-main);
+    border-bottom-color: var(--primary);
+}
+
+.duplicate-search-content {
+    padding: 0 20px 20px 20px;
+}
+
+.duplicate-search-note {
+    margin-bottom: 15px;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.duplicate-search-warning {
+    margin-bottom: 10px;
+    font-size: 0.9rem;
+    color: var(--danger, #e74c3c);
+}
+
+.duplicate-search-hint {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    opacity: 0.8;
+}
+
+.criteria-list .checkbox-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+    cursor: pointer;
+    color: var(--text-main);
+}
+
+.criteria-list .checkbox-row input {
+    margin-right: 10px;
+    accent-color: var(--primary);
 }
 
 @keyframes fadeIn {

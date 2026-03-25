@@ -10,6 +10,7 @@ interface SettingsModalProps {
     settings: AppSettings
     onUpdateSettings: (settings: AppSettings) => void
     onClose: () => void
+    language?: 'ja' | 'en'
 }
 
 // 削除された定義
@@ -27,6 +28,14 @@ const PERMISSION_LABELS: Record<string, string> = {
     'UPLOAD': 'UP',
     'EDIT': '編集',
     'FULL': 'フル'
+}
+
+const PERMISSION_LABELS_EN: Record<string, string> = {
+    'READ_ONLY': 'Read',
+    'DOWNLOAD': 'DL',
+    'UPLOAD': 'UP',
+    'EDIT': 'Edit',
+    'FULL': 'Full'
 }
 
 const SHORTCUT_LABELS: Record<string, string> = {
@@ -48,6 +57,24 @@ const SHORTCUT_LABELS: Record<string, string> = {
     'NAV_RIGHT': '右へ移動'
 }
 
+const SHORTCUT_LABELS_EN: Record<string, string> = {
+    'PLAYER_TOGGLE_PLAY': 'Play / Pause',
+    'PLAYER_FORWARD': 'Forward 10s',
+    'PLAYER_REWIND': 'Rewind 10s',
+    'PLAYER_STEP_FORWARD': 'Step 1 frame (paused only)',
+    'PLAYER_STEP_BACKWARD': 'Back 1 frame (paused only)',
+    'PLAYER_VOLUME_UP': 'Volume up',
+    'PLAYER_VOLUME_DOWN': 'Volume down',
+    'PLAYER_TOGGLE_MUTE': 'Toggle mute',
+    'PLAYER_TOGGLE_FULLSCREEN': 'Toggle fullscreen',
+    'NAV_ENTER': 'Open item',
+    'NAV_BACK': 'Back',
+    'NAV_UP': 'Move up',
+    'NAV_DOWN': 'Move down',
+    'NAV_LEFT': 'Move left',
+    'NAV_RIGHT': 'Move right'
+}
+
 type ShortcutCategory = 'Player' | 'Navigation'
 const SHORTCUT_CATEGORIES: Record<ShortcutCategory, ShortcutAction[]> = {
     'Player': [
@@ -62,10 +89,59 @@ const SHORTCUT_CATEGORIES: Record<ShortcutCategory, ShortcutAction[]> = {
     ]
 }
 
-export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsModalProps) {
+const DEFAULT_INSPECTOR_SECTION_VISIBILITY = {
+    artist: true,
+    description: true,
+    relations: true,
+    url: true,
+    tags: true,
+    folders: true,
+    info: true,
+    comments: true,
+    playlist: true
+}
+
+const DEFAULT_INSPECTOR_INFO_VISIBILITY = {
+    rating: true,
+    resolution: true,
+    duration: true,
+    fileSize: true,
+    importedAt: true,
+    createdAt: true,
+    modifiedAt: true,
+    audioBitrate: true,
+    framerate: true,
+    formatName: true,
+    codecId: true
+}
+
+export function SettingsModal({ settings, onUpdateSettings, onClose, language = 'ja' }: SettingsModalProps) {
+    const tr = (ja: string, en: string) => language === 'en' ? en : ja
     const [activeCategory, setActiveCategory] = useState<Category>('general')
     const [appVersion, setAppVersion] = useState<string>('Unknown')
     const [searchQuery, setSearchQuery] = useState('')
+    const inspectorSettings = {
+        sectionVisibility: {
+            ...DEFAULT_INSPECTOR_SECTION_VISIBILITY,
+            ...(settings.inspector?.sectionVisibility || {})
+        },
+        infoVisibility: {
+            ...DEFAULT_INSPECTOR_INFO_VISIBILITY,
+            ...(settings.inspector?.infoVisibility || {})
+        },
+        playlistPrevVisibleCount: Number.isFinite(Number(settings.inspector?.playlistPrevVisibleCount))
+            ? Math.max(0, Math.min(50, Number(settings.inspector?.playlistPrevVisibleCount)))
+            : 1,
+        playlistNextVisibleCount: Number.isFinite(Number(settings.inspector?.playlistNextVisibleCount))
+            ? Math.max(0, Math.min(50, Number(settings.inspector?.playlistNextVisibleCount)))
+            : (() => {
+                const legacy = Number.isFinite(Number(settings.inspector?.playlistVisibleCount))
+                    ? Math.max(3, Math.min(50, Number(settings.inspector?.playlistVisibleCount)))
+                    : 12
+                return Math.max(0, legacy - 2)
+            })()
+    }
+    const [expandedInspectorOption, setExpandedInspectorOption] = useState<string | null>('section:artist')
 
     // ショートカット関連
     const shortcutContext = useContext(ShortcutContext)
@@ -102,29 +178,47 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
     const categories: { id: Category; label: string; icon: JSX.Element; group: string }[] = [
         // 基本
-        { id: 'general', label: '基本設定', group: '基本', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg> },
-        { id: 'profile', label: 'プロフィール', group: '基本', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg> },
+        { id: 'general', label: tr('基本設定', 'General'), group: tr('基本', 'Core'), icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg> },
+        { id: 'profile', label: tr('プロフィール', 'Profile'), group: tr('基本', 'Core'), icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg> },
 
         // 表示・操作
-        { id: 'theme', label: 'テーマ', group: '表示・操作', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="5"></circle><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path></svg> },
-        { id: 'viewer', label: 'ビューアー', group: '表示・操作', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg> },
-        { id: 'shortcuts', label: 'ショートカット', group: '表示・操作', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect><line x1="6" y1="8" x2="6" y2="8"></line><line x1="10" y1="8" x2="10" y2="8"></line><line x1="14" y1="8" x2="14" y2="8"></line><line x1="18" y1="8" x2="18" y2="8"></line><line x1="6" y1="12" x2="6" y2="12"></line><line x1="10" y1="12" x2="10" y2="12"></line><line x1="14" y1="12" x2="14" y2="12"></line><line x1="18" y1="12" x2="18" y2="12"></line><line x1="7" y1="16" x2="17" y2="16"></line></svg> },
+        { id: 'theme', label: tr('テーマ', 'Theme'), group: tr('表示・操作', 'Display & Controls'), icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="5"></circle><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path></svg> },
+        { id: 'viewer', label: tr('ビューアー', 'Viewer'), group: tr('表示・操作', 'Display & Controls'), icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg> },
+        { id: 'shortcuts', label: tr('ショートカット', 'Shortcuts'), group: tr('表示・操作', 'Display & Controls'), icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect><line x1="6" y1="8" x2="6" y2="8"></line><line x1="10" y1="8" x2="10" y2="8"></line><line x1="14" y1="8" x2="14" y2="8"></line><line x1="18" y1="8" x2="18" y2="8"></line><line x1="6" y1="12" x2="6" y2="12"></line><line x1="10" y1="12" x2="10" y2="12"></line><line x1="14" y1="12" x2="14" y2="12"></line><line x1="18" y1="12" x2="18" y2="12"></line><line x1="7" y1="16" x2="17" y2="16"></line></svg> },
 
         // ライブラリ
-        { id: 'import', label: 'インポート・ダウンロード', group: 'ライブラリ', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> },
-        { id: 'audio', label: 'オーディオ', group: 'ライブラリ', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg> },
-        { id: 'media-engine', label: 'メディアエンジン', group: 'ライブラリ', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> },
-        { id: 'network', label: 'ネットワーク同期', group: 'ライブラリ', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg> },
+        { id: 'import', label: tr('インポート・ダウンロード', 'Import & Download'), group: tr('ライブラリ', 'Library'), icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> },
+        { id: 'audio', label: tr('オーディオ', 'Audio'), group: tr('ライブラリ', 'Library'), icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg> },
+        { id: 'media-engine', label: tr('メディアエンジン', 'Media Engine'), group: tr('ライブラリ', 'Library'), icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg> },
+        { id: 'network', label: tr('ネットワーク同期', 'Network Sync'), group: tr('ライブラリ', 'Library'), icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg> },
 
         // システム
-        { id: 'extensions', label: '拡張機能', group: 'システム', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg> },
-        { id: 'developer', label: '開発者ツール', group: 'システム', icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg> },
+        { id: 'extensions', label: tr('拡張機能', 'Extensions'), group: tr('システム', 'System'), icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg> },
+        { id: 'developer', label: tr('開発者ツール', 'Developer Tools'), group: tr('システム', 'System'), icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg> },
     ]
 
     const handleToggle = (key: keyof AppSettings) => {
         onUpdateSettings({
             ...settings,
             [key]: !settings[key]
+        })
+    }
+
+    const updateInspectorSettings = (updates: Partial<AppSettings['inspector']>) => {
+        onUpdateSettings({
+            ...settings,
+            inspector: {
+                ...inspectorSettings,
+                ...(updates || {}),
+                sectionVisibility: {
+                    ...inspectorSettings.sectionVisibility,
+                    ...((updates as any)?.sectionVisibility || {})
+                },
+                infoVisibility: {
+                    ...inspectorSettings.infoVisibility,
+                    ...((updates as any)?.infoVisibility || {})
+                }
+            }
         })
     }
 
@@ -187,7 +281,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }
 
     const handleDeleteTheme = (id: string) => {
-        if (confirm('このテーマを削除してもよろしいですか？')) {
+        if (confirm(tr('このテーマを削除してもよろしいですか？', 'Delete this theme?'))) {
             deleteTheme(id)
         }
     }
@@ -208,7 +302,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
     const handleCopyTemplate = (css: string) => {
         api.copyToClipboard(css)
-        alert('テンプレートをクリップボードにコピーしました')
+        alert(tr('テンプレートをクリップボードにコピーしました', 'Template copied to clipboard'))
     }
 
     useEffect(() => {
@@ -379,25 +473,25 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
             return (
                 <div className="settings-page">
                     <h3 className="settings-page-title">
-                        {isEdit ? 'テーマを編集' : '新しいテーマを作成'}
+                        {isEdit ? tr('テーマを編集', 'Edit Theme') : tr('新しいテーマを作成', 'Create New Theme')}
                     </h3>
                     <div className="settings-section">
                         {!isEdit && (
                             <div className="settings-row">
                                 <div className="settings-info">
-                                    <span className="settings-label">テーマ名</span>
+                                    <span className="settings-label">{tr('テーマ名', 'Theme Name')}</span>
                                 </div>
                                 <input
                                     type="text"
                                     value={newThemeName}
                                     onChange={(e) => setNewThemeName(e.target.value)}
                                     className="form-control"
-                                    placeholder="テーマ名を入力"
+                                    placeholder={tr('テーマ名を入力', 'Enter theme name')}
                                 />
                             </div>
                         )}
 
-                        <h4 className="section-title">カラー設定</h4>
+                        <h4 className="section-title">{tr('カラー設定', 'Color Settings')}</h4>
                         {Object.keys(editingColors).map((key) =>
                             renderColorPicker(key as keyof ThemeColors, editingColors[key as keyof ThemeColors], (val) => {
                                 setEditingColors(prev => ({ ...prev, [key]: val }))
@@ -405,9 +499,9 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         )}
 
                         <div className="settings-actions" style={{ marginTop: '20px', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-                            <button className="btn btn-secondary" onClick={handleCancel}>キャンセル</button>
+                            <button className="btn btn-secondary" onClick={handleCancel}>{tr('キャンセル', 'Cancel')}</button>
                             <button className="btn btn-primary" onClick={handleSave} disabled={!isEdit && !newThemeName.trim()}>
-                                {isEdit ? '更新' : '作成'}
+                                {isEdit ? tr('更新', 'Update') : tr('作成', 'Create')}
                             </button>
                         </div>
                     </div>
@@ -417,25 +511,25 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
         return (
             <div className="settings-page">
-                <h3 className="settings-page-title">テーマ設定</h3>
+                <h3 className="settings-page-title">{tr('テーマ設定', 'Theme Settings')}</h3>
                 <div className="settings-section">
                     <div className="settings-header-actions" style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
                         <span className="settings-description" style={{ margin: 0 }}>
-                            アプリの外観をカスタマイズできます。プリセットから選ぶか、独自のテーマを作成してください。
+                            {tr('アプリの外観をカスタマイズできます。プリセットから選ぶか、独自のテーマを作成してください。', 'Customize the app appearance. Choose a preset or create your own theme.')}
                         </span>
                         <div style={{ display: 'flex', gap: '8px' }}>
                             <button className="btn btn-primary btn-sm" style={{ height: '32px', padding: '0 12px' }} onClick={() => {
                                 setEditingColors(defaultDarkTheme.colors)
                                 setIsCreatingTheme(true)
                             }}>
-                                新規作成
+                                {tr('新規作成', 'New')}
                             </button>
                             <button className="btn btn-secondary btn-sm" style={{ height: '32px', padding: '0 12px' }} onClick={() => setShowTemplateModal(true)}>
-                                テンプレート
+                                {tr('テンプレート', 'Templates')}
                             </button>
                             <div style={{ position: 'relative' }}>
                                 <button className="btn btn-secondary btn-sm" style={{ height: '32px', padding: '0 12px' }} onClick={() => document.getElementById('theme-import-input')?.click()}>
-                                    CSSからインポート
+                                    {tr('CSSからインポート', 'Import from CSS')}
                                 </button>
                                 <input
                                     id="theme-import-input"
@@ -506,7 +600,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                         <div className="theme-actions" onClick={(e) => e.stopPropagation()}>
                                             <button
                                                 className="btn-icon-sm"
-                                                title="編集"
+                                                title={tr('編集', 'Edit')}
                                                 onClick={() => startEditTheme(theme)}
                                                 style={{ marginRight: '5px' }}
                                             >
@@ -514,7 +608,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                             </button>
                                             <button
                                                 className="btn-icon-sm text-danger"
-                                                title="削除"
+                                                title={tr('削除', 'Delete')}
                                                 onClick={() => handleDeleteTheme(theme.id)}
                                             >
                                                 ✕
@@ -551,29 +645,29 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     const renderMediaEngineSettings = () => {
         return (
             <div className="settings-page">
-                <h3 className="settings-page-title">メディアエンジン</h3>
+                <h3 className="settings-page-title">{tr('メディアエンジン', 'Media Engine')}</h3>
                 <section className="settings-section">
-                    <h4 className="section-title">FFmpeg 設定</h4>
+                    <h4 className="section-title">{tr('FFmpeg 設定', 'FFmpeg Settings')}</h4>
                     <div className="settings-card">
                         <div className="settings-row">
                             <div className="settings-info">
-                                <span className="settings-label">現在のバージョン</span>
+                                <span className="settings-label">{tr('現在のバージョン', 'Current version')}</span>
                                 <span className="settings-description">
-                                    {ffmpegInfo?.version || '読み込み中...'}
+                                    {ffmpegInfo?.version || tr('読み込み中...', 'Loading...')}
                                 </span>
                             </div>
                             <button className="btn btn-secondary btn-sm" onClick={() => {
                                 if (ffmpegInfo?.path) {
                                     api.copyToClipboard(ffmpegInfo.path)
-                                    alert('パスをコピーしました')
+                                    alert(tr('パスをコピーしました', 'Copied path'))
                                 }
                             }}>
-                                パスをコピー
+                                {tr('パスをコピー', 'Copy path')}
                             </button>
                         </div>
                         <div className="settings-row">
                             <div className="settings-info">
-                                <span className="settings-label">バイナリパス</span>
+                                <span className="settings-label">{tr('バイナリパス', 'Binary path')}</span>
                                 <span className="settings-description" style={{ fontFamily: 'monospace', fontSize: '11px', wordBreak: 'break-all' }}>
                                     {ffmpegInfo?.path || '...'}
                                 </span>
@@ -581,20 +675,20 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         </div>
                         <div className="settings-row">
                             <div className="settings-info">
-                                <span className="settings-label">アップデート</span>
+                                <span className="settings-label">{tr('アップデート', 'Update')}</span>
                                 <span className="settings-description">
-                                    {ffmpegUpdateStatus === 'checking' && '更新を確認中...'}
-                                    {ffmpegUpdateStatus === 'up-to-date' && '最新です'}
-                                    {ffmpegUpdateStatus === 'available' && '新しいバージョンが利用可能です'}
-                                    {ffmpegUpdateStatus === 'updating' && `更新中... ${ffmpegUpdateProgress}%`}
-                                    {ffmpegUpdateStatus === 'error' && 'エラーが発生しました'}
-                                    {ffmpegUpdateStatus === 'idle' && '手動で更新を確認できます'}
+                                    {ffmpegUpdateStatus === 'checking' && tr('更新を確認中...', 'Checking for updates...')}
+                                    {ffmpegUpdateStatus === 'up-to-date' && tr('最新です', 'Up to date')}
+                                    {ffmpegUpdateStatus === 'available' && tr('新しいバージョンが利用可能です', 'A new version is available')}
+                                    {ffmpegUpdateStatus === 'updating' && `${tr('更新中...', 'Updating...')} ${ffmpegUpdateProgress}%`}
+                                    {ffmpegUpdateStatus === 'error' && tr('エラーが発生しました', 'An error occurred')}
+                                    {ffmpegUpdateStatus === 'idle' && tr('手動で更新を確認できます', 'You can check for updates manually')}
                                 </span>
                             </div>
                             <div>
                                 {ffmpegUpdateStatus === 'available' ? (
                                     <button className="btn btn-primary btn-sm" onClick={handleUpdateFFmpeg}>
-                                        今すぐ更新
+                                        {tr('今すぐ更新', 'Update now')}
                                     </button>
                                 ) : (
                                     <button
@@ -602,7 +696,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                         onClick={handleCheckFFmpegUpdate}
                                         disabled={ffmpegUpdateStatus === 'checking' || ffmpegUpdateStatus === 'updating'}
                                     >
-                                        更新を確認
+                                        {tr('更新を確認', 'Check updates')}
                                     </button>
                                 )}
                             </div>
@@ -623,20 +717,21 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     const renderShortcutsSettings = () => {
         if (!shortcutContext) return null
         const keyMap = shortcutContext.getKeyMap()
+        const shortcutLabels = language === 'en' ? SHORTCUT_LABELS_EN : SHORTCUT_LABELS
 
         return (
             <div className="settings-page">
-                <h3 className="settings-page-title">ショートカット設定</h3>
+                <h3 className="settings-page-title">{tr('ショートカット設定', 'Shortcut Settings')}</h3>
                 <div className="settings-padded-content" style={{ display: 'flex', justifyContent: 'flex-end', paddingBottom: 0 }}>
                     <button
                         className="btn btn-secondary btn-sm"
                         onClick={() => {
-                            if (confirm('すべてのショートカットを初期設定に戻しますか？')) {
+                            if (confirm(tr('すべてのショートカットを初期設定に戻しますか？', 'Reset all shortcuts to default?'))) {
                                 shortcutContext.resetKeyMap()
                             }
                         }}
                     >
-                        デフォルトに戻す
+                        {tr('デフォルトに戻す', 'Reset to default')}
                     </button>
                 </div>
 
@@ -669,8 +764,8 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     return (
                                         <div key={action} className="settings-row">
                                             <div className="settings-info">
-                                                <span className="settings-label">{SHORTCUT_LABELS[action] || action}</span>
-                                                {isDup && <span style={{ color: 'var(--accent)', fontSize: '11px', marginLeft: '8px' }}>⚠ 重複</span>}
+                                                <span className="settings-label">{shortcutLabels[action] || action}</span>
+                                                {isDup && <span style={{ color: 'var(--accent)', fontSize: '11px', marginLeft: '8px' }}>{tr('⚠ 重複', '⚠ Duplicate')}</span>}
                                             </div>
                                             <button
                                                 className={`btn ${recordingAction === action ? 'btn-danger' : 'btn-outline'} btn-sm`}
@@ -683,7 +778,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                                 }}
                                                 onClick={() => setRecordingAction(action as ShortcutAction)}
                                             >
-                                                {recordingAction === action ? 'キーを入力...' : (keyMap[action] || '未設定')}
+                                                {recordingAction === action ? tr('キーを入力...', 'Press key...') : (keyMap[action] || tr('未設定', 'Unassigned'))}
                                             </button>
                                         </div>
                                     )
@@ -699,7 +794,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                     <div className="settings-card">
                         <div className="settings-row">
                             <div className="settings-info">
-                                <span className="settings-label">前の動画</span>
+                                <span className="settings-label">{tr('前の動画', 'Previous media')}</span>
                             </div>
                             <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
                                 Mouse Button 4 (戻る)
@@ -707,7 +802,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         </div>
                         <div className="settings-row">
                             <div className="settings-info">
-                                <span className="settings-label">次の動画</span>
+                                <span className="settings-label">{tr('次の動画', 'Next media')}</span>
                             </div>
                             <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
                                 Mouse Button 5 (進む)
@@ -895,7 +990,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }
 
     const handleDeleteUser = async (userId: string) => {
-        if (!confirm('このユーザーを削除しますか？')) return
+        if (!confirm(tr('このユーザーを削除しますか？', 'Delete this user?'))) return
         try {
             await api.deleteSharedUser(userId)
             setSharedUsers(sharedUsers.filter(u => u.id !== userId))
@@ -943,6 +1038,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }
 
     const renderUserManagement = () => {
+        const permissionLabels = language === 'en' ? PERMISSION_LABELS_EN : PERMISSION_LABELS
         // アクティブユーザー判定 (5分以内)
         const activeUsers = sharedUsers.filter(u => {
             if (!u.lastAccessAt) return false
@@ -952,21 +1048,21 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
         return (
             <div className="settings-section" style={{ marginTop: '24px', borderTop: '1px solid #333', paddingTop: '16px' }}>
-                <h4 className="section-title">ユーザー管理</h4>
+                <h4 className="section-title">{tr('ユーザー管理', 'User Management')}</h4>
 
                 {/* 接続中ユーザー */}
                 <div className="settings-card">
                     <div className="settings-row-vertical">
                         <span className="settings-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: activeUsers.length > 0 ? '#10b981' : '#6b7280' }}></span>
-                            現在の接続数: {activeUsers.length}
+                            {tr('現在の接続数', 'Current connections')}: {activeUsers.length}
                         </span>
                         {activeUsers.length > 0 && (
                             <div className="active-users-list" style={{ marginLeft: '16px' }}>
                                 {activeUsers.map(u => (
                                     <span key={u.id} className="active-user-badge">
                                         <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981', display: 'inline-block', marginRight: '6px' }}></div>
-                                        {u.nickname || '未指定'}
+                                        {u.nickname || tr('未指定', 'Unspecified')}
                                     </span>
                                 ))}
                             </div>
@@ -977,26 +1073,26 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                 {/* 新規ユーザー追加 */}
                 <div className="settings-card">
                     <div className="settings-row-vertical">
-                        <span className="settings-label">新規ユーザー追加</span>
+                        <span className="settings-label">{tr('新規ユーザー追加', 'Add User')}</span>
                         <p className="settings-description" style={{ margin: 0 }}>
-                            ユーザーから受け取ったトークンを入力し、アクセストークンを発行してください。
+                            {tr('ユーザーから受け取ったトークンを入力し、アクセストークンを発行してください。', 'Enter the token received from the user and issue an access token.')}
                         </p>
                         <div style={{ display: 'flex', gap: '8px', width: '100%', alignItems: 'center', marginTop: '4px' }}>
                             <input
                                 type="text"
-                                placeholder="ユーザートークンを入力"
+                                placeholder={tr('ユーザートークンを入力', 'Enter user token')}
                                 value={inputUserToken}
                                 onChange={e => setInputUserToken(e.target.value)}
                                 className="settings-input"
                                 style={{ flex: 1, minWidth: 0 }}
                             />
                             <button className="btn btn-primary btn-small" onClick={handleAddUser} disabled={!inputUserToken.trim()} style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>
-                                発行
+                                {tr('発行', 'Issue')}
                             </button>
                         </div>
                         {newAccessToken && (
                             <div className="token-display" style={{ width: '100%' }}>
-                                <p>アクセストークンを共有してください（一度しか表示されません）:</p>
+                                <p>{tr('アクセストークンを共有してください（一度しか表示されません）', 'Share this access token (shown only once)')}:</p>
                                 <code>{newAccessToken}</code>
                                 <button
                                     onClick={() => {
@@ -1006,7 +1102,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     className="btn btn-outline btn-small"
                                     style={{ marginTop: '8px' }}
                                 >
-                                    コピーして閉じる
+                                    {tr('コピーして閉じる', 'Copy and close')}
                                 </button>
                             </div>
                         )}
@@ -1016,34 +1112,34 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                 {/* 全ユーザーリスト */}
                 <div className="settings-card">
                     <div className="settings-padded-content">
-                        <span className="settings-label">登録ユーザー一覧</span>
+                        <span className="settings-label">{tr('登録ユーザー一覧', 'Registered users')}</span>
                         <div className="users-list">
                             {sharedUsers.map(u => (
                                 <div key={u.id} className="user-card-item">
                                     <div className="user-card-header">
-                                        <span className="user-card-name">{u.nickname || '未指定'}</span>
+                                        <span className="user-card-name">{u.nickname || tr('未指定', 'Unspecified')}</span>
                                         <button
                                             onClick={() => handleDeleteUser(u.id)}
                                             className="icon-button delete"
-                                            title="削除"
+                                            title={tr('削除', 'Delete')}
                                         >
                                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                                         </button>
                                     </div>
                                     <div className="user-card-last-access">
-                                        最終アクセス: {u.lastAccessAt ? new Date(u.lastAccessAt).toLocaleString() : '未アクセス'}
+                                        {tr('最終アクセス', 'Last seen')}: {u.lastAccessAt ? new Date(u.lastAccessAt).toLocaleString() : tr('未アクセス', 'Never')}
                                     </div>
                                     {/* トークン表示 (スポイラー形式) */}
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                                         <div className="token-row">
                                             <div className="token-label-row">
-                                                <span className="token-label">ユーザートークン</span>
+                                                <span className="token-label">{tr('ユーザートークン', 'User token')}</span>
                                                 {visibleTokens[u.id] === 'user' && (
                                                     <button
                                                         onClick={() => api.copyToClipboard(u.userToken)}
                                                         className="btn btn-outline btn-small"
                                                     >
-                                                        コピー
+                                                        {tr('コピー', 'Copy')}
                                                     </button>
                                                 )}
                                             </div>
@@ -1051,18 +1147,18 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                                 onClick={() => toggleTokenVisibility(u.id, 'user')}
                                                 className={`token-value-box ${visibleTokens[u.id] === 'user' ? 'revealed' : ''}`}
                                             >
-                                                {visibleTokens[u.id] === 'user' ? u.userToken : 'クリックして表示'}
+                                                {visibleTokens[u.id] === 'user' ? u.userToken : tr('クリックして表示', 'Click to reveal')}
                                             </div>
                                         </div>
                                         <div className="token-row">
                                             <div className="token-label-row">
-                                                <span className="token-label">アクセストークン</span>
+                                                <span className="token-label">{tr('アクセストークン', 'Access token')}</span>
                                                 {visibleTokens[u.id] === 'access' && (
                                                     <button
                                                         onClick={() => api.copyToClipboard(u.accessToken)}
                                                         className="btn btn-outline btn-small"
                                                     >
-                                                        コピー
+                                                        {tr('コピー', 'Copy')}
                                                     </button>
                                                 )}
                                             </div>
@@ -1070,11 +1166,11 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                                 onClick={() => toggleTokenVisibility(u.id, 'access')}
                                                 className={`token-value-box ${visibleTokens[u.id] === 'access' ? 'revealed' : ''}`}
                                             >
-                                                {visibleTokens[u.id] === 'access' ? u.accessToken : 'クリックして表示'}
+                                                {visibleTokens[u.id] === 'access' ? u.accessToken : tr('クリックして表示', 'Click to reveal')}
                                             </div>
                                         </div>
                                         <div className="field-hint" style={{ fontSize: '11px', marginTop: '0' }}>
-                                            ※ 接続時は「ユーザートークン:アクセストークン」形式で入力
+                                            {tr('※ 接続時は「ユーザートークン:アクセストークン」形式で入力', 'Use format \"userToken:accessToken\" when connecting')}
                                         </div>
 
                                         {/* 権限管理 */}
@@ -1088,7 +1184,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                                         className={`permission-btn ${(u.permissions || []).includes(p) ? 'active' : ''}`}
                                                         title={p}
                                                     >
-                                                        {PERMISSION_LABELS[p] || p}
+                                                        {permissionLabels[p] || p}
                                                     </button>
                                                 ))}
                                             </div>
@@ -1131,7 +1227,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     const handleTestConnection = async () => {
         if (!remoteUrl || !remoteKey) return
         setConnectionStatus('testing')
-        setConnectionMsg('接続確認中...')
+            setConnectionMsg(tr('接続確認中...', 'Checking connection...'))
         try {
             const normalizedUrl = normalizeRemoteUrl(remoteUrl)
 
@@ -1141,7 +1237,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
             // HTTPで失敗し、かつURLがhttp://で始まる場合はhttps://で再試行
             if (!result.success && normalizedUrl.startsWith('http://')) {
-                setConnectionMsg('HTTPS接続を試行中...')
+                    setConnectionMsg(tr('HTTPS接続を試行中...', 'Trying HTTPS connection...'))
                 const httpsUrl = normalizedUrl.replace('http://', 'https://')
                 const httpsResult = await api.testConnection(httpsUrl, remoteKey)
 
@@ -1152,7 +1248,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
             }
             // HTTPSで失敗し、かつURLがhttps://で始まる場合はhttp://で再試行
             else if (!result.success && normalizedUrl.startsWith('https://')) {
-                setConnectionMsg('HTTP接続を試行中...')
+                    setConnectionMsg(tr('HTTP接続を試行中...', 'Trying HTTP connection...'))
                 const httpUrl = normalizedUrl.replace('https://', 'http://')
                 const httpResult = await api.testConnection(httpUrl, remoteKey)
 
@@ -1165,7 +1261,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
             if (result.success) {
                 setConnectionStatus('success')
                 const protocol = finalUrl.startsWith('https://') ? 'HTTPS' : 'HTTP'
-                setConnectionMsg(`接続成功！ (${protocol})`)
+                setConnectionMsg(tr(`接続成功！ (${protocol})`, `Connected (${protocol})`))
                 // URLを成功したプロトコルで更新
                 setRemoteUrl(finalUrl)
                 // ホスト側のライブラリ名を自動反映
@@ -1174,11 +1270,11 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                 }
             } else {
                 setConnectionStatus('error')
-                setConnectionMsg(`接続失敗: ${result.message}`)
+                setConnectionMsg(tr(`接続失敗: ${result.message}`, `Connection failed: ${result.message}`))
             }
         } catch (e: any) {
             setConnectionStatus('error')
-            setConnectionMsg(`エラー: ${e.message}`)
+            setConnectionMsg(tr(`エラー: ${e.message}`, `Error: ${e.message}`))
         }
     }
 
@@ -1197,14 +1293,14 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
             setRemoteName('')
             setConnectionStatus('idle')
             setConnectionMsg('')
-            alert('リモートライブラリを追加しました。')
+            alert(tr('リモートライブラリを追加しました。', 'Remote library added.'))
         } catch (e: any) {
-            alert(`追加に失敗しました: ${e.message}`)
+            alert(tr(`追加に失敗しました: ${e.message}`, `Failed to add: ${e.message}`))
         }
     }
 
     const handleDeleteRemoteLibrary = async (lib: any) => {
-        if (!confirm(`リモートライブラリ "${lib.name || lib.url}" を削除しますか？`)) return
+        if (!confirm(tr(`リモートライブラリ "${lib.name || lib.url}" を削除しますか？`, `Delete remote library "${lib.name || lib.url}"?`))) return
         try {
             // updateClientConfig でリストから除外して保存
             const currentLibs = clientConfig?.remoteLibraries || []
@@ -1218,37 +1314,39 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }
 
     const renderNetworkSettings = () => {
-        if (!serverConfig) return <div className="loading">読み込み中...</div>
+        if (!serverConfig) return <div className="loading">{tr('読み込み中...', 'Loading...')}</div>
 
         return (
             <div className="settings-page">
-                <h3 className="settings-page-title">ネットワーク共有</h3>
+                <h3 className="settings-page-title">{tr('ネットワーク共有', 'Network Sharing')}</h3>
 
                 <div className="network-tabs">
                     <button
                         className={`network-tab ${activeTab === 'host' ? 'active' : ''}`}
                         onClick={() => setActiveTab('host')}
                     >
-                        ホスト設定 (サーバー)
+                        {tr('ホスト設定 (サーバー)', 'Host Settings (Server)')}
                     </button>
                     <button
                         className={`network-tab ${activeTab === 'client' ? 'active' : ''}`}
                         onClick={() => setActiveTab('client')}
                     >
-                        クライアント設定 (接続)
+                        {tr('クライアント設定 (接続)', 'Client Settings (Connection)')}
                     </button>
                 </div>
 
                 {activeTab === 'host' ? (
                     <>
                         <section className="settings-section">
-                            <h4 className="section-title">サーバー状態</h4>
+                            <h4 className="section-title">{tr('サーバー状態', 'Server Status')}</h4>
                             <div className="settings-card">
                                 <div className="settings-row">
                                     <div className="settings-info">
-                                        <span className="settings-label">ネットワーク共有を有効にする</span>
+                                        <span className="settings-label">{tr('ネットワーク共有を有効にする', 'Enable network sharing')}</span>
                                         <span className="settings-description">
-                                            {isServerRunning ? '起動中 - 外部からの接続を受け付けています' : '停止中 - 外部からの接続は拒否されます'}
+                                            {isServerRunning
+                                                ? tr('起動中 - 外部からの接続を受け付けています', 'Running - accepting external connections')
+                                                : tr('停止中 - 外部からの接続は拒否されます', 'Stopped - external connections are rejected')}
                                         </span>
                                     </div>
                                     <label className="toggle-switch">
@@ -1263,7 +1361,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
                                 <div className="settings-row">
                                     <div className="settings-info">
-                                        <span className="settings-label">ポート番号</span>
+                                        <span className="settings-label">{tr('ポート番号', 'Port')}</span>
                                     </div>
                                     <div className="input-with-button">
                                         <input
@@ -1332,7 +1430,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     <div style={{ display: 'flex', gap: '8px', width: '100%', alignItems: 'center' }}>
                                         <input
                                             type="text"
-                                            placeholder="例: 192.168.1.50"
+                                            placeholder={tr('例: 192.168.1.50', 'e.g. 192.168.1.50')}
                                             value={newAllowedIP}
                                             onChange={e => setNewAllowedIP(e.target.value)}
                                             className="settings-input"
@@ -1445,14 +1543,14 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     <span className="settings-label">あなたのユーザートークン</span>
                                     <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
                                         <code className="code-block" style={{ flex: 1, margin: 0, wordBreak: 'break-all' }}>
-                                            {myUserToken || 'トークン生成中...'}
+                                            {myUserToken || tr('トークン生成中...', 'Generating token...')}
                                         </code>
                                         <button
                                             className="btn btn-outline btn-small"
                                             onClick={() => {
                                                 if (myUserToken) {
                                                     api.copyToClipboard(myUserToken)
-                                                    alert('コピーしました')
+                                                    alert(tr('コピーしました', 'Copied'))
                                                 }
                                             }}
                                         >
@@ -1478,7 +1576,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     </div>
 
                                     <div style={{ width: '100%' }}>
-                                        <label className="settings-label" style={{ marginBottom: '8px', display: 'block' }}>ホストURL</label>
+                                        <label className="settings-label" style={{ marginBottom: '8px', display: 'block' }}>{tr('ホストURL', 'Host URL')}</label>
                                         <input
                                             type="text"
                                             placeholder="例: http://192.168.1.10:3000"
@@ -1490,10 +1588,10 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     </div>
 
                                     <div style={{ width: '100%' }}>
-                                        <label className="settings-label" style={{ marginBottom: '8px', display: 'block' }}>アクセストークン</label>
+                                        <label className="settings-label" style={{ marginBottom: '8px', display: 'block' }}>{tr('アクセストークン', 'Access token')}</label>
                                         <input
                                             type="password"
-                                            placeholder="公開設定で生成されたキー"
+                                            placeholder={tr('公開設定で生成されたキー', 'Key generated by host settings')}
                                             value={remoteKey}
                                             onChange={e => setRemoteKey(e.target.value)}
                                             className="settings-input"
@@ -1507,7 +1605,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                             onClick={handleTestConnection}
                                             disabled={connectionStatus === 'testing' || !remoteUrl || !remoteKey}
                                         >
-                                            {connectionStatus === 'testing' ? '接続確認中...' : '接続テスト'}
+                                            {connectionStatus === 'testing' ? tr('接続確認中...', 'Testing connection...') : tr('接続テスト', 'Test connection')}
                                         </button>
 
                                         {connectionStatus !== 'idle' && (
@@ -1521,7 +1619,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                                 <span style={{ fontSize: '13px', color: connectionStatus === 'error' ? '#f44336' : 'var(--text-main)' }}>
                                                     {connectionMsg}
                                                     {connectionStatus === 'success' && remoteName && (
-                                                        <span style={{ marginLeft: '8px', opacity: 0.8 }}>(ライブラリ: {remoteName})</span>
+                                                        <span style={{ marginLeft: '8px', opacity: 0.8 }}>({tr('ライブラリ', 'Library')}: {remoteName})</span>
                                                     )}
                                                 </span>
                                             </div>
@@ -1554,31 +1652,31 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                                                     <button
                                                         className="btn btn-outline btn-small"
-                                                        title="一括同期"
+                                                        title={tr('一括同期', 'Bulk sync')}
                                                         onClick={async () => {
                                                             try {
                                                                 const btn = document.getElementById(`sync-btn-${lib.id}`) as HTMLButtonElement
                                                                 if (btn) {
                                                                     btn.disabled = true
-                                                                    btn.innerText = '同期中...'
+                                                                    btn.innerText = tr('同期中...', 'Syncing...')
                                                                 }
                                                                 const res = await api.syncRemoteLibrary(lib.url, lib.token, lib.id)
                                                                 if (res.success) {
-                                                                    alert('同期が完了しました。')
+                                                                    alert(tr('同期が完了しました。', 'Sync completed.'))
                                                                 }
                                                             } catch (e: any) {
-                                                                alert(`同期に失敗しました: ${e.message}`)
+                                                                alert(tr(`同期に失敗しました: ${e.message}`, `Sync failed: ${e.message}`))
                                                             } finally {
                                                                 const btn = document.getElementById(`sync-btn-${lib.id}`) as HTMLButtonElement
                                                                 if (btn) {
                                                                     btn.disabled = false
-                                                                    btn.innerText = '一括同期'
+                                                                    btn.innerText = tr('一括同期', 'Bulk sync')
                                                                 }
                                                             }
                                                         }}
                                                         id={`sync-btn-${lib.id}`}
                                                     >
-                                                        一括同期
+                                                        {tr('一括同期', 'Bulk sync')}
                                                     </button>
                                                     <button
                                                         className="icon-button delete"
@@ -1716,6 +1814,23 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
                     <div className="settings-row">
                         <div className="settings-info">
+                            <span className="settings-label">説明欄のリッチテキストを有効化</span>
+                            <span className="settings-description">
+                                インスペクタの説明セクションをHTMLリッチテキストとして編集・表示します。
+                            </span>
+                        </div>
+                        <label className="toggle-switch">
+                            <input
+                                type="checkbox"
+                                checked={!!settings.enableRichText}
+                                onChange={() => handleToggle('enableRichText')}
+                            />
+                            <span className="slider"></span>
+                        </label>
+                    </div>
+
+                    <div className="settings-row">
+                        <div className="settings-info">
                             <span className="settings-label">GPUハードウェアアクセラレーション</span>
                             <span className="settings-description">
                                 多くの環境でパフォーマンスが向上しますが、無効にすることで不具合が解消される場合があります。
@@ -1733,6 +1848,147 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                     </div>
                 </div>
             </section>
+
+            <section className="settings-section">
+                <h4 className="section-title">{tr('インスペクタ詳細', 'Inspector Details')}</h4>
+                <div className="settings-card">
+                    <div className="settings-row-vertical inspector-settings-group" style={{ gap: '12px' }}>
+                        <span className="settings-label">{tr('表示するセクション', 'Visible Sections')}</span>
+                        {[
+                            { key: 'artist', label: tr('アーティスト', 'Artist'), desc: tr('作者・投稿者などの表示と編集', 'Show and edit creator/uploader') },
+                            { key: 'description', label: tr('説明', 'Description'), desc: tr('説明文の表示と編集', 'Show and edit description') },
+                            { key: 'relations', label: tr('親子関係', 'Relations'), desc: tr('関連メディアのリンク表示', 'Show links to related media') },
+                            { key: 'url', label: 'URL', desc: '関連URLの表示と操作' },
+                            { key: 'tags', label: tr('タグ', 'Tags'), desc: tr('タグの追加・削除', 'Add or remove tags') },
+                            { key: 'folders', label: tr('フォルダー', 'Folders'), desc: tr('フォルダーの追加・削除', 'Add or remove folders') },
+                            { key: 'info', label: tr('インフォメーション', 'Information'), desc: tr('メタデータ情報の一覧', 'Metadata information list') },
+                            { key: 'comments', label: tr('コメント', 'Comments'), desc: tr('時刻コメントの表示', 'Show timeline comments') },
+                            { key: 'playlist', label: tr('プレイリスト', 'Playlist'), desc: tr('関連リストの表示件数を制御', 'Control visible related items') }
+                        ].map(item => {
+                            const optionId = `section:${item.key}`
+                            const isOpen = expandedInspectorOption === optionId
+                            const isEnabled = !!inspectorSettings.sectionVisibility[item.key as keyof typeof inspectorSettings.sectionVisibility]
+                            return (
+                                <div key={item.key} className={`inspector-option-card ${isOpen ? 'open' : ''}`}>
+                                    <button
+                                        type="button"
+                                        className="inspector-option-header"
+                                        onClick={() => setExpandedInspectorOption(isOpen ? null : optionId)}
+                                    >
+                                        <span className="inspector-option-title">{item.label}</span>
+                                        <span className="inspector-option-actions">
+                                            <label className="toggle-switch" onClick={(e) => e.stopPropagation()}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isEnabled}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    onChange={(e) => {
+                                                        e.stopPropagation()
+                                                        updateInspectorSettings({
+                                                            sectionVisibility: {
+                                                                [item.key]: !isEnabled
+                                                            } as any
+                                                        })
+                                                    }}
+                                                />
+                                                <span className="slider"></span>
+                                            </label>
+                                            <span className="inspector-option-chevron">{isOpen ? '▾' : '▸'}</span>
+                                        </span>
+                                    </button>
+                                    <div className={`inspector-option-body-wrap ${isOpen ? 'open' : ''}`}>
+                                        <div className="inspector-option-body">
+                                            <span className="settings-description">{item.desc}</span>
+                                            {item.key === 'playlist' && (
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
+                                                    <div className="settings-row" style={{ padding: '10px 12px' }}>
+                                                        <div className="settings-info">
+                                                            <span className="settings-label">{tr('前の動画の表示数', 'Previous items')}</span>
+                                                            <span className="settings-description">{tr('0〜50件（標準: 1）', '0-50 (default: 1)')}</span>
+                                                        </div>
+                                                        <input
+                                                            type="number"
+                                                            min={0}
+                                                            max={50}
+                                                            value={inspectorSettings.playlistPrevVisibleCount}
+                                                            onChange={(e) => {
+                                                                const raw = Number(e.target.value)
+                                                                const next = Number.isFinite(raw) ? Math.max(0, Math.min(50, raw)) : 1
+                                                                updateInspectorSettings({ playlistPrevVisibleCount: next })
+                                                            }}
+                                                            className="settings-input"
+                                                            style={{ width: '96px' }}
+                                                        />
+                                                    </div>
+                                                    <div className="settings-row" style={{ padding: '10px 12px' }}>
+                                                        <div className="settings-info">
+                                                            <span className="settings-label">{tr('次の動画の表示数', 'Next items')}</span>
+                                                            <span className="settings-description">{tr('0〜50件（標準: 10）', '0-50 (default: 10)')}</span>
+                                                        </div>
+                                                        <input
+                                                            type="number"
+                                                            min={0}
+                                                            max={50}
+                                                            value={inspectorSettings.playlistNextVisibleCount}
+                                                            onChange={(e) => {
+                                                                const raw = Number(e.target.value)
+                                                                const next = Number.isFinite(raw) ? Math.max(0, Math.min(50, raw)) : 10
+                                                                updateInspectorSettings({ playlistNextVisibleCount: next })
+                                                            }}
+                                                            className="settings-input"
+                                                            style={{ width: '96px' }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {item.key === 'info' && (
+                                                <div className="inspector-sub-options">
+                                                    <span className="settings-label">{tr('インフォメーション項目', 'Information Fields')}</span>
+                                                    {[
+                                                        { key: 'rating', label: tr('評価', 'Rating'), desc: tr('評価値 (0〜5) を表示', 'Show rating (0-5)') },
+                                                        { key: 'resolution', label: tr('解像度', 'Resolution'), desc: tr('幅×高さを表示', 'Show width x height') },
+                                                        { key: 'duration', label: tr('再生時間', 'Duration'), desc: tr('長さを表示', 'Show duration') },
+                                                        { key: 'fileSize', label: tr('ファイルサイズ', 'File size'), desc: tr('容量を表示', 'Show file size') },
+                                                        { key: 'importedAt', label: tr('追加日', 'Imported'), desc: tr('ライブラリ追加日時を表示', 'Show import date/time') },
+                                                        { key: 'createdAt', label: tr('作成日', 'Created'), desc: tr('ファイル作成日時を表示', 'Show file creation date/time') },
+                                                        { key: 'modifiedAt', label: tr('更新日', 'Modified'), desc: tr('ファイル更新日時を表示', 'Show file modified date/time') },
+                                                        { key: 'audioBitrate', label: tr('音声ビットレート', 'Audio bitrate'), desc: tr('音声のビットレートを表示', 'Show audio bitrate') },
+                                                        { key: 'framerate', label: tr('フレームレート', 'Frame rate'), desc: tr('fpsを表示', 'Show fps') },
+                                                        { key: 'formatName', label: tr('ファイル形式', 'File format'), desc: tr('コンテナ形式を表示', 'Show container format') },
+                                                        { key: 'codecId', label: tr('コーデックID', 'Codec ID'), desc: tr('コーデック識別子を表示', 'Show codec identifier') }
+                                                    ].map(infoItem => {
+                                                        const infoEnabled = !!inspectorSettings.infoVisibility[infoItem.key as keyof typeof inspectorSettings.infoVisibility]
+                                                        return (
+                                                            <div key={infoItem.key} className="inspector-sub-option-row">
+                                                                <div className="settings-info">
+                                                                    <span className="settings-label">{infoItem.label}</span>
+                                                                    <span className="settings-description">{infoItem.desc}</span>
+                                                                </div>
+                                                                <label className="toggle-switch">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={infoEnabled}
+                                                                        onChange={() => updateInspectorSettings({
+                                                                            infoVisibility: {
+                                                                                [infoItem.key]: !infoEnabled
+                                                                            } as any
+                                                                        })}
+                                                                    />
+                                                                    <span className="slider"></span>
+                                                                </label>
+                                                            </div>
+                                                        )
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            )
+                        })}
+                    </div>
+                </div>
+            </section>
         </div>
     )
 
@@ -1742,47 +1998,47 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
         return (
             <div className="settings-page">
-                <h3 className="settings-page-title">開発者ツール</h3>
+                <h3 className="settings-page-title">{tr('開発者ツール', 'Developer Tools')}</h3>
 
                 <section className="settings-section">
-                    <h4 className="section-title">API 接続情報</h4>
+                    <h4 className="section-title">{tr('API 接続情報', 'API Connection')}</h4>
                     <div className="settings-card">
                         <div className="settings-row-vertical">
                             <div className="settings-label-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                                 <span className="settings-label">API Base URL</span>
                                 <button className="btn btn-outline btn-small" onClick={() => {
                                     api.copyToClipboard(apiBaseUrl)
-                                    alert('API Base URL をコピーしました')
-                                }}>コピー</button>
+                                    alert(tr('API Base URL をコピーしました', 'Copied API Base URL'))
+                                }}>{tr('コピー', 'Copy')}</button>
                             </div>
                             <code className="code-block" style={{ margin: 0, width: '100%' }}>{apiBaseUrl}</code>
                         </div>
 
                         <div className="settings-row-vertical" style={{ marginTop: '16px' }}>
                             <div className="settings-label-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                                <span className="settings-label">Host Secret (認証用シークレット)</span>
+                                <span className="settings-label">{tr('Host Secret (認証用シークレット)', 'Host Secret (Auth Secret)')}</span>
                                 <div style={{ display: 'flex', gap: '8px' }}>
                                     <button
                                         className="btn btn-outline btn-small"
                                         onClick={() => {
                                             if (hostSecret) {
                                                 api.copyToClipboard(hostSecret)
-                                                alert('Host Secret をコピーしました')
+                                                alert(tr('Host Secret をコピーしました', 'Copied Host Secret'))
                                             }
                                         }}
                                     >
-                                        コピー
+                                        {tr('コピー', 'Copy')}
                                     </button>
                                     <button
                                         className="btn btn-outline btn-small"
                                         onClick={async () => {
-                                            if (confirm('Host Secret をリセットしてもよろしいですか？\n既存の拡張機能の認証が切れる可能性があります。')) {
+                                            if (confirm(tr('Host Secret をリセットしてもよろしいですか？\n既存の拡張機能の認証が切れる可能性があります。', 'Reset Host Secret?\nExisting extension authentication may stop working.'))) {
                                                 const newSecret = await api.resetHostSecret()
                                                 setServerConfig({ ...serverConfig, hostSecret: newSecret })
                                             }
                                         }}
                                     >
-                                        リセット
+                                        {tr('リセット', 'Reset')}
                                     </button>
                                 </div>
                             </div>
@@ -1790,17 +2046,17 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                 className="token-value-box revealed"
                                 style={{ width: '100%', cursor: 'text', userSelect: 'all' }}
                             >
-                                {hostSecret || '設定取得中...'}
+                                {hostSecret || tr('設定取得中...', 'Loading...')}
                             </div>
                             <span className="settings-description" style={{ marginTop: '8px', display: 'block' }}>
-                                APIリクエストの <code>Authorization</code> ヘッダーに <code>Bearer [Host Secret]</code> として使用してください。
+                                {tr('APIリクエストの ', 'Use in API request ') }<code>Authorization</code> {tr('ヘッダーに ', 'header as ')}<code>Bearer [Host Secret]</code>{tr(' として使用してください。', '.')}
                             </span>
                         </div>
                     </div>
                 </section>
 
                 <section className="settings-section" style={{ marginTop: '24px' }}>
-                    <h4 className="section-title">拡張機能開発リソース</h4>
+                    <h4 className="section-title">{tr('拡張機能開発リソース', 'Extension Development Resources')}</h4>
 
                     <div className="resource-list">
                         <a href="#" className="resource-item" onClick={(e) => {
@@ -1811,8 +2067,8 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
                             </div>
                             <div className="resource-info">
-                                <span className="resource-title">Extension テンプレート (GitHub)</span>
-                                <span className="resource-desc">TypeScript + Vite を使用した拡張機能のベースプロジェクトです。</span>
+                                <span className="resource-title">{tr('Extension テンプレート (GitHub)', 'Extension Template (GitHub)')}</span>
+                                <span className="resource-desc">{tr('TypeScript + Vite を使用した拡張機能のベースプロジェクトです。', 'A base extension project built with TypeScript + Vite.')}</span>
                             </div>
                         </a>
 
@@ -1821,9 +2077,9 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
                             </div>
                             <div className="resource-info">
-                                <span className="resource-title">@obscura/core 型定義の利用</span>
+                                <span className="resource-title">{tr('@obscura/core 型定義の利用', 'Use @obscura/core type definitions')}</span>
                                 <span className="resource-desc">
-                                    プロジェクト内で <code>npm install -D @obscura/core</code> を実行することで、APIの型補完を有効にできます。
+                                    {tr('プロジェクト内で ', 'Run ')}<code>npm install -D @obscura/core</code>{tr(' を実行することで、APIの型補完を有効にできます。', ' in your project to enable API type completion.')}
                                 </span>
                             </div>
                         </div>
@@ -1836,8 +2092,8 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
                             </div>
                             <div className="resource-info">
-                                <span className="resource-title">開発者向け公式ドキュメント</span>
-                                <span className="resource-desc">APIの仕様や拡張機能のライフサイクルについての詳細な解説です。</span>
+                                <span className="resource-title">{tr('開発者向け公式ドキュメント', 'Official Developer Documentation')}</span>
+                                <span className="resource-desc">{tr('APIの仕様や拡張機能のライフサイクルについての詳細な解説です。', 'Detailed API specs and extension lifecycle documentation.')}</span>
                             </div>
                         </a>
                     </div>
@@ -1857,16 +2113,16 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     const renderUpdateSection = () => {
         return (
             <section className="settings-section">
-                <h4 className="section-title">アプリケーション更新</h4>
+                <h4 className="section-title">{tr('アプリケーション更新', 'Application Updates')}</h4>
                 <div className="settings-card">
                     <div className="settings-row-vertical">
                         <div className="settings-info" style={{ paddingRight: 0 }}>
-                            <span className="settings-label">バージョン情報</span>
+                            <span className="settings-label">{tr('バージョン情報', 'Version')}</span>
                             <span className="settings-description">
-                                現在のバージョン: v{appVersion}
+                                {tr('現在のバージョン', 'Current version')}: v{appVersion}
                                 {updateInfo?.version && (
                                     <span style={{ marginLeft: '10px', color: 'var(--primary-light)' }}>
-                                        (最新: v{updateInfo.version})
+                                        ({tr('最新', 'Latest')}: v{updateInfo.version})
                                     </span>
                                 )}
                             </span>
@@ -1876,14 +2132,14 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                             {updateStatus === 'checking' && (
                                 <div className="status-indicator" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-muted)' }}>
                                     <div className="spinner" style={{ width: '14px', height: '14px', border: '2px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-                                    <span>更新を確認中...</span>
+                                    <span>{tr('更新を確認中...', 'Checking for updates...')}</span>
                                 </div>
                             )}
 
                             {updateStatus === 'downloading' && (
                                 <div className="download-progress-container" style={{ width: '100%' }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '12px' }}>
-                                        <span>ダウンロード中...</span>
+                                        <span>{tr('ダウンロード中...', 'Downloading...')}</span>
                                         <span>{Math.round(downloadProgress)}%</span>
                                     </div>
                                     <div className="progress-bar-track" style={{ height: '6px', background: 'var(--bg-dark)', borderRadius: '3px' }}>
@@ -1904,31 +2160,31 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                             <div className="button-group" style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
                                 {updateStatus === 'idle' && (
                                     <button className="btn btn-primary btn-sm" onClick={handleCheckForUpdates}>
-                                        更新を確認
+                                        {tr('更新を確認', 'Check for updates')}
                                     </button>
                                 )}
 
                                 {updateStatus === 'available' && (
                                     <button className="btn btn-primary btn-sm" onClick={handleDownloadUpdate}>
-                                        アップデートをダウンロード
+                                        {tr('アップデートをダウンロード', 'Download update')}
                                     </button>
                                 )}
 
                                 {updateStatus === 'downloaded' && (
                                     <button className="btn btn-primary btn-sm" onClick={handleQuitAndInstall}>
-                                        再起動してインストール
+                                        {tr('再起動してインストール', 'Restart and install')}
                                     </button>
                                 )}
 
                                 {updateStatus === 'not-available' && (
                                     <span className="settings-description" style={{ color: 'var(--primary-light)' }}>
-                                        最新のバージョンを使用しています。
+                                        {tr('最新のバージョンを使用しています。', 'You are using the latest version.')}
                                     </span>
                                 )}
 
                                 {updateStatus === 'error' && (
                                     <div style={{ color: 'var(--accent)', fontSize: '13px' }}>
-                                        エラーが発生しました: {typeof updateInfo === 'string' ? updateInfo : '不明なエラー'}
+                                        {tr('エラーが発生しました', 'An error occurred')}: {typeof updateInfo === 'string' ? updateInfo : tr('不明なエラー', 'Unknown error')}
                                     </div>
                                 )}
                             </div>
@@ -1944,7 +2200,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
         if (path) {
             // Check dupes
             if (clientConfig?.autoImport.watchPaths.some((p: AutoImportPath) => p.path === path)) {
-                alert('このフォルダは既に登録されています')
+                alert(tr('このフォルダは既に登録されています', 'This folder is already registered'))
                 return
             }
 
@@ -1999,17 +2255,17 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }
 
     const renderImportSettings = () => {
-        if (!clientConfig) return <div className="loading">読み込み中...</div>
+        if (!clientConfig) return <div className="loading">{tr('読み込み中...', 'Loading...')}</div>
 
         return (
             <div className="settings-page">
-                <h3 className="settings-page-title">インポート・ダウンロード</h3>
+                <h3 className="settings-page-title">{tr('インポート・ダウンロード', 'Import & Download')}</h3>
 
                 <section className="settings-section">
-                    <h4 className="section-title">ダウンロード</h4>
+                    <h4 className="section-title">{tr('ダウンロード', 'Download')}</h4>
                     <div className="settings-card">
                         <div className="settings-row-vertical">
-                            <span className="settings-label">保存先フォルダー</span>
+                            <span className="settings-label">{tr('保存先フォルダー', 'Download folder')}</span>
                             <div style={{ display: 'flex', gap: '8px', width: '100%', alignItems: 'center' }}>
                                 <input
                                     type="text"
@@ -2019,11 +2275,11 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     style={{ flex: 1, color: 'var(--text-muted)', cursor: 'not-allowed' }}
                                 />
                                 <button className="btn btn-outline btn-small" onClick={handleSelectDownloadPath}>
-                                    変更
+                                    {tr('変更', 'Change')}
                                 </button>
                             </div>
                             <span className="settings-description">
-                                サーバーからダウンロードするファイルのデフォルト保存先です。
+                                {tr('サーバーからダウンロードするファイルのデフォルト保存先です。', 'Default save location for downloaded files.')}
                             </span>
                         </div>
                     </div>
@@ -2033,15 +2289,15 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                     <div className="settings-card">
 
                         <div className="settings-padded-content" style={{ paddingBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span className="settings-label" style={{ fontSize: '13px', marginBottom: 0 }}>監視フォルダ設定</span>
+                            <span className="settings-label" style={{ fontSize: '13px', marginBottom: 0 }}>{tr('監視フォルダ設定', 'Watch folders')}</span>
                             <button className="btn btn-secondary btn-sm" onClick={handleAddWatchPath}>
-                                + フォルダを追加
+                                + {tr('フォルダを追加', 'Add folder')}
                             </button>
                         </div>
 
                         {(!clientConfig.autoImport.watchPaths || clientConfig.autoImport.watchPaths.length === 0) ? (
                             <div className="watcher-empty">
-                                監視フォルダが設定されていません
+                                {tr('監視フォルダが設定されていません', 'No watch folders configured')}
                             </div>
                         ) : (
                             <div className="settings-padded-content" style={{ display: 'flex', flexDirection: 'column', gap: '12px', paddingTop: 0 }}>
@@ -2058,7 +2314,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
 
                                         <div style={{ flex: 1, minWidth: 0 }}>
                                             <div style={{ fontSize: '12px', marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                <span style={{ fontWeight: 'bold', minWidth: '70px' }}>インポート先:</span>
+                                                <span style={{ fontWeight: 'bold', minWidth: '70px' }}>{tr('インポート先', 'Target')}: </span>
                                                 <select
                                                     value={p.targetLibraryId}
                                                     onChange={(e) => handleUpdateWatchPath(p.id, { targetLibraryId: e.target.value })}
@@ -2088,7 +2344,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         )}
                         <div className="settings-description-box" style={{ borderTop: '1px solid var(--border)', borderBottom: 'none' }}>
                             <p className="settings-description" style={{ color: '#eab308' }}>
-                                ※ インポート完了後、元のファイルは完全に削除されます。
+                                {tr('※ インポート完了後、元のファイルは完全に削除されます。', 'After import completes, source files will be permanently deleted.')}
                             </p>
                         </div>
                     </div>
@@ -2098,9 +2354,9 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                     <div className="settings-card">
                         <div className="settings-padded-content" style={{ paddingBottom: '8px' }}>
                             <div className="settings-info" style={{ paddingRight: 0 }}>
-                                <span className="settings-label">他のライブラリへの追加設定</span>
+                                <span className="settings-label">{tr('他のライブラリへの追加設定', 'Add to other library settings')}</span>
                                 <span className="settings-description">
-                                    ファイルを他のライブラリに追加する際、引き継ぐ情報を選択します。
+                                    {tr('ファイルを他のライブラリに追加する際、引き継ぐ情報を選択します。', 'Choose which metadata to carry over when adding to another library.')}
                                 </span>
                             </div>
                         </div>
@@ -2164,23 +2420,51 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     }
 
     const renderGeneralSettings = () => {
-        if (!clientConfig) return <div className="loading">読み込み中...</div>
+        if (!clientConfig) return <div className="loading">{tr('読み込み中...', 'Loading...')}</div>
 
         return (
             <div className="settings-page">
-                <h3 className="settings-page-title">一般設定</h3>
+                <h3 className="settings-page-title">{tr('一般設定', 'General')}</h3>
 
                 {renderUpdateSection()}
 
-
                 <section className="settings-section">
-                    <h4 className="section-title">Discord リッチプレゼンス</h4>
+                    <h4 className="section-title">{tr('表示言語', 'Display language')}</h4>
                     <div className="settings-card">
                         <div className="settings-row">
                             <div className="settings-info">
-                                <span className="settings-label">Discord に再生状況を表示</span>
+                                <span className="settings-label">{tr('ソフトウェアの言語', 'Software language')}</span>
                                 <span className="settings-description">
-                                    再生中のメディア情報を Discord のステータスに表示します。
+                                    {tr('UI の表示言語を切り替えます。', 'Switch the UI display language.')}
+                                </span>
+                            </div>
+                            <select
+                                className="settings-input"
+                                style={{ width: '180px', height: '32px' }}
+                                value={clientConfig.language || 'ja'}
+                                onChange={(e) => {
+                                    const nextLanguage = (e.target.value === 'en' ? 'en' : 'ja') as 'ja' | 'en'
+                                    const newConfig = { ...clientConfig, language: nextLanguage }
+                                    setClientConfig(newConfig)
+                                    updateClientConfig({ language: nextLanguage })
+                                }}
+                            >
+                                <option value="ja">日本語</option>
+                                <option value="en">English</option>
+                            </select>
+                        </div>
+                    </div>
+                </section>
+
+
+                <section className="settings-section">
+                    <h4 className="section-title">{tr('Discord リッチプレゼンス', 'Discord Rich Presence')}</h4>
+                    <div className="settings-card">
+                        <div className="settings-row">
+                            <div className="settings-info">
+                                <span className="settings-label">{tr('Discord に再生状況を表示', 'Show playback status on Discord')}</span>
+                                <span className="settings-description">
+                                    {tr('再生中のメディア情報を Discord のステータスに表示します。', 'Display currently playing media in Discord status.')}
                                 </span>
                             </div>
                             <label className="toggle-switch">
@@ -2230,10 +2514,10 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                 })
             }
 
-            alert('プロファイルを保存しました')
+            alert(tr('プロファイルを保存しました', 'Profile saved'))
         } catch (e: any) {
             console.error('Failed to save profile:', e)
-            alert('保存に失敗しました: ' + e.message)
+            alert(tr('保存に失敗しました: ' + e.message, 'Save failed: ' + e.message))
         }
     }
 
@@ -2283,7 +2567,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
             setSelectedIcon(resizedDataUrl)
         } catch (err) {
             console.error('Failed to process image:', err)
-            alert('画像の処理に失敗しました')
+            alert(tr('画像の処理に失敗しました', 'Failed to process image'))
         }
     }
 
@@ -2292,7 +2576,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     const renderProfileSettings = () => {
         return (
             <div className="settings-page">
-                <h3 className="settings-page-title">プロファイル設定</h3>
+                <h3 className="settings-page-title">{tr('プロファイル設定', 'Profile Settings')}</h3>
                 <section className="settings-section">
                     <div className="settings-card">
                         <div className="settings-description-box">
@@ -2302,11 +2586,11 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         </div>
 
                         <div className="settings-row-vertical">
-                            <label className="settings-label">ニックネーム</label>
+                            <label className="settings-label">{tr('ニックネーム', 'Nickname')}</label>
                             <input
                                 type="text"
                                 className="settings-input"
-                                placeholder="あなたの表示名"
+                                placeholder={tr('あなたの表示名', 'Your display name')}
                                 value={nickname}
                                 onChange={e => setNickname(e.target.value)}
                                 maxLength={50}
@@ -2314,7 +2598,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                         </div>
 
                         <div className="settings-row-vertical">
-                            <label className="settings-label">アイコン</label>
+                            <label className="settings-label">{tr('アイコン', 'Icon')}</label>
                             <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                                 <button
                                     type="button"
@@ -2323,7 +2607,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     style={{ height: '40px', padding: '0 16px', display: 'flex', alignItems: 'center', gap: '8px' }}
                                 >
                                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
-                                    画像を選択...
+                                    {tr('画像を選択...', 'Select image...')}
                                 </button>
                                 <input
                                     ref={fileInputRef}
@@ -2339,7 +2623,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                         onClick={() => setSelectedIcon('')}
                                         style={{ color: 'var(--accent)' }}
                                     >
-                                        削除
+                                        {tr('削除', 'Delete')}
                                     </button>
                                 )}
                             </div>
@@ -2378,13 +2662,13 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     )}
                                 </div>
                                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                    <span style={{ fontWeight: 'bold', fontSize: '18px', color: 'var(--text-main)' }}>{nickname || '（未設定）'}</span>
-                                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>プレビュー</span>
+                                    <span style={{ fontWeight: 'bold', fontSize: '18px', color: 'var(--text-main)' }}>{nickname || tr('（未設定）', '(Not set)')}</span>
+                                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{tr('プレビュー', 'Preview')}</span>
                                 </div>
                             </div>
                             <div style={{ flex: 1 }}></div>
                             <button className="btn btn-primary" onClick={handleSaveProfile} disabled={!nickname.trim()}>
-                                保存
+                                {tr('保存', 'Save')}
                             </button>
                         </div>
                     </div>
@@ -2396,7 +2680,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     const renderExtensionsSettings = () => {
         return (
             <div className="settings-page">
-                <h3 className="settings-page-title">拡張機能（プラグイン）設定</h3>
+                <h3 className="settings-page-title">{tr('拡張機能（プラグイン）設定', 'Extensions (Plugins)')}</h3>
                 <section className="settings-section">
                     <div className="settings-card">
                         <div className="settings-description-box">
@@ -2423,7 +2707,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                             setAvailablePlugins(scripts || [])
                                         }
                                         if ((result.skipped?.length ?? 0) > 0) {
-                                            alert(`以下のファイルは既に存在するためスキップされました:\n${(result.skipped ?? []).join('\n')}`)
+                                            alert(`${tr('以下のファイルは既に存在するためスキップされました', 'Skipped because these files already exist')}:\n${(result.skipped ?? []).join('\n')}`)
                                         }
                                     } catch (e) {
                                         console.error('[Settings] Plugin install failed:', e)
@@ -2435,13 +2719,13 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                     <polyline points="7 10 12 15 17 10"></polyline>
                                     <line x1="12" y1="15" x2="12" y2="3"></line>
                                 </svg>
-                                ファイルからインストール...
+                                {tr('ファイルからインストール...', 'Install from file...')}
                             </button>
                         </div>
 
                         {availablePlugins.length === 0 ? (
                             <div className="empty-state">
-                                <p>利用可能なプラグインが見つかりません</p>
+                                <p>{tr('利用可能なプラグインが見つかりません', 'No plugins available')}</p>
                             </div>
                         ) : (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -2466,7 +2750,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                                         )}
                                                     </div>
                                                     <span className="settings-description" style={{ marginTop: '4px' }}>
-                                                        {meta.description || '説明がありません。'}
+                                                        {meta.description || tr('説明がありません。', 'No description.')}
                                                     </span>
                                                     <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace', marginTop: '4px' }}>
                                                         ID: {plugin.id}
@@ -2502,15 +2786,15 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                                                     const scripts = await api.getPluginScripts()
                                                                     setAvailablePlugins(scripts || [])
                                                                 } else {
-                                                                    alert(`削除に失敗しました: ${result.error}`)
+                                                                    alert(tr(`削除に失敗しました: ${result.error}`, `Delete failed: ${result.error}`))
                                                                 }
                                                             } catch (e) {
                                                                 console.error('[Settings] Plugin uninstall failed:', e)
                                                             }
                                                         }}
-                                                        title="プラグインを削除"
+                                                        title={tr('プラグインを削除', 'Remove plugin')}
                                                     >
-                                                        削除
+                                                        {tr('削除', 'Delete')}
                                                     </button>
                                                 </div>
                                             </div>
@@ -2530,13 +2814,13 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
             <div className="settings-modal-container" onClick={e => e.stopPropagation()}>
                 <div className="settings-modal-sidebar">
                     <div className="settings-sidebar-header">
-                        <h2>環境設定</h2>
+                        <h2>{tr('環境設定', 'Preferences')}</h2>
                     </div>
                     <div className="settings-sidebar-search">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                         <input
                             type="text"
-                            placeholder="設定を検索..."
+                            placeholder={tr('設定を検索...', 'Search settings...')}
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                         />
@@ -2584,17 +2868,17 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
                                             activeCategory === 'network' ? renderNetworkSettings() :
                                                 activeCategory === 'shortcuts' ? renderShortcutsSettings() :
                                                     activeCategory === 'media-engine' ? renderMediaEngineSettings() :
-                                                        activeCategory === 'audio' ? <AudioSettings clientConfig={clientConfig} setClientConfig={setClientConfig} /> :
+                                                        activeCategory === 'audio' ? <AudioSettings language={language} clientConfig={clientConfig} setClientConfig={setClientConfig} /> :
                                                             activeCategory === 'developer' ? renderDeveloperSettings() :
                                                                 activeCategory === 'extensions' ? renderExtensionsSettings() : (
                                                                     <div className="empty-state">
-                                                                        <p>このセクションの設定は準備中です。</p>
+                                                                        <p>{tr('このセクションの設定は準備中です。', 'Settings for this section are coming soon.')}</p>
                                                                     </div>
                                                                 )}
                     </div>
 
                     <footer className="settings-main-footer">
-                        <button className="btn-save" onClick={onClose}>閉じる</button>
+                        <button className="btn-save" onClick={onClose}>{tr('閉じる', 'Close')}</button>
                     </footer>
                 </div>
 
@@ -2639,7 +2923,8 @@ export function SettingsModal({ settings, onUpdateSettings, onClose }: SettingsM
     )
 }
 
-const AudioSettings = ({ clientConfig, setClientConfig }: { clientConfig: ClientConfig, setClientConfig: (config: ClientConfig) => void }) => {
+const AudioSettings = ({ language = 'ja', clientConfig, setClientConfig }: { language?: 'ja' | 'en', clientConfig: ClientConfig, setClientConfig: (config: ClientConfig) => void }) => {
+    const tr = (ja: string, en: string) => language === 'en' ? en : ja
     const [audioDevices, setAudioDevices] = useState<{ name: string, description: string }[]>([])
 
     useEffect(() => {
@@ -2672,16 +2957,16 @@ const AudioSettings = ({ clientConfig, setClientConfig }: { clientConfig: Client
 
     return (
         <div className="settings-page">
-            <h3 className="settings-page-title">オーディオ設定</h3>
+            <h3 className="settings-page-title">{tr('オーディオ設定', 'Audio Settings')}</h3>
             <section className="settings-section">
                 <div className="settings-card">
                     {/* Master Switch: Enable WASAPI/MPV */}
                     <div className="settings-row">
                         <div className="settings-info">
-                            <span className="settings-label">WASAPI (MPVバックエンド) を使用する</span>
+                                <span className="settings-label">{tr('WASAPI (MPVバックエンド) を使用する', 'Use WASAPI (MPV backend)')}</span>
                             <span className="settings-description">
-                                高品質なオーディオ再生のためにMPVバックエンドを使用します。<br />
-                                <span style={{ fontSize: '0.85em', opacity: 0.8 }}>無効の場合は標準のWeb Audio (Shared Mode) が使用されます。</span>
+                                {tr('高品質なオーディオ再生のためにMPVバックエンドを使用します。', 'Use MPV backend for high quality audio playback.')}<br />
+                                <span style={{ fontSize: '0.85em', opacity: 0.8 }}>{tr('無効の場合は標準のWeb Audio (Shared Mode) が使用されます。', 'When disabled, standard Web Audio (Shared Mode) is used.')}</span>
                             </span>
                         </div>
                         <label className="toggle-switch">
@@ -2699,9 +2984,9 @@ const AudioSettings = ({ clientConfig, setClientConfig }: { clientConfig: Client
 
                         <div className="settings-row">
                             <div className="settings-info">
-                                <span className="settings-label">出力デバイス</span>
+                                <span className="settings-label">{tr('出力デバイス', 'Output device')}</span>
                                 <span className="settings-description">
-                                    再生に使用するオーディオデバイスを選択します。
+                                    {tr('再生に使用するオーディオデバイスを選択します。', 'Select the audio device used for playback.')}
                                 </span>
                             </div>
                             <div className="settings-controls">
@@ -2712,7 +2997,7 @@ const AudioSettings = ({ clientConfig, setClientConfig }: { clientConfig: Client
                                     onChange={(e) => updateConfig({ audioDevice: e.target.value })}
                                     disabled={!useMpvAudio}
                                 >
-                                    <option value="auto">自動 (デフォルト)</option>
+                                    <option value="auto">{tr('自動 (デフォルト)', 'Auto (Default)')}</option>
                                     {audioDevices.map((dev, i) => (
                                         <option key={i} value={dev.name}>
                                             {dev.description}
@@ -2724,11 +3009,11 @@ const AudioSettings = ({ clientConfig, setClientConfig }: { clientConfig: Client
 
                         <div className="settings-row-vertical">
                             <div className="settings-info" style={{ paddingRight: 0 }}>
-                                <span className="settings-label">WASAPI 排他モード (Exclusive Mode)</span>
+                                <span className="settings-label">{tr('WASAPI 排他モード (Exclusive Mode)', 'WASAPI Exclusive Mode')}</span>
                                 <span className="settings-description">
-                                    <span style={{ color: 'var(--accent)', fontWeight: 'bold' }}>⚠ 実験的機能</span><br />
-                                    システムミキサーをバイパスし、ビットパーフェクトな再生を行います。<br />
-                                    有効にすると、他のアプリケーションの音声は再生されなくなります。
+                                    <span style={{ color: 'var(--accent)', fontWeight: 'bold' }}>{tr('⚠ 実験的機能', '⚠ Experimental')}</span><br />
+                                    {tr('システムミキサーをバイパスし、ビットパーフェクトな再生を行います。', 'Bypasses the system mixer for bit-perfect playback.')}<br />
+                                    {tr('有効にすると、他のアプリケーションの音声は再生されなくなります。', 'When enabled, audio from other applications may stop playing.')}
                                 </span>
                             </div>
                             <label className="toggle-switch">
@@ -2744,10 +3029,10 @@ const AudioSettings = ({ clientConfig, setClientConfig }: { clientConfig: Client
 
                         <div className="settings-row-vertical">
                             <div className="settings-info" style={{ paddingRight: 0 }}>
-                                <span className="settings-label">動画ファイルでも使用する (音声のみ)</span>
+                                <span className="settings-label">{tr('動画ファイルでも使用する (音声のみ)', 'Use for video files too (audio only)')}</span>
                                 <span className="settings-description">
-                                    <span style={{ color: 'var(--accent)', fontWeight: 'bold' }}>⚠ 画面は真っ暗になります</span><br />
-                                    MP4などの動画ファイルでも高音質再生を行いますが、<br />映像は表示されません。
+                                    <span style={{ color: 'var(--accent)', fontWeight: 'bold' }}>{tr('⚠ 画面は真っ暗になります', '⚠ Screen will be black')}</span><br />
+                                    {tr('MP4などの動画ファイルでも高音質再生を行いますが、', 'Enables high quality audio for video files like MP4, but')}<br />{tr('映像は表示されません。', 'video will not be displayed.')}
                                 </span>
                             </div>
                             <label className="toggle-switch">

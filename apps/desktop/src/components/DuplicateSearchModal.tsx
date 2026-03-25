@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { DuplicateCriteria } from '@obscura/core'
-import './DuplicateModal.css' // Use existing styles or create new one if needed, assuming reusing typical modal styles
+import './DuplicateModal.css'
 
 interface DuplicateSearchModalProps {
     onSearch: (criteria: DuplicateCriteria) => void
@@ -18,134 +18,108 @@ export const DuplicateSearchModal: React.FC<DuplicateSearchModalProps> = ({ onSe
     })
 
     const handleToggle = (key: keyof DuplicateCriteria) => {
-        setCriteria(prev => ({ ...prev, [key]: !prev[key] }))
+        setCriteria((prev) => ({ ...prev, [key]: !prev[key] }))
     }
+
+    const canSearch = mode === 'filesystem' || Object.values(criteria).some(Boolean)
 
     const handleSearch = () => {
         if (mode === 'filesystem') {
             if (onFileSystemScan) onFileSystemScan()
-            onClose() // Close modal after triggering
-        } else {
-            onSearch(criteria)
+            onClose()
+            return
         }
+        onSearch(criteria)
     }
 
     return (
         <div className="duplicate-modal-overlay">
-            <div className="duplicate-modal" style={{ maxWidth: '450px' }}>
+            <div className="duplicate-modal duplicate-search-modal">
                 <div className="duplicate-modal-header">
-                    <h3>重複・孤立ファイル検索</h3>
+                    <h3>重複ファイル検索</h3>
                     <button className="close-btn" onClick={onClose}>×</button>
                 </div>
 
-                <div className="duplicate-modal-tabs" style={{ display: 'flex', borderBottom: '1px solid #444', marginBottom: '15px' }}>
+                <div className="duplicate-modal-tabs">
                     <button
-                        style={{
-                            flex: 1,
-                            padding: '10px',
-                            background: mode === 'database' ? '#333' : 'transparent',
-                            color: mode === 'database' ? '#fff' : '#888',
-                            border: 'none',
-                            cursor: 'pointer',
-                            borderBottom: mode === 'database' ? '2px solid #007bff' : 'none'
-                        }}
+                        className={`duplicate-modal-tab-btn ${mode === 'database' ? 'active' : ''}`}
                         onClick={() => setMode('database')}
                     >
-                        DB内重複
+                        DB検索
                     </button>
                     <button
-                        style={{
-                            flex: 1,
-                            padding: '10px',
-                            background: mode === 'filesystem' ? '#333' : 'transparent',
-                            color: mode === 'filesystem' ? '#fff' : '#888',
-                            border: 'none',
-                            cursor: 'pointer',
-                            borderBottom: mode === 'filesystem' ? '2px solid #007bff' : 'none'
-                        }}
+                        className={`duplicate-modal-tab-btn ${mode === 'filesystem' ? 'active' : ''}`}
                         onClick={() => setMode('filesystem')}
                     >
-                        完全スキャン (残骸)
+                        ファイルスキャン (詳細)
                     </button>
                 </div>
 
-                <div className="duplicate-search-content" style={{ padding: '0 20px 20px 20px' }}>
+                <div className="duplicate-search-content">
                     {mode === 'database' ? (
                         <>
-                            <p style={{ marginBottom: '15px', fontSize: '0.9rem', color: '#ccc' }}>
-                                ライブラリDB内で登録済みの重複アイテムを検索します。
+                            <p className="duplicate-search-note">
+                                ライブラリDB内で登録済みメディアの重複候補を検索します。
                             </p>
                             <div className="criteria-list">
-                                <label className="checkbox-row" style={{ display: 'flex', alignItems: 'center', marginBottom: '10px', cursor: 'pointer' }}>
+                                <label className="checkbox-row">
                                     <input
                                         type="checkbox"
                                         checked={criteria.name}
                                         onChange={() => handleToggle('name')}
-                                        style={{ marginRight: '10px' }}
                                     />
                                     ファイル名
                                 </label>
-                                <label className="checkbox-row" style={{ display: 'flex', alignItems: 'center', marginBottom: '10px', cursor: 'pointer' }}>
+                                <label className="checkbox-row">
                                     <input
                                         type="checkbox"
                                         checked={criteria.size}
                                         onChange={() => handleToggle('size')}
-                                        style={{ marginRight: '10px' }}
                                     />
                                     ファイルサイズ
                                 </label>
-                                <label className="checkbox-row" style={{ display: 'flex', alignItems: 'center', marginBottom: '10px', cursor: 'pointer' }}>
+                                <label className="checkbox-row">
                                     <input
                                         type="checkbox"
                                         checked={criteria.duration}
                                         onChange={() => handleToggle('duration')}
-                                        style={{ marginRight: '10px' }}
                                     />
                                     再生時間
                                 </label>
-                                <label className="checkbox-row" style={{ display: 'flex', alignItems: 'center', marginBottom: '10px', cursor: 'pointer' }}>
+                                <label className="checkbox-row">
                                     <input
                                         type="checkbox"
                                         checked={criteria.modified}
                                         onChange={() => handleToggle('modified')}
-                                        style={{ marginRight: '10px' }}
                                     />
-                                    変更日
+                                    更新日時
                                 </label>
                             </div>
                         </>
                     ) : (
                         <>
-                            <p style={{ marginBottom: '10px', fontSize: '0.9rem', color: '#e74c3c' }}>
-                                <strong>注意:</strong> この機能はライブラリフォルダ内の全ファイルを物理スキャンします。
+                            <p className="duplicate-search-warning">
+                                <strong>注意:</strong> この操作はライブラリフォルダー全体をスキャンします。
                             </p>
-                            <p style={{ marginBottom: '15px', fontSize: '0.9rem', color: '#ccc' }}>
-                                データベースに登録されていない動画ファイル（インポートエラーの残骸など）を検出し、削除候補としてリストアップします。
+                            <p className="duplicate-search-note">
+                                データベースに登録されていないファイル（インポートエラーの残骸など）を検索し、必要に応じてリストを再構築できます。
                             </p>
-                            <p style={{ fontSize: '0.85rem', color: '#888' }}>
-                                ※ 処理には時間がかかる場合があります。
+                            <p className="duplicate-search-hint">
+                                スキャンには時間がかかる場合があります。
                             </p>
                         </>
                     )}
                 </div>
 
                 <div className="duplicate-modal-footer">
-                    <button className="cancel-btn" onClick={onClose} style={{
-                        padding: '8px 16px',
-                        border: '1px solid #444',
-                        background: 'transparent',
-                        color: '#ccc',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        marginRight: '10px'
-                    }}>
+                    <button className="cancel-btn" onClick={onClose}>
                         キャンセル
                     </button>
-                    <button className="confirm-btn" onClick={handleSearch} disabled={mode === 'database' && !Object.values(criteria).some(Boolean)} style={{
-                        opacity: (mode === 'filesystem' || Object.values(criteria).some(Boolean)) ? 1 : 0.5,
-                        background: mode === 'filesystem' ? '#e74c3c' : undefined,
-                        border: mode === 'filesystem' ? '1px solid #c0392b' : undefined
-                    }}>
+                    <button
+                        className={`confirm-btn ${mode === 'filesystem' ? 'danger' : ''}`}
+                        onClick={handleSearch}
+                        disabled={!canSearch}
+                    >
                         {mode === 'filesystem' ? 'スキャン開始' : '検索開始'}
                     </button>
                 </div>

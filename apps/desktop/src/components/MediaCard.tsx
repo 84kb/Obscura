@@ -56,55 +56,30 @@ export function MediaCard({
 
     // 繧ｵ繝繝阪う繝ｫ縺後↑縺・ｴ蜷医・閾ｪ蜍慕函謌舌ｒ繝医Μ繧ｬ繝ｼ・亥刀雉ｪ蜆ｪ蜈医Δ繝ｼ繝峨・蝣ｴ蜷医・縺ｿ・・
     useEffect(() => {
-        let timeoutId: NodeJS.Timeout | null = null;
         const cacheKey = `${media.id}|${thumbnailMode}|${width}|${media.thumbnail_path || ''}`
         const cachedUrl = thumbnailUrlCache.get(cacheKey)
 
         if (cachedUrl) {
             setThumbnailUrl(cachedUrl)
             setIsLoaded(true)
-        } else {
-            setIsLoaded(false);
-            setThumbnailUrl(null);
+            return
         }
 
-        const updateThumbnail = () => {
-            if (media.thumbnail_path) {
-                const url = toMediaUrl(media.thumbnail_path)
-                const separator = url.includes('?') ? '&' : '?'
-                const isServerThumb = /\/api\/thumbnails\//.test(url)
-                const resolved = thumbnailMode === 'speed' && isServerThumb ? `${url}${separator}width=320` : url
-                const perf = (window as any).__obscuraRandomPerf
-                if (perf && !perf.firstThumbRequestLogged) {
-                    perf.firstThumbRequestLogged = true
-                    const elapsed = performance.now() - Number(perf.start || 0)
-                    console.log(`[Perf][Random] first thumbnail request in ${elapsed.toFixed(1)}ms (mediaId=${media.id})`)
-                }
-                thumbnailUrlCache.set(cacheKey, resolved)
-                setThumbnailUrl(resolved)
-            } else if (thumbnailMode === 'quality' && media.file_type === 'video') {
-                api.generateThumbnail(media.id, media.file_path)
-                    .then((path: string | null) => {
-                        if (path) {
-                            const resolved = toMediaUrl(path)
-                            thumbnailUrlCache.set(cacheKey, resolved)
-                            setThumbnailUrl(resolved)
-                        }
-                    })
-                    .catch((err: Error) => console.error('Thumbnail generation failed:', err))
-            }
-        };
+        setIsLoaded(false)
+        setThumbnailUrl(null)
+        if (!media.thumbnail_path) return
 
-        if (thumbnailMode === 'speed') {
-            timeoutId = setTimeout(updateThumbnail, cachedUrl ? 0 : 30);
-        } else {
-            updateThumbnail();
+        // Use already generated thumbnail as-is. Do not trigger resize/generation on render.
+        const resolved = toMediaUrl(media.thumbnail_path)
+        const perf = (window as any).__obscuraRandomPerf
+        if (perf && !perf.firstThumbRequestLogged) {
+            perf.firstThumbRequestLogged = true
+            const elapsed = performance.now() - Number(perf.start || 0)
+            console.log(`[Perf][Random] first thumbnail request in ${elapsed.toFixed(1)}ms (mediaId=${media.id})`)
         }
-
-        return () => {
-            if (timeoutId) clearTimeout(timeoutId);
-        };
-    }, [media.id, media.file_path, media.thumbnail_path, media.file_type, thumbnailMode, width])
+        thumbnailUrlCache.set(cacheKey, resolved)
+        setThumbnailUrl(resolved)
+    }, [media.id, media.thumbnail_path, thumbnailMode, width])
 
     // 繝輔ぃ繧､繝ｫ繧ｿ繧､繝励↓蠢懊§縺溘い繧､繧ｳ繝ｳ
     const getIcon = () => {
@@ -185,6 +160,20 @@ export function MediaCard({
         return ext
     }
 
+    const getDisplayTitle = () => {
+        const rawTitle = String(media.title || media.file_name || '').trim()
+        const hasExtension = /\.[^/.]+$/.test(rawTitle)
+        const lastDotIndex = media.file_name.lastIndexOf('.')
+        const fileExtWithDot = lastDotIndex > 0 ? media.file_name.substring(lastDotIndex) : ''
+
+        if (showExtension) {
+            if (hasExtension) return rawTitle
+            return fileExtWithDot ? `${rawTitle}${fileExtWithDot}` : rawTitle
+        }
+
+        return rawTitle.replace(/\.[^/.]+$/, "")
+    }
+
 
 
     const handleContextMenu = (e: React.MouseEvent) => {
@@ -254,7 +243,15 @@ export function MediaCard({
         if (!perf || perf.firstThumbLogged) return
         perf.firstThumbLogged = true
         const elapsed = performance.now() - Number(perf.start || 0)
-        console.log(`[Perf][Random] first thumbnail loaded in ${elapsed.toFixed(1)}ms (mediaId=${media.id})`)
+        const src = String(thumbnailUrl || '')
+        const srcKind = /\/api\/thumbnails\//.test(src)
+            ? 'api'
+            : src.includes('asset.localhost')
+                ? 'asset'
+                : /^https?:\/\//.test(src)
+                    ? 'http'
+                    : 'other'
+        console.log(`[Perf][Random] first thumbnail loaded in ${elapsed.toFixed(1)}ms (mediaId=${media.id}, type=${media.file_type}, src=${srcKind})`)
     }
 
     const imgLoadingMode: 'eager' | 'lazy' = priorityLoad ? 'eager' : 'lazy'
@@ -309,7 +306,7 @@ export function MediaCard({
             {/* 繝輔ぃ繧､繝ｫ諠・ｱ・井ｸ矩Κ・・*/}
             {hasVisibleInfo && (
                 <div className="media-card-info">
-                    {showName && <div className="media-card-title" title={media.file_name}>
+                    {showName && <div className="media-card-title" title={getDisplayTitle()}>
                         {isRenaming ? (
                             <textarea
                                 defaultValue={(() => {
@@ -386,12 +383,7 @@ export function MediaCard({
                             />
                         ) : (
                             <>
-                                <>
-                                    {(() => {
-                                        const displayValue = media.title || media.file_name
-                                        return showExtension ? displayValue : displayValue.replace(/\.[^/.]+$/, "")
-                                    })()}
-                                </>
+                                <>{getDisplayTitle()}</>
                             </>
                         )}
                     </div>

@@ -8,7 +8,7 @@ const { spawn, spawnSync } = require('node:child_process')
 
 let machineIdSync = null
 try {
-  ;({ machineIdSync } = require('node-machine-id'))
+  ; ({ machineIdSync } = require('node-machine-id'))
 } catch {
   machineIdSync = null
 }
@@ -33,6 +33,7 @@ let pendingUpdateInstallerPath = null
 let discordRpcModule = null
 let discordClient = null
 let discordReady = false
+let ffmpegHwaccelAvailable = true
 
 const DISCORD_CLIENT_ID = '1462710290322952234'
 
@@ -60,6 +61,18 @@ function getDataRoot() {
   const fromEnv = process.env.OBSCURA_SIDECAR_DATA_DIR
   if (fromEnv) return fromEnv
   return path.resolve(__dirname, '..', '.sidecar-data')
+}
+
+function appendDebugLog(line) {
+  try {
+    const root = getDataRoot()
+    ensureDir(root)
+    const target = path.join(root, 'debug-fileops.log')
+    const ts = new Date().toISOString()
+    fs.appendFileSync(target, `[${ts}] ${String(line || '')}\n`, 'utf8')
+  } catch {
+    // Ignore debug log errors.
+  }
 }
 
 function getUpdateDir() {
@@ -336,6 +349,52 @@ function decodeDataUrl(dataUrl) {
   return { mime, bytes, extension }
 }
 
+function normalizeInputFilePath(inputPath) {
+  let raw = String(inputPath || '').trim()
+  if (!raw) return ''
+  appendDebugLog(`normalizeInputFilePath raw=${raw}`)
+  raw = raw.replace(/^"+|"+$/g, '')
+
+  if (/^media:\/\//i.test(raw)) {
+    const noScheme = raw.slice('media://'.length)
+    const decoded = decodeURIComponent(noScheme)
+    const driveLike = decoded.match(/^([A-Za-z])\/(.*)$/)
+    if (driveLike) {
+      const normalized = path.normalize(`${driveLike[1]}:/${driveLike[2]}`)
+      appendDebugLog(`normalizeInputFilePath media-> ${normalized}`)
+      return normalized
+    }
+    const normalized = path.normalize(decoded)
+    appendDebugLog(`normalizeInputFilePath media-decoded-> ${normalized}`)
+    return normalized
+  }
+
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const parsed = new URL(raw)
+      if (parsed.hostname === 'asset.localhost') {
+        let decoded = decodeURIComponent(parsed.pathname || '')
+        decoded = decoded.replace(/^\/+/, '')
+        const driveLike = decoded.match(/^([A-Za-z])\/(.*)$/)
+        if (driveLike) {
+          const normalized = path.normalize(`${driveLike[1]}:/${driveLike[2]}`)
+          appendDebugLog(`normalizeInputFilePath asset-> ${normalized}`)
+          return normalized
+        }
+        const normalized = path.normalize(decoded)
+        appendDebugLog(`normalizeInputFilePath asset-decoded-> ${normalized}`)
+        return normalized
+      }
+    } catch {
+      // Fall through and return raw path.
+    }
+  }
+
+  const normalized = path.normalize(raw)
+  appendDebugLog(`normalizeInputFilePath plain-> ${normalized}`)
+  return normalized
+}
+
 function getFfmpegExecutablePath() {
   const fromEnv = String(process.env.FFMPEG_PATH || '').trim()
   if (fromEnv) return fromEnv
@@ -437,6 +496,79 @@ function extractThumbnailWithFfmpeg(filePath, outputPath) {
     timeout: 120000,
   })
   return proc.status === 0 && fs.existsSync(outputPath)
+}
+
+function captureFrameDataUrlWithFfmpeg(filePath, timeSeconds) {
+  const ffmpegPath = getFfmpegExecutablePath()
+  const seek = Number.isFinite(Number(timeSeconds)) ? Math.max(0, Number(timeSeconds)) : 0
+  const proc = spawnSync(ffmpegPath, [
+    '-ss', String(seek),
+    '-i', filePath,
+    '-frames:v', '1',
+    '-f', 'image2pipe',
+    '-vcodec', 'mjpeg',
+    'pipe:1',
+  ], {
+    windowsHide: true,
+    timeout: 30000,
+  })
+  if (proc.status !== 0) {
+    const stderr = String(proc.stderr || '').trim()
+    throw new Error(stderr || 'ffmpeg failed to capture frame')
+  }
+  const bytes = Buffer.isBuffer(proc.stdout) ? proc.stdout : Buffer.from(proc.stdout || '')
+  if (!bytes || bytes.length === 0) {
+    throw new Error('ffmpeg returned empty frame')
+  }
+  return `data:image/jpeg;base64,${bytes.toString('base64')}`
+}
+
+function getFfmpegHwaccelArgs(enableGpuAcceleration) {
+  if (!enableGpuAcceleration) return []
+  if (isWindows()) return ['-hwaccel', 'd3d11va']
+  if (process.platform === 'darwin') return ['-hwaccel', 'videotoolbox']
+  return ['-hwaccel', 'auto']
+}
+
+function captureFrameDataUrlWithFfmpegWithHwaccel(filePath, timeSeconds, enableGpuAcceleration) {
+  const ffmpegPath = getFfmpegExecutablePath()
+  const seek = Number.isFinite(Number(timeSeconds)) ? Math.max(0, Number(timeSeconds)) : 0
+  const baseArgs = [
+    '-ss', String(seek),
+    '-i', filePath,
+    '-frames:v', '1',
+    '-f', 'image2pipe',
+    '-vcodec', 'mjpeg',
+    'pipe:1',
+  ]
+  const hwaccelArgs = (enableGpuAcceleration && ffmpegHwaccelAvailable)
+    ? getFfmpegHwaccelArgs(true)
+    : []
+  const candidates = hwaccelArgs.length > 0
+    ? [[...hwaccelArgs, ...baseArgs], baseArgs]
+    : [baseArgs]
+
+  let lastError = 'ffmpeg failed to capture frame'
+  for (const args of candidates) {
+    const proc = spawnSync(ffmpegPath, args, {
+      windowsHide: true,
+      timeout: 30000,
+    })
+    if (proc.status === 0) {
+      const bytes = Buffer.isBuffer(proc.stdout) ? proc.stdout : Buffer.from(proc.stdout || '')
+      if (bytes && bytes.length > 0) {
+        return `data:image/jpeg;base64,${bytes.toString('base64')}`
+      }
+      lastError = 'ffmpeg returned empty frame'
+      continue
+    }
+    const stderr = String(proc.stderr || '').trim()
+    if (hwaccelArgs.length > 0 && args === candidates[0]) {
+      ffmpegHwaccelAvailable = false
+    }
+    if (stderr) lastError = stderr
+  }
+  throw new Error(lastError)
 }
 
 function generatePreviewImages(filePath, previewsDir, intervalSeconds) {
@@ -743,6 +875,214 @@ function asArray(value) {
   return Array.isArray(value) ? value : []
 }
 
+const LIBRARY_INDEX_VERSION = 2
+const LIBRARY_INDEX_FILE = '.obscura-media-index.json'
+const LIBRARY_INDEX_BACKUP_FILE = '.obscura-media-index.backup.json'
+const LEGACY_MEDIA_CACHE_FILE = 'media_cache.json'
+const INDEX_PACKED_FIELDS = [
+  'id',
+  'file_path',
+  'file_name',
+  'title',
+  'file_type',
+  'thumbnail_path',
+  'file_size',
+  'created_at',
+  'modified_date',
+  'updated_at',
+  'added_date',
+  'duration',
+  'width',
+  'height',
+  'rating',
+  'framerate',
+  'audio_bitrate',
+  'format_name',
+  'codec_id',
+  'audio_codec',
+  'video_codec',
+  'artist',
+  'artists',
+  'description',
+  'url',
+  'is_deleted',
+  'last_played_at',
+  'permanently_deleted',
+]
+
+function getLibraryMediaIndexPath(libraryPath) {
+  const normalized = String(libraryPath || '').trim()
+  if (!normalized) return null
+  return path.join(normalized, LIBRARY_INDEX_FILE)
+}
+
+function getLibraryMediaIndexBackupPath(libraryPath) {
+  const normalized = String(libraryPath || '').trim()
+  if (!normalized) return null
+  return path.join(normalized, LIBRARY_INDEX_BACKUP_FILE)
+}
+
+function packIndexItems(items) {
+  return asArray(items).map((item) => INDEX_PACKED_FIELDS.map((field) => item?.[field]))
+}
+
+function unpackIndexItems(rawItems, fields) {
+  const keys = Array.isArray(fields) && fields.length > 0 ? fields : INDEX_PACKED_FIELDS
+  return asArray(rawItems)
+    .filter((row) => Array.isArray(row))
+    .map((row) => {
+      const item = {}
+      for (let i = 0; i < keys.length; i += 1) {
+        const key = String(keys[i] || '').trim()
+        if (!key) continue
+        const value = row[i]
+        if (value !== undefined) item[key] = value
+      }
+      return item
+    })
+}
+
+function normalizeIndexedMediaItem(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const filePath = String(raw.file_path || '').trim()
+  if (!filePath) return null
+  return {
+    ...raw,
+    id: Number.isFinite(Number(raw.id)) ? Number(raw.id) : toMediaId(filePath),
+    file_path: filePath,
+    file_name: String(raw.file_name || path.basename(filePath)),
+  }
+}
+
+function normalizeIndexedMediaList(media) {
+  return asArray(media)
+    .map((item) => normalizeIndexedMediaItem(item))
+    .filter(Boolean)
+}
+
+function readLibraryMediaIndex(libraryPath) {
+  const normalized = String(libraryPath || '').trim()
+  if (!normalized) return []
+
+  const indexPath = getLibraryMediaIndexPath(normalized)
+  const indexRaw = readJsonIfExists(indexPath, null)
+  if (Array.isArray(indexRaw)) {
+    return normalizeIndexedMediaList(indexRaw)
+  }
+  if (indexRaw && typeof indexRaw === 'object' && Array.isArray(indexRaw.items) && !Array.isArray(indexRaw.fields)) {
+    return normalizeIndexedMediaList(indexRaw.items)
+  }
+  if (indexRaw && typeof indexRaw === 'object' && Array.isArray(indexRaw.items) && Array.isArray(indexRaw.fields)) {
+    return normalizeIndexedMediaList(unpackIndexItems(indexRaw.items, indexRaw.fields))
+  }
+  const backupPath = getLibraryMediaIndexBackupPath(normalized)
+  const backupRaw = readJsonIfExists(backupPath, null)
+  if (Array.isArray(backupRaw)) {
+    return normalizeIndexedMediaList(backupRaw)
+  }
+  if (backupRaw && typeof backupRaw === 'object' && Array.isArray(backupRaw.items) && !Array.isArray(backupRaw.fields)) {
+    return normalizeIndexedMediaList(backupRaw.items)
+  }
+  if (backupRaw && typeof backupRaw === 'object' && Array.isArray(backupRaw.items) && Array.isArray(backupRaw.fields)) {
+    return normalizeIndexedMediaList(unpackIndexItems(backupRaw.items, backupRaw.fields))
+  }
+  // Backward compatibility: older libraries may only have media_cache.json.
+  const legacyRaw = readJsonIfExists(path.join(normalized, LEGACY_MEDIA_CACHE_FILE), null)
+  if (Array.isArray(legacyRaw)) {
+    const normalizedLegacy = normalizeIndexedMediaList(legacyRaw)
+    if (normalizedLegacy.length > 0) {
+      // Migrate to the new index format for faster subsequent loads.
+      writeLibraryMediaIndex(normalized, normalizedLegacy)
+    }
+    return normalizedLegacy
+  }
+  if (legacyRaw && typeof legacyRaw === 'object' && Array.isArray(legacyRaw.items)) {
+    const normalizedLegacy = normalizeIndexedMediaList(legacyRaw.items)
+    if (normalizedLegacy.length > 0) {
+      writeLibraryMediaIndex(normalized, normalizedLegacy)
+    }
+    return normalizedLegacy
+  }
+  return []
+}
+
+function writeLibraryMediaIndex(libraryPath, media) {
+  const normalized = String(libraryPath || '').trim()
+  if (!normalized) return
+  const items = normalizeIndexedMediaList(media)
+  const packedItems = packIndexItems(items)
+  const payload = {
+    version: LIBRARY_INDEX_VERSION,
+    libraryPath: normalized,
+    count: items.length,
+    updatedAt: new Date().toISOString(),
+    fields: INDEX_PACKED_FIELDS,
+    items: packedItems,
+  }
+  const indexPath = getLibraryMediaIndexPath(normalized)
+  const backupPath = getLibraryMediaIndexBackupPath(normalized)
+  if (indexPath) {
+    const tmpPath = `${indexPath}.tmp`
+    try {
+      if (backupPath && fs.existsSync(indexPath)) {
+        try {
+          fs.copyFileSync(indexPath, backupPath)
+        } catch {
+          // ignore backup copy failure
+        }
+      }
+      fs.writeFileSync(tmpPath, JSON.stringify(payload), 'utf8')
+      fs.renameSync(tmpPath, indexPath)
+    } catch {
+      try {
+        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
+      } catch {
+        // ignore cleanup failure
+      }
+    }
+  }
+  // Backward-compatible cache for existing versions/tools.
+  try {
+    fs.writeFileSync(path.join(normalized, LEGACY_MEDIA_CACHE_FILE), JSON.stringify(items), 'utf8')
+  } catch {
+    // ignore legacy cache write failure
+  }
+}
+
+function mediaIdentityKey(media) {
+  const filePath = String(media?.file_path || '').trim()
+  if (filePath) return `fp:${filePath}`
+  const idNum = Number(media?.id)
+  if (Number.isFinite(idNum)) return `id:${idNum}`
+  return ''
+}
+
+function upsertLibraryMediaIndex(libraryPath, items) {
+  const normalized = String(libraryPath || '').trim()
+  if (!normalized) return []
+  const base =
+    cachedLibraryPath === normalized
+      ? asArray(cachedScannedMedia)
+      : readLibraryMediaIndex(normalized)
+  const merged = new Map()
+  for (const item of base) {
+    const key = mediaIdentityKey(item)
+    if (!key) continue
+    merged.set(key, item)
+  }
+  for (const item of asArray(items)) {
+    const normalizedItem = normalizeIndexedMediaItem(item)
+    if (!normalizedItem) continue
+    const key = mediaIdentityKey(normalizedItem)
+    if (!key) continue
+    merged.set(key, normalizedItem)
+  }
+  const next = [...merged.values()]
+  writeLibraryMediaIndex(normalized, next)
+  setCachedScannedMedia(normalized, next)
+  return next
+}
+
 function setCachedScannedMedia(libraryPath, media) {
   cachedLibraryPath = String(libraryPath || '').trim() || null
   cachedScannedMedia = asArray(media)
@@ -778,15 +1118,34 @@ const MEDIA_EXTENSIONS = new Set([
   '.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a',
   '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp',
 ])
+const DEFAULT_SCAN_LIMIT = 200000
+const SKIP_SCAN_DIR_NAMES = new Set([
+  '.git',
+  'node_modules',
+  '.obscura-thumbnails',
+  '.sidecar-data',
+  '$recycle.bin',
+  'system volume information',
+])
+
+function isSidecarThumbnailFileName(fileName) {
+  const name = String(fileName || '')
+  // Keep originals, but skip generated sidecar thumbnail files.
+  // Examples:
+  //   foo_thumbnail.png
+  //   foo.thumbnail.jpg
+  return /(?:_thumbnail|\.thumbnail)\.(png|jpe?g|webp|avif)$/i.test(name)
+}
 
 function toMediaId(filePath) {
   const hex = crypto.createHash('sha1').update(String(filePath)).digest('hex').slice(0, 12)
   return parseInt(hex, 16)
 }
 
-function scanLocalMediaFiles(rootDir, limit = 10000) {
+function scanLocalMediaFiles(rootDir, limit = DEFAULT_SCAN_LIMIT) {
   const out = []
   const stack = [rootDir]
+  const metadataJsonCache = new Map()
 
   while (stack.length > 0 && out.length < limit) {
     const current = stack.pop()
@@ -800,10 +1159,14 @@ function scanLocalMediaFiles(rootDir, limit = 10000) {
     for (const entry of entries) {
       const fullPath = path.join(current, entry.name)
       if (entry.isDirectory()) {
+        const dirName = String(entry.name || '').toLowerCase()
+        if (SKIP_SCAN_DIR_NAMES.has(dirName)) continue
         stack.push(fullPath)
         continue
       }
+      if (entry.isSymbolicLink()) continue
       if (!entry.isFile()) continue
+      if (isSidecarThumbnailFileName(entry.name)) continue
 
       const ext = path.extname(entry.name).toLowerCase()
       if (!MEDIA_EXTENSIONS.has(ext)) continue
@@ -818,15 +1181,15 @@ function scanLocalMediaFiles(rootDir, limit = 10000) {
       const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(ext)
       const isAudio = ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a'].includes(ext)
       const fileType = isImage ? 'image' : isAudio ? 'audio' : 'video'
-      const siblingThumb = fileType === 'video' ? findSiblingThumbnailPath(fullPath) : ''
+      const siblingThumb = findSiblingThumbnailPath(fullPath)
 
-      out.push({
+      const item = {
         id: toMediaId(fullPath),
         file_name: entry.name,
         title: path.basename(entry.name, ext),
         file_type: fileType,
         file_path: fullPath,
-        thumbnail_path: isImage ? fullPath : siblingThumb,
+        thumbnail_path: siblingThumb || (isImage ? fullPath : ''),
         file_size: stat?.size || 0,
         created_at: stat?.ctime ? new Date(stat.ctime).toISOString() : '',
         modified_date: stat?.mtime ? new Date(stat.mtime).toISOString() : '',
@@ -834,12 +1197,186 @@ function scanLocalMediaFiles(rootDir, limit = 10000) {
         last_played_at: null,
         tags: [],
         folders: [],
-      })
+      }
+
+      const metadataEntry = resolveMetadataEntryForFile(fullPath, metadataJsonCache)
+      if (metadataEntry) {
+        applyMetadataOverlayFromEntry(item, item, metadataEntry)
+
+        const toFiniteNumber = (value) => {
+          const n = Number(value)
+          return Number.isFinite(n) ? n : undefined
+        }
+        const duration = toFiniteNumber(metadataEntry.duration)
+        const width = toFiniteNumber(metadataEntry.width ?? metadataEntry.resolutionWidth)
+        const height = toFiniteNumber(metadataEntry.height ?? metadataEntry.resolutionHeight)
+        const framerate = toFiniteNumber(metadataEntry.framerate ?? metadataEntry.frame_rate)
+        const audioBitrate = toFiniteNumber(
+          metadataEntry.audio_bitrate ??
+          metadataEntry.audioBitrate ??
+          metadataEntry.audioBitRate
+        )
+        const rating = toFiniteNumber(metadataEntry.rating ?? metadataEntry.star)
+        const fileSize = toFiniteNumber(metadataEntry.file_size ?? metadataEntry.size)
+        const formatName = (typeof metadataEntry.format_name === 'string' ? metadataEntry.format_name : (typeof metadataEntry.formatName === 'string' ? metadataEntry.formatName : '')).trim()
+        const codecId = (typeof metadataEntry.codec_id === 'string' ? metadataEntry.codec_id : (typeof metadataEntry.codecId === 'string' ? metadataEntry.codecId : '')).trim()
+
+        if (duration !== undefined) item.duration = duration
+        if (width !== undefined) item.width = width
+        if (height !== undefined) item.height = height
+        if (framerate !== undefined) item.framerate = framerate
+        if (audioBitrate !== undefined) item.audio_bitrate = audioBitrate
+        if (rating !== undefined) item.rating = rating
+        if (fileSize !== undefined && fileSize > 0) item.file_size = fileSize
+        if (formatName) item.format_name = formatName
+        if (codecId) item.codec_id = codecId
+        if (typeof metadataEntry.thumbnail_path === 'string' && metadataEntry.thumbnail_path.trim()) {
+          item.thumbnail_path = metadataEntry.thumbnail_path.trim()
+        }
+        if (Array.isArray(metadataEntry.tags)) {
+          item.tags = metadataEntry.tags
+        }
+        if (Array.isArray(metadataEntry.folders)) {
+          item.folders = metadataEntry.folders
+        }
+        if (typeof metadataEntry.last_played_at === 'string') {
+          item.last_played_at = metadataEntry.last_played_at
+        }
+        if (typeof metadataEntry.is_deleted === 'boolean') {
+          item.is_deleted = metadataEntry.is_deleted
+        }
+      }
+
+      out.push(item)
 
       if (out.length >= limit) break
     }
   }
 
+  return out
+}
+
+function nextTick() {
+  return new Promise((resolve) => setImmediate(resolve))
+}
+
+async function scanLocalMediaFilesAsync(rootDir, limit = DEFAULT_SCAN_LIMIT, onPulse) {
+  const out = []
+  const stack = [rootDir]
+  const metadataJsonCache = new Map()
+  let processedEntries = 0
+
+  while (stack.length > 0 && out.length < limit) {
+    const current = stack.pop()
+    let entries = []
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true })
+    } catch {
+      continue
+    }
+
+    for (const entry of entries) {
+      const fullPath = path.join(current, entry.name)
+      if (entry.isDirectory()) {
+        const dirName = String(entry.name || '').toLowerCase()
+        if (SKIP_SCAN_DIR_NAMES.has(dirName)) continue
+        stack.push(fullPath)
+        continue
+      }
+      if (entry.isSymbolicLink()) continue
+      if (!entry.isFile()) continue
+      if (isSidecarThumbnailFileName(entry.name)) continue
+
+      const ext = path.extname(entry.name).toLowerCase()
+      if (!MEDIA_EXTENSIONS.has(ext)) continue
+
+      let stat = null
+      try {
+        stat = fs.statSync(fullPath)
+      } catch {
+        stat = null
+      }
+
+      const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(ext)
+      const isAudio = ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a'].includes(ext)
+      const fileType = isImage ? 'image' : isAudio ? 'audio' : 'video'
+      const siblingThumb = findSiblingThumbnailPath(fullPath)
+
+      const item = {
+        id: toMediaId(fullPath),
+        file_name: entry.name,
+        title: path.basename(entry.name, ext),
+        file_type: fileType,
+        file_path: fullPath,
+        thumbnail_path: siblingThumb || (isImage ? fullPath : ''),
+        file_size: stat?.size || 0,
+        created_at: stat?.ctime ? new Date(stat.ctime).toISOString() : '',
+        modified_date: stat?.mtime ? new Date(stat.mtime).toISOString() : '',
+        is_deleted: false,
+        last_played_at: null,
+        tags: [],
+        folders: [],
+      }
+
+      const metadataEntry = resolveMetadataEntryForFile(fullPath, metadataJsonCache)
+      if (metadataEntry) {
+        applyMetadataOverlayFromEntry(item, item, metadataEntry)
+        const toFiniteNumber = (value) => {
+          const n = Number(value)
+          return Number.isFinite(n) ? n : undefined
+        }
+        const duration = toFiniteNumber(metadataEntry.duration)
+        const width = toFiniteNumber(metadataEntry.width ?? metadataEntry.resolutionWidth)
+        const height = toFiniteNumber(metadataEntry.height ?? metadataEntry.resolutionHeight)
+        const framerate = toFiniteNumber(metadataEntry.framerate ?? metadataEntry.frame_rate)
+        const audioBitrate = toFiniteNumber(
+          metadataEntry.audio_bitrate ??
+          metadataEntry.audioBitrate ??
+          metadataEntry.audioBitRate
+        )
+        const rating = toFiniteNumber(metadataEntry.rating ?? metadataEntry.star)
+        const fileSize = toFiniteNumber(metadataEntry.file_size ?? metadataEntry.size)
+        const formatName = (typeof metadataEntry.format_name === 'string' ? metadataEntry.format_name : (typeof metadataEntry.formatName === 'string' ? metadataEntry.formatName : '')).trim()
+        const codecId = (typeof metadataEntry.codec_id === 'string' ? metadataEntry.codec_id : (typeof metadataEntry.codecId === 'string' ? metadataEntry.codecId : '')).trim()
+
+        if (duration !== undefined) item.duration = duration
+        if (width !== undefined) item.width = width
+        if (height !== undefined) item.height = height
+        if (framerate !== undefined) item.framerate = framerate
+        if (audioBitrate !== undefined) item.audio_bitrate = audioBitrate
+        if (rating !== undefined) item.rating = rating
+        if (fileSize !== undefined && fileSize > 0) item.file_size = fileSize
+        if (formatName) item.format_name = formatName
+        if (codecId) item.codec_id = codecId
+        if (typeof metadataEntry.thumbnail_path === 'string' && metadataEntry.thumbnail_path.trim()) {
+          item.thumbnail_path = metadataEntry.thumbnail_path.trim()
+        }
+        if (Array.isArray(metadataEntry.tags)) item.tags = metadataEntry.tags
+        if (Array.isArray(metadataEntry.folders)) item.folders = metadataEntry.folders
+        if (typeof metadataEntry.last_played_at === 'string') item.last_played_at = metadataEntry.last_played_at
+        if (typeof metadataEntry.is_deleted === 'boolean') item.is_deleted = metadataEntry.is_deleted
+      }
+
+      out.push(item)
+      if (out.length >= limit) break
+      processedEntries += 1
+
+      if (processedEntries % 250 === 0) {
+        if (typeof onPulse === 'function') {
+          onPulse({ processed: processedEntries, found: out.length, queued: stack.length })
+        }
+        await nextTick()
+      }
+    }
+
+    if (processedEntries % 250 === 0) {
+      await nextTick()
+    }
+  }
+
+  if (typeof onPulse === 'function') {
+    onPulse({ processed: processedEntries, found: out.length, queued: stack.length })
+  }
   return out
 }
 
@@ -957,31 +1494,54 @@ function applyMetadataOverlayFromEntry(item, overlay, entry) {
   if (!entry || typeof entry !== 'object') return
 
   const stringOrEmpty = (value) => (typeof value === 'string' ? value.trim() : '')
+  const toFiniteNumber = (value) => {
+    const n = Number(value)
+    return Number.isFinite(n) ? n : undefined
+  }
+
   const artist =
     stringOrEmpty(entry.artist) ||
-    stringOrEmpty(entry['投稿者']) ||
-    stringOrEmpty(entry['投稿者名']) ||
     stringOrEmpty(entry.uploader) ||
     stringOrEmpty(entry.author) ||
     stringOrEmpty(entry.creator) ||
     stringOrEmpty(entry.channel)
   const description =
     stringOrEmpty(entry.description) ||
-    stringOrEmpty(entry['説明']) ||
     stringOrEmpty(entry.desc) ||
     stringOrEmpty(entry.caption)
   const url =
     stringOrEmpty(entry.url) ||
-    stringOrEmpty(entry['リンク']) ||
-    stringOrEmpty(entry['URL']) ||
+    stringOrEmpty(entry.URL) ||
     stringOrEmpty(entry.source_url) ||
     stringOrEmpty(entry.webpage_url) ||
     stringOrEmpty(entry.original_url)
   const title =
     stringOrEmpty(entry.title) ||
-    stringOrEmpty(entry['タイトル']) ||
-    stringOrEmpty(entry['題名']) ||
     stringOrEmpty(entry.name)
+
+  const audioBitrate = toFiniteNumber(entry.audio_bitrate ?? entry.audioBitrate ?? entry.audioBitRate)
+  const framerate = toFiniteNumber(entry.framerate ?? entry.frame_rate ?? entry.fps)
+  const formatNameRaw =
+    stringOrEmpty(entry.format_name) ||
+    stringOrEmpty(entry.formatName) ||
+    stringOrEmpty(entry.container) ||
+    stringOrEmpty(entry.format)
+  const codecIdRaw =
+    stringOrEmpty(entry.codec_id) ||
+    stringOrEmpty(entry.codecId) ||
+    stringOrEmpty(entry.codec) ||
+    stringOrEmpty(entry.video_codec) ||
+    stringOrEmpty(entry.videoCodec) ||
+    stringOrEmpty(entry.audio_codec) ||
+    stringOrEmpty(entry.audioCodec)
+  const audioCodec = stringOrEmpty(entry.audio_codec) || stringOrEmpty(entry.audioCodec)
+  const videoCodec = stringOrEmpty(entry.video_codec) || stringOrEmpty(entry.videoCodec)
+  const formatName = normalizeFormatLabel(
+    formatNameRaw,
+    item?.file_path || overlay?.file_path || entry?.file_path || '',
+    ''
+  )
+  const codecId = normalizeCodecLabel(codecIdRaw)
 
   if (artist) {
     overlay.artist = artist
@@ -998,6 +1558,30 @@ function applyMetadataOverlayFromEntry(item, overlay, entry) {
   if (title) {
     overlay.title = title
     item.title = title
+  }
+  if (audioBitrate !== undefined && audioBitrate > 0) {
+    overlay.audio_bitrate = audioBitrate
+    item.audio_bitrate = audioBitrate
+  }
+  if (framerate !== undefined && framerate > 0) {
+    overlay.framerate = framerate
+    item.framerate = framerate
+  }
+  if (formatName) {
+    overlay.format_name = formatName
+    item.format_name = formatName
+  }
+  if (codecId) {
+    overlay.codec_id = codecId
+    item.codec_id = codecId
+  }
+  if (audioCodec) {
+    overlay.audio_codec = audioCodec
+    item.audio_codec = audioCodec
+  }
+  if (videoCodec) {
+    overlay.video_codec = videoCodec
+    item.video_codec = videoCodec
   }
 }
 
@@ -1191,6 +1775,11 @@ function getResolvedTagsAndFolders(meta, libraryPath) {
 function mergeMediaWithMeta(mediaList) {
   const meta = loadLocalMeta()
   const byFilePath = meta.byFilePath || {}
+  const hasByFilePath = byFilePath && typeof byFilePath === 'object' && Object.keys(byFilePath).length > 0
+  const manualMedia = asArray(meta.manualMedia)
+  if (!hasByFilePath && manualMedia.length === 0) {
+    return asArray(mediaList).filter((m) => !m?.permanently_deleted)
+  }
   const { tags, folders } = getResolvedTagsAndFolders(meta)
   const tagById = new Map(tags.map((t) => [Number(t.id), t]))
   const folderById = new Map(folders.map((f) => [Number(f.id), f]))
@@ -1209,12 +1798,6 @@ function mergeMediaWithMeta(mediaList) {
         tags: resolvedTags.length > 0 ? resolvedTags : asArray(m?.tags),
         folders: resolvedFolders.length > 0 ? resolvedFolders : asArray(m?.folders),
       }
-      if (String(merged?.file_type || '') === 'video' && !String(merged?.thumbnail_path || '').trim()) {
-        const siblingThumb = findSiblingThumbnailPath(filePath)
-        if (siblingThumb) {
-          merged.thumbnail_path = siblingThumb
-        }
-      }
       return merged
     })
 
@@ -1223,7 +1806,7 @@ function mergeMediaWithMeta(mediaList) {
     indexed.set(String(m?.file_path || ''), m)
   }
 
-  for (const manual of asArray(meta.manualMedia)) {
+  for (const manual of manualMedia) {
     const fp = String(manual?.file_path || '')
     if (!fp || indexed.has(fp)) continue
     const overlay = byFilePath[fp] || {}
@@ -1247,7 +1830,7 @@ function getAllMediaForActiveLibrary() {
     return cachedMergedMedia
   }
 
-  if (activeLibraryPath && cachedLibraryPath === activeLibraryPath && cachedScannedMedia.length > 0) {
+  if (activeLibraryPath && cachedLibraryPath === activeLibraryPath) {
     const merged = mergeMediaWithMeta(cachedScannedMedia)
     cachedMergedLibraryPath = activeLibraryPath
     cachedMergedRevision = mediaDataRevision
@@ -1255,17 +1838,17 @@ function getAllMediaForActiveLibrary() {
     return merged
   }
 
-  let allMedia = readJsonIfExists(getActiveLibraryDataPath('media_cache.json'), [])
-  if ((!Array.isArray(allMedia) || allMedia.length === 0) && activeLibraryPath) {
-    allMedia = scanLocalMediaFiles(activeLibraryPath)
-    const cachePath = getActiveLibraryDataPath('media_cache.json')
-    if (cachePath) {
-      try {
-        fs.writeFileSync(cachePath, JSON.stringify(asArray(allMedia), null, 2), 'utf8')
-      } catch {
-        // Keep runtime flow even if cache write fails.
-      }
+  // Never block startup/UI on a full filesystem scan.
+  // If index is missing, return empty and wait for explicit refresh/import.
+  const allMedia = activeLibraryPath ? readLibraryMediaIndex(activeLibraryPath) : []
+  if (!Array.isArray(allMedia) || allMedia.length === 0) {
+    if (activeLibraryPath) {
+      setCachedScannedMedia(activeLibraryPath, [])
     }
+    cachedMergedLibraryPath = activeLibraryPath
+    cachedMergedRevision = mediaDataRevision
+    cachedMergedMedia = []
+    return []
   }
 
   if (activeLibraryPath) {
@@ -1418,6 +2001,31 @@ function buildTransferredOverlay(media, settings, targetMeta, targetLibraryPath)
 function probeMediaMetadata(filePath) {
   if (!filePath || !fs.existsSync(filePath)) return null
 
+  const normalizeFormatLabel = (input, srcPath, longName) => {
+    const raw = String(input || '').trim().toLowerCase()
+    const ext = String(path.extname(String(srcPath || '')) || '').replace(/^\./, '').toLowerCase()
+    const full = String(longName || '').trim()
+    if (raw.includes('mp4') || ext === 'mp4' || ext === 'm4v') return 'MPEG-4'
+    if (raw.includes('matroska') || ext === 'mkv') return 'Matroska'
+    if (raw.includes('webm') || ext === 'webm') return 'WebM'
+    if (raw.includes('mpegts') || raw === 'ts' || ext === 'ts') return 'MPEG-TS'
+    if (full) return full
+    if (!raw) return ''
+    const preferred = raw.split(',').map((v) => v.trim()).find((v) => v && v !== 'mov') || ''
+    return preferred || raw
+  }
+
+  const normalizeCodecTag = (tag) => {
+    const raw = String(tag || '').trim().toLowerCase()
+    if (!raw) return ''
+    if (raw === '[0][0][0][0]' || raw === '0x00000000') return ''
+    return raw
+  }
+
+  const normalizeCodecLabel = (codec) => {
+    return String(codec || '').trim().toLowerCase()
+  }
+
   const ffprobePath = getFfprobeExecutablePath()
   try {
     const proc = spawnSync(ffprobePath, [
@@ -1436,10 +2044,40 @@ function probeMediaMetadata(filePath) {
     const data = JSON.parse(stdout || '{}')
     const streams = asArray(data?.streams)
     const videoStream = streams.find((stream) => stream && String(stream.codec_type) === 'video') || null
+    const audioStream = streams.find((stream) => stream && String(stream.codec_type) === 'audio') || null
     const durationRaw = data?.format?.duration ?? videoStream?.duration
     const duration = Number(durationRaw)
     const width = Number(videoStream?.width)
     const height = Number(videoStream?.height)
+    const videoBitrate = Number(videoStream?.bit_rate ?? 0)
+    const formatBitrate = Number(data?.format?.bit_rate ?? 0)
+    const audioBitrateRaw =
+      audioStream?.bit_rate ??
+      audioStream?.tags?.BPS ??
+      audioStream?.tags?.BPS_eng ??
+      ((!videoStream && !audioStream) ? data?.format?.bit_rate : undefined)
+    let audioBitrate = Number(audioBitrateRaw)
+    if ((!Number.isFinite(audioBitrate) || audioBitrate <= 0) && Number.isFinite(formatBitrate) && formatBitrate > 0) {
+      if (Number.isFinite(videoBitrate) && videoBitrate > 0 && formatBitrate > videoBitrate) {
+        audioBitrate = formatBitrate - videoBitrate
+      } else if (!videoStream && !audioStream) {
+        audioBitrate = formatBitrate
+      }
+    }
+    const formatName = normalizeFormatLabel(
+      data?.format?.format_name || '',
+      filePath,
+      data?.format?.format_long_name || '',
+    )
+    const codecId = normalizeCodecLabel(
+      normalizeCodecTag(videoStream?.codec_tag_string) ||
+      normalizeCodecTag(audioStream?.codec_tag_string) ||
+      videoStream?.codec_name ||
+      audioStream?.codec_name ||
+      '',
+    )
+    const audioCodec = normalizeCodecLabel(audioStream?.codec_name || '')
+    const videoCodec = normalizeCodecLabel(videoStream?.codec_name || '')
     let framerate
     const frameRateRaw = String(videoStream?.r_frame_rate || '')
     if (frameRateRaw.includes('/')) {
@@ -1539,6 +2177,12 @@ function probeMediaMetadata(filePath) {
       height: Number.isFinite(height) ? height : undefined,
       duration: Number.isFinite(duration) ? duration : undefined,
       framerate: Number.isFinite(Number(framerate)) ? Number(framerate) : undefined,
+      audio_bitrate: Number.isFinite(audioBitrate) && audioBitrate > 0 ? audioBitrate : undefined,
+      video_bitrate: Number.isFinite(videoBitrate) && videoBitrate > 0 ? videoBitrate : undefined,
+      format_name: formatName || undefined,
+      codec_id: codecId || undefined,
+      audio_codec: audioCodec || undefined,
+      video_codec: videoCodec || undefined,
       artist: artist || undefined,
       description: description || undefined,
       comment: comment || undefined,
@@ -1618,6 +2262,26 @@ function applyMediaSort(media, filters) {
   })
 
   return list
+}
+
+function emitLibraryLoadProgress(requestId, current, total, phase, extra) {
+  const safeTotal = Number(total)
+  const safeCurrent = Number(current)
+  const normalizedTotal = Number.isFinite(safeTotal) && safeTotal > 0 ? safeTotal : 100
+  const normalizedCurrent = Number.isFinite(safeCurrent)
+    ? Math.max(0, Math.min(normalizedTotal, safeCurrent))
+    : 0
+  const payload = {
+    requestId,
+    current: normalizedCurrent,
+    total: normalizedTotal,
+    percentage: Math.round((normalizedCurrent / normalizedTotal) * 100),
+    phase: String(phase || ''),
+  }
+  if (extra && typeof extra === 'object') {
+    Object.assign(payload, extra)
+  }
+  send({ id: null, ok: true, event: 'library-load-progress', payload })
 }
 
 function parseMetadata(code, fileName) {
@@ -1812,7 +2476,7 @@ function handleRequest(req) {
   }
 
   if (method === 'discord_update_activity') {
-    ;(async () => {
+    ; (async () => {
       try {
         const enabled = params?.enabled !== false
         if (!enabled) {
@@ -1848,7 +2512,7 @@ function handleRequest(req) {
   }
 
   if (method === 'discord_clear_activity') {
-    ;(async () => {
+    ; (async () => {
       try {
         const ok = await clearDiscordActivitySafe()
         send({ id, ok: true, result: ok })
@@ -1903,38 +2567,63 @@ function handleRequest(req) {
 
   if (method === 'get_media_files') {
     try {
-      const filters = params?.filters && typeof params.filters === 'object' ? params.filters : {}
+      const rawFilters = params?.filters && typeof params.filters === 'object' ? { ...params.filters } : {}
+      const fastPreview =
+        Boolean(params?.fastPreview) ||
+        Boolean(rawFilters?.__fastPreview) ||
+        Boolean(rawFilters?.__obscuraFastPreview)
+      delete rawFilters.__fastPreview
+      delete rawFilters.__obscuraFastPreview
+      const filters = rawFilters
       const hasPaging =
         params &&
         typeof params === 'object' &&
         params.page !== undefined &&
         params.limit !== undefined
+      const limitRaw = Number(params?.limit)
+      const pageRaw = Number(params?.page)
+      const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1
+      const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : 100
+
+      emitLibraryLoadProgress(id, 3, 100, 'read-index')
       const merged = getAllMediaForActiveLibrary()
-      const filterCacheKey = JSON.stringify({
-        activeLibraryPath: String(activeLibraryPath || ''),
-        filters,
-      })
+      emitLibraryLoadProgress(id, 45, 100, 'index-ready', { totalItems: asArray(merged).length })
+
       let filtered = []
-      if (cachedFilteredRevision === mediaDataRevision && cachedFilteredKey === filterCacheKey) {
-        filtered = cachedFilteredMedia
+      if (fastPreview) {
+        filtered = asArray(merged)
+        emitLibraryLoadProgress(id, 70, 100, 'preview-ready', { previewMode: true })
       } else {
-        filtered = applyMediaSort(applyMediaFilters(merged, filters), filters)
-        cachedFilteredRevision = mediaDataRevision
-        cachedFilteredKey = filterCacheKey
-        cachedFilteredMedia = filtered
+        const filterCacheKey = JSON.stringify({
+          activeLibraryPath: String(activeLibraryPath || ''),
+          filters,
+        })
+        if (cachedFilteredRevision === mediaDataRevision && cachedFilteredKey === filterCacheKey) {
+          filtered = cachedFilteredMedia
+        } else {
+          filtered = applyMediaSort(applyMediaFilters(merged, filters), filters)
+          cachedFilteredRevision = mediaDataRevision
+          cachedFilteredKey = filterCacheKey
+          cachedFilteredMedia = filtered
+        }
+        emitLibraryLoadProgress(id, 88, 100, 'filter-ready')
       }
       mediaIndexById = new Map(asArray(filtered).map((m) => [Number(m?.id), m]))
       if (!hasPaging) {
+        emitLibraryLoadProgress(id, 100, 100, 'done', { count: asArray(filtered).length, previewMode: fastPreview })
         send({ id, ok: true, result: filtered })
         return
       }
 
-      const pageRaw = Number(params?.page)
-      const limitRaw = Number(params?.limit)
-      const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1
-      const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : 100
       const start = (page - 1) * limit
       const media = asArray(filtered).slice(start, start + limit)
+      emitLibraryLoadProgress(id, 100, 100, 'done', {
+        count: asArray(filtered).length,
+        returned: media.length,
+        page,
+        limit,
+        previewMode: fastPreview,
+      })
       send({
         id,
         ok: true,
@@ -1952,33 +2641,34 @@ function handleRequest(req) {
   }
 
   if (method === 'refresh_library') {
-    try {
-      send({ id: null, ok: true, event: 'refresh-progress', payload: { current: 0, total: 3 } })
-      if (activeLibraryPath) {
-        send({ id: null, ok: true, event: 'refresh-progress', payload: { current: 1, total: 3 } })
-        const scannedRaw = scanLocalMediaFiles(activeLibraryPath)
-        const cachePath = getActiveLibraryDataPath('media_cache.json')
-        if (cachePath) {
-          try {
-            fs.writeFileSync(cachePath, JSON.stringify(asArray(scannedRaw), null, 2), 'utf8')
-          } catch {
-            // Cache write failure should not block refresh.
-          }
+    ; (async () => {
+      try {
+        send({ id: null, ok: true, event: 'refresh-progress', payload: { current: 0, total: 100 } })
+        if (activeLibraryPath) {
+          const imagesRoot = path.join(activeLibraryPath, 'images')
+          const scanRoot = fs.existsSync(imagesRoot) ? imagesRoot : activeLibraryPath
+          send({ id: null, ok: true, event: 'refresh-progress', payload: { current: 5, total: 100 } })
+          const scannedRaw = await scanLocalMediaFilesAsync(scanRoot, DEFAULT_SCAN_LIMIT, (pulse) => {
+            // 5%..85% during scan
+            const progress = Math.min(85, 5 + Math.floor((Number(pulse?.processed || 0) / 25000) * 80))
+            send({ id: null, ok: true, event: 'refresh-progress', payload: { current: progress, total: 100 } })
+          })
+          send({ id: null, ok: true, event: 'refresh-progress', payload: { current: 90, total: 100 } })
+          writeLibraryMediaIndex(activeLibraryPath, scannedRaw)
+          setCachedScannedMedia(activeLibraryPath, scannedRaw)
+          const scanned = mergeMediaWithMeta(scannedRaw)
+          mediaIndexById = new Map(asArray(scanned).map((m) => [Number(m?.id), m]))
+          send({ id: null, ok: true, event: 'refresh-progress', payload: { current: 100, total: 100 } })
+        } else {
+          clearCachedScannedMedia()
+          mediaIndexById = new Map()
+          send({ id: null, ok: true, event: 'refresh-progress', payload: { current: 100, total: 100 } })
         }
-        setCachedScannedMedia(activeLibraryPath, scannedRaw)
-        const scanned = mergeMediaWithMeta(scannedRaw)
-        mediaIndexById = new Map(asArray(scanned).map((m) => [Number(m?.id), m]))
-        send({ id: null, ok: true, event: 'refresh-progress', payload: { current: 2, total: 3 } })
-      } else {
-        clearCachedScannedMedia()
-        mediaIndexById = new Map()
-        send({ id: null, ok: true, event: 'refresh-progress', payload: { current: 2, total: 3 } })
+        send({ id, ok: true, result: true })
+      } catch (err) {
+        send({ id, ok: false, error: `refresh_library failed: ${err?.message || String(err)}` })
       }
-      send({ id: null, ok: true, event: 'refresh-progress', payload: { current: 3, total: 3 } })
-      send({ id, ok: true, result: true })
-    } catch (err) {
-      send({ id, ok: false, error: `refresh_library failed: ${err?.message || String(err)}` })
-    }
+    })()
     return
   }
 
@@ -1992,7 +2682,7 @@ function handleRequest(req) {
 
       let media = mediaIndexById.get(mediaId) || null
       if (!media && activeLibraryPath) {
-        const scanned = mergeMediaWithMeta(scanLocalMediaFiles(activeLibraryPath))
+        const scanned = getAllMediaForActiveLibrary()
         media = scanned.find((m) => Number(m?.id) === mediaId) || null
       }
 
@@ -2559,7 +3249,7 @@ function handleRequest(req) {
   }
 
   if (method === 'plugin_fetch') {
-    ;(async () => {
+    ; (async () => {
       try {
         const url = params?.url
         if (!url || typeof url !== 'string') {
@@ -2614,7 +3304,7 @@ function handleRequest(req) {
   }
 
   if (method === 'test_connection') {
-    ;(async () => {
+    ; (async () => {
       try {
         const baseUrl = String(params?.url || '').replace(/\/$/, '')
         const token = String(params?.token || '')
@@ -2677,7 +3367,7 @@ function handleRequest(req) {
           send({
             id,
             ok: true,
-            result: { success: false, message: 'アクセストークンが異なります。' },
+            result: { success: false, message: 'Authentication failed. Verify access token and user token.' },
           })
           return
         }
@@ -2853,14 +3543,19 @@ function handleRequest(req) {
 
   if (method === 'file_open_path') {
     try {
-      const filePath = String(params?.filePath || '')
+      const filePath = normalizeInputFilePath(params?.filePath)
       if (!filePath) {
         send({ id, ok: false, error: 'file_open_path requires filePath' })
         return
       }
 
       if (isWindows()) {
-        spawnDetached('cmd', ['/c', 'start', '', filePath])
+        const resolved = path.resolve(filePath)
+        if (fs.existsSync(resolved)) {
+          spawnDetached('explorer.exe', [resolved])
+        } else {
+          spawnDetached('cmd', ['/c', 'start', '', resolved])
+        }
       } else {
         spawnDetached('xdg-open', [filePath])
       }
@@ -2873,29 +3568,38 @@ function handleRequest(req) {
 
   if (method === 'file_show_item_in_folder') {
     try {
-      const filePath = String(params?.filePath || '')
+      const filePath = normalizeInputFilePath(params?.filePath)
+      appendDebugLog(`file_show_item_in_folder input=${String(params?.filePath || '')}`)
+      appendDebugLog(`file_show_item_in_folder normalized=${filePath}`)
       if (!filePath) {
+        appendDebugLog('file_show_item_in_folder fail: empty filePath')
         send({ id, ok: false, error: 'file_show_item_in_folder requires filePath' })
         return
       }
 
       if (isWindows()) {
         const resolved = path.resolve(filePath)
-        const escaped = resolved.replace(/"/g, '""')
-        const proc = spawnSync('cmd', ['/c', 'explorer', `/select,\"${escaped}\"`], {
-          encoding: 'utf8',
-          windowsHide: true,
-          timeout: 5000,
-        })
-        if (proc.status !== 0) {
-          spawnDetached('explorer.exe', [path.dirname(resolved)])
+        let targetDir = resolved
+        appendDebugLog(`file_show_item_in_folder resolved=${resolved} exists=${fs.existsSync(resolved)}`)
+        if (fs.existsSync(resolved)) {
+          const stat = fs.statSync(resolved)
+          targetDir = stat.isDirectory() ? resolved : path.dirname(resolved)
+          appendDebugLog(`file_show_item_in_folder stat.isDirectory=${stat.isDirectory()} targetDir=${targetDir}`)
+        } else {
+          targetDir = path.dirname(resolved)
+          appendDebugLog(`file_show_item_in_folder fallback targetDir=${targetDir} exists=${fs.existsSync(targetDir)}`)
         }
+        appendDebugLog(`file_show_item_in_folder shell_open=${targetDir}`)
+        // Open via Windows shell so the default file manager handles the folder.
+        spawnDetached('cmd', ['/c', 'start', '', targetDir])
       } else {
         const dirPath = path.dirname(filePath)
+        appendDebugLog(`file_show_item_in_folder xdg_open=${dirPath}`)
         spawnDetached('xdg-open', [dirPath])
       }
       send({ id, ok: true, result: true })
     } catch (err) {
+      appendDebugLog(`file_show_item_in_folder error=${err?.message || String(err)}`)
       send({ id, ok: false, error: `file_show_item_in_folder failed: ${err?.message || String(err)}` })
     }
     return
@@ -2903,7 +3607,7 @@ function handleRequest(req) {
 
   if (method === 'file_open_with') {
     try {
-      const filePath = String(params?.filePath || '')
+      const filePath = normalizeInputFilePath(params?.filePath)
       if (!filePath) {
         send({ id, ok: false, error: 'file_open_with requires filePath' })
         return
@@ -2922,9 +3626,9 @@ function handleRequest(req) {
   }
 
   if (method === 'file_copy_to_clipboard') {
-    ;(async () => {
+    ; (async () => {
       try {
-        const filePath = String(params?.filePath || '')
+        const filePath = normalizeInputFilePath(params?.filePath)
         const copied = await copyFileToClipboard(filePath)
         if (!copied) {
           send({ id, ok: false, error: 'file_copy_to_clipboard failed' })
@@ -2952,6 +3656,27 @@ function handleRequest(req) {
       send({ id, ok: true, result: true })
     } catch (err) {
       send({ id, ok: false, error: `save_data_url_file failed: ${err?.message || String(err)}` })
+    }
+    return
+  }
+
+  if (method === 'capture_frame_data_url') {
+    try {
+      const filePath = normalizeInputFilePath(params?.filePath)
+      const timeSeconds = Number(params?.timeSeconds)
+      const enableGpuAcceleration = params?.enableGpuAcceleration !== false
+      if (!filePath) {
+        send({ id, ok: false, error: 'capture_frame_data_url requires filePath' })
+        return
+      }
+      if (!fs.existsSync(filePath)) {
+        send({ id, ok: false, error: 'capture_frame_data_url file does not exist' })
+        return
+      }
+      const dataUrl = captureFrameDataUrlWithFfmpegWithHwaccel(filePath, timeSeconds, enableGpuAcceleration)
+      send({ id, ok: true, result: dataUrl })
+    } catch (err) {
+      send({ id, ok: false, error: `capture_frame_data_url failed: ${err?.message || String(err)}` })
     }
     return
   }
@@ -3070,7 +3795,7 @@ function handleRequest(req) {
   }
 
   if (method === 'remote_sync_library') {
-    ;(async () => {
+    ; (async () => {
       try {
         const baseUrl = normalizeBaseUrl(params?.url)
         const token = String(params?.token || '')
@@ -3093,7 +3818,7 @@ function handleRequest(req) {
         fs.writeFileSync(path.join(cacheDir, 'folders.json'), JSON.stringify(dbDump.folders || [], null, 2))
         fs.writeFileSync(path.join(cacheDir, 'audit_logs.json'), JSON.stringify(dbDump.auditLogs || [], null, 2))
 
-        send({ id, ok: true, result: { success: true, message: '同期が完了しました。' } })
+        send({ id, ok: true, result: { success: true, message: 'Sync completed successfully.' } })
       } catch (err) {
         send({
           id,
@@ -3109,7 +3834,7 @@ function handleRequest(req) {
   }
 
   if (method === 'remote_search_media_files') {
-    ;(async () => {
+    ; (async () => {
       try {
         const url = normalizeBaseUrl(params?.url)
         const token = String(params?.token || '')
@@ -3139,7 +3864,7 @@ function handleRequest(req) {
   }
 
   if (method === 'remote_get_shared_users') {
-    ;(async () => {
+    ; (async () => {
       try {
         const baseUrl = normalizeBaseUrl(params?.url)
         const userToken = String(params?.userToken || '')
@@ -3173,7 +3898,7 @@ function handleRequest(req) {
   }
 
   if (method === 'remote_rename_media') {
-    ;(async () => {
+    ; (async () => {
       try {
         const result = await callRemoteApi(
           normalizeBaseUrl(params?.url),
@@ -3192,7 +3917,7 @@ function handleRequest(req) {
   }
 
   if (method === 'remote_delete_media') {
-    ;(async () => {
+    ; (async () => {
       try {
         const permanent = params?.options?.permanent ? 'true' : 'false'
         const result = await callRemoteApi(
@@ -3212,7 +3937,7 @@ function handleRequest(req) {
   }
 
   if (method === 'remote_update_media') {
-    ;(async () => {
+    ; (async () => {
       try {
         const result = await callRemoteApi(
           normalizeBaseUrl(params?.url),
@@ -3231,7 +3956,7 @@ function handleRequest(req) {
   }
 
   if (method === 'remote_create_tag') {
-    ;(async () => {
+    ; (async () => {
       try {
         const result = await callRemoteApi(
           normalizeBaseUrl(params?.url),
@@ -3250,7 +3975,7 @@ function handleRequest(req) {
   }
 
   if (method === 'remote_delete_tag') {
-    ;(async () => {
+    ; (async () => {
       try {
         const result = await callRemoteApi(
           normalizeBaseUrl(params?.url),
@@ -3269,7 +3994,7 @@ function handleRequest(req) {
   }
 
   if (method === 'remote_add_tag_to_media') {
-    ;(async () => {
+    ; (async () => {
       try {
         const payload = {
           mediaId: params?.mediaId,
@@ -3294,7 +4019,7 @@ function handleRequest(req) {
   }
 
   if (method === 'remote_remove_tag_from_media') {
-    ;(async () => {
+    ; (async () => {
       try {
         const mediaId = Number(params?.mediaId)
         const tagId = Number(params?.tagId)
@@ -3315,7 +4040,7 @@ function handleRequest(req) {
   }
 
   if (method === 'remote_add_media_parent') {
-    ;(async () => {
+    ; (async () => {
       try {
         const result = await callRemoteApi(
           normalizeBaseUrl(params?.url),
@@ -3334,7 +4059,7 @@ function handleRequest(req) {
   }
 
   if (method === 'remote_remove_media_parent') {
-    ;(async () => {
+    ; (async () => {
       try {
         const result = await callRemoteApi(
           normalizeBaseUrl(params?.url),
@@ -3353,7 +4078,7 @@ function handleRequest(req) {
   }
 
   if (method === 'remote_update_profile') {
-    ;(async () => {
+    ; (async () => {
       try {
         const result = await callRemoteApi(
           normalizeBaseUrl(params?.url),
@@ -3372,7 +4097,7 @@ function handleRequest(req) {
   }
 
   if (method === 'remote_upload_media') {
-    ;(async () => {
+    ; (async () => {
       try {
         const url = normalizeBaseUrl(params?.url)
         const token = String(params?.token || '')
@@ -3423,7 +4148,7 @@ function handleRequest(req) {
   }
 
   if (method === 'remote_download_media') {
-    ;(async () => {
+    ; (async () => {
       try {
         const downloadUrl = String(params?.url || '')
         const filename = path.basename(String(params?.filename || 'download.bin')) || 'download.bin'
@@ -3478,7 +4203,7 @@ function handleRequest(req) {
   }
 
   if (method === 'check_for_updates') {
-    ;(async () => {
+    ; (async () => {
       try {
         const currentVersion = normalizeVersion(params?.currentVersion || '')
         const release = await fetchLatestGithubRelease('84kb', 'Obscura')
@@ -3514,7 +4239,7 @@ function handleRequest(req) {
   }
 
   if (method === 'download_update') {
-    ;(async () => {
+    ; (async () => {
       try {
         const providedUrl = String(params?.url || '').trim()
         let downloadUrl = providedUrl
@@ -3598,7 +4323,7 @@ function handleRequest(req) {
   }
 
   if (method === 'ffmpeg_check_update') {
-    ;(async () => {
+    ; (async () => {
       try {
         const info = getFfmpegInfo()
         const response = await fetch('https://www.gyan.dev/ffmpeg/builds/release-version', {
@@ -3629,7 +4354,7 @@ function handleRequest(req) {
   }
 
   if (method === 'ffmpeg_update') {
-    ;(async () => {
+    ; (async () => {
       try {
         const downloadUrl = String(params?.url || '').trim() || 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip'
         const tempDir = path.join(getDataRoot(), 'tmp')
@@ -3871,7 +4596,7 @@ function handleRequest(req) {
   if (method === 'check_import_duplicates') {
     try {
       const filePaths = asArray(params?.filePaths).filter((p) => typeof p === 'string')
-      const allMedia = getAllMediaForActiveLibrary()
+      const allMedia = getAllMediaForActiveLibrary().filter((m) => !m?.is_deleted && !m?.permanently_deleted)
       const results = []
       for (const filePath of filePaths) {
         const normalized = String(filePath)
@@ -3879,6 +4604,7 @@ function handleRequest(req) {
         const fileName = path.basename(normalized)
         const existing = allMedia.find((m) =>
           String(m?.file_path || '') === normalized ||
+          String(m?.import_source_path || '') === normalized ||
           (String(m?.file_name || '') === fileName && Number(m?.file_size || 0) === Number(stat?.size || 0)),
         )
         if (existing) {
@@ -3898,7 +4624,7 @@ function handleRequest(req) {
   if (method === 'check_entry_duplicates') {
     try {
       const mediaId = Number(params?.mediaId)
-      const allMedia = getAllMediaForActiveLibrary()
+      const allMedia = getAllMediaForActiveLibrary().filter((m) => !m?.is_deleted && !m?.permanently_deleted)
       const target = allMedia.find((m) => Number(m?.id) === mediaId)
       if (!target) {
         send({ id, ok: true, result: [] })
@@ -3925,7 +4651,7 @@ function handleRequest(req) {
       const criteria = params?.criteria && typeof params.criteria === 'object'
         ? params.criteria
         : { name: true, size: true, duration: false, modified: false }
-      const allMedia = getAllMediaForActiveLibrary()
+      const allMedia = getAllMediaForActiveLibrary().filter((m) => !m?.is_deleted && !m?.permanently_deleted)
       const groups = new Map()
       for (const m of allMedia) {
         const keys = []
@@ -3976,7 +4702,7 @@ function handleRequest(req) {
           ? { ...meta.byFilePath[filePath] }
           : {}
 
-        const siblingThumb = fileType === 'video' ? findSiblingThumbnailPath(filePath) : ''
+        const siblingThumb = findSiblingThumbnailPath(filePath)
         if (siblingThumb) {
           overlay.thumbnail_path = siblingThumb
         } else if (fileType === 'video') {
@@ -4005,6 +4731,12 @@ function handleRequest(req) {
           if (Number.isFinite(Number(probed.width))) overlay.width = Number(probed.width)
           if (Number.isFinite(Number(probed.height))) overlay.height = Number(probed.height)
           if (Number.isFinite(Number(probed.framerate))) overlay.framerate = Number(probed.framerate)
+          if (Number.isFinite(Number(probed.audio_bitrate))) overlay.audio_bitrate = Number(probed.audio_bitrate)
+          if (Number.isFinite(Number(probed.video_bitrate))) overlay.video_bitrate = Number(probed.video_bitrate)
+          if (typeof probed.format_name === 'string' && probed.format_name.trim()) overlay.format_name = probed.format_name.trim()
+          if (typeof probed.codec_id === 'string' && probed.codec_id.trim()) overlay.codec_id = probed.codec_id.trim()
+          if (typeof probed.audio_codec === 'string' && probed.audio_codec.trim()) overlay.audio_codec = probed.audio_codec.trim()
+          if (typeof probed.video_codec === 'string' && probed.video_codec.trim()) overlay.video_codec = probed.video_codec.trim()
           if (typeof probed.artist === 'string' && probed.artist.trim()) overlay.artist = probed.artist.trim()
           if (typeof probed.description === 'string' && probed.description.trim()) overlay.description = probed.description.trim()
           if (typeof probed.url === 'string' && probed.url.trim()) overlay.url = probed.url.trim()
@@ -4013,6 +4745,12 @@ function handleRequest(req) {
         if (metadataEntry) {
           const shadow = {}
           applyMetadataOverlayFromEntry(shadow, overlay, metadataEntry)
+        }
+        if (probed) {
+          if (typeof probed.format_name === 'string' && probed.format_name.trim()) overlay.format_name = probed.format_name.trim()
+          if (typeof probed.codec_id === 'string' && probed.codec_id.trim()) overlay.codec_id = probed.codec_id.trim()
+          if (typeof probed.audio_codec === 'string' && probed.audio_codec.trim()) overlay.audio_codec = probed.audio_codec.trim()
+          if (typeof probed.video_codec === 'string' && probed.video_codec.trim()) overlay.video_codec = probed.video_codec.trim()
         }
 
         meta.byFilePath[filePath] = overlay
@@ -4082,7 +4820,13 @@ function handleRequest(req) {
         send({ id, ok: false, error: 'import_media failed: active library is not set' })
         return
       }
-      const filePaths = asArray(params?.filePaths).filter((p) => typeof p === 'string' && p.trim().length > 0)
+      const filePaths = [...new Set(
+        asArray(params?.filePaths)
+          .filter((p) => typeof p === 'string' && p.trim().length > 0)
+          .map((p) => String(p).trim()),
+      )]
+      const importOptions = params?.options && typeof params.options === 'object' ? params.options : {}
+      const shouldDeleteSource = Boolean(importOptions.deleteSource)
       const meta = loadLocalMeta()
       const metadataJsonCache = new Map()
       if (!meta.byFilePath || typeof meta.byFilePath !== 'object') {
@@ -4138,20 +4882,20 @@ function handleRequest(req) {
           // Keep import success if timestamp sync fails.
         }
 
-        const siblingThumbSource = fileType === 'video' ? findSiblingThumbnailPath(sourcePath) : ''
+        const siblingThumbSource = findSiblingThumbnailPath(sourcePath)
         let thumbnailPath = isImage ? destPath : ''
         const destBaseName = path.basename(sourceNameSanitized, path.extname(sourceNameSanitized))
-        if (fileType === 'video') {
-          if (siblingThumbSource && fs.existsSync(siblingThumbSource)) {
-            const thumbExt = path.extname(siblingThumbSource) || '.png'
-            const copiedThumbPath = path.join(destDir, `${destBaseName}_thumbnail${thumbExt}`)
-            try {
-              fs.copyFileSync(siblingThumbSource, copiedThumbPath)
-              thumbnailPath = copiedThumbPath
-            } catch {
-              // Fallback to generated thumbnail below.
-            }
+        if (siblingThumbSource && fs.existsSync(siblingThumbSource)) {
+          const thumbExt = path.extname(siblingThumbSource) || '.png'
+          const copiedThumbPath = path.join(destDir, `${destBaseName}_thumbnail${thumbExt}`)
+          try {
+            fs.copyFileSync(siblingThumbSource, copiedThumbPath)
+            thumbnailPath = copiedThumbPath
+          } catch {
+            // Fallback logic below.
           }
+        }
+        if (fileType === 'video') {
           if (!thumbnailPath) {
             const generatedThumbPath = path.join(destDir, `${destBaseName}_thumbnail.png`)
             try {
@@ -4182,6 +4926,12 @@ function handleRequest(req) {
           width: Number.isFinite(Number(probed?.width)) ? Number(probed.width) : undefined,
           height: Number.isFinite(Number(probed?.height)) ? Number(probed.height) : undefined,
           framerate: Number.isFinite(Number(probed?.framerate)) ? Number(probed.framerate) : undefined,
+          audio_bitrate: Number.isFinite(Number(probed?.audio_bitrate)) ? Number(probed.audio_bitrate) : undefined,
+          video_bitrate: Number.isFinite(Number(probed?.video_bitrate)) ? Number(probed.video_bitrate) : undefined,
+          format_name: typeof probed?.format_name === 'string' ? probed.format_name : undefined,
+          codec_id: typeof probed?.codec_id === 'string' ? probed.codec_id : undefined,
+          audio_codec: typeof probed?.audio_codec === 'string' ? probed.audio_codec : undefined,
+          video_codec: typeof probed?.video_codec === 'string' ? probed.video_codec : undefined,
           artist: typeof probed?.artist === 'string' ? probed.artist : undefined,
           description: typeof probed?.description === 'string' ? probed.description : undefined,
           url: typeof probed?.url === 'string' ? probed.url : undefined,
@@ -4190,6 +4940,7 @@ function handleRequest(req) {
           tags: [],
           folders: [],
           comments: [],
+          import_source_path: sourcePath,
         }
 
         const overlay = meta.byFilePath[destPath] && typeof meta.byFilePath[destPath] === 'object'
@@ -4200,12 +4951,36 @@ function handleRequest(req) {
         if (Number.isFinite(Number(probed?.width))) overlay.width = Number(probed.width)
         if (Number.isFinite(Number(probed?.height))) overlay.height = Number(probed.height)
         if (Number.isFinite(Number(probed?.framerate))) overlay.framerate = Number(probed.framerate)
+        if (Number.isFinite(Number(probed?.audio_bitrate))) overlay.audio_bitrate = Number(probed.audio_bitrate)
+        if (Number.isFinite(Number(probed?.video_bitrate))) overlay.video_bitrate = Number(probed.video_bitrate)
+        if (typeof probed?.format_name === 'string' && probed.format_name.trim()) overlay.format_name = probed.format_name.trim()
+        if (typeof probed?.codec_id === 'string' && probed.codec_id.trim()) overlay.codec_id = probed.codec_id.trim()
+        if (typeof probed?.audio_codec === 'string' && probed.audio_codec.trim()) overlay.audio_codec = probed.audio_codec.trim()
+        if (typeof probed?.video_codec === 'string' && probed.video_codec.trim()) overlay.video_codec = probed.video_codec.trim()
         if (typeof probed?.artist === 'string' && probed.artist.trim()) overlay.artist = probed.artist.trim()
         if (typeof probed?.description === 'string' && probed.description.trim()) overlay.description = probed.description.trim()
         if (typeof probed?.url === 'string' && probed.url.trim()) overlay.url = probed.url.trim()
         const metadataEntry = resolveMetadataEntryForFile(sourcePath, metadataJsonCache)
         if (metadataEntry) {
           applyMetadataOverlayFromEntry(item, overlay, metadataEntry)
+        }
+        if (probed) {
+          if (typeof probed.format_name === 'string' && probed.format_name.trim()) {
+            item.format_name = probed.format_name.trim()
+            overlay.format_name = probed.format_name.trim()
+          }
+          if (typeof probed.codec_id === 'string' && probed.codec_id.trim()) {
+            item.codec_id = probed.codec_id.trim()
+            overlay.codec_id = probed.codec_id.trim()
+          }
+          if (typeof probed.audio_codec === 'string' && probed.audio_codec.trim()) {
+            item.audio_codec = probed.audio_codec.trim()
+            overlay.audio_codec = probed.audio_codec.trim()
+          }
+          if (typeof probed.video_codec === 'string' && probed.video_codec.trim()) {
+            item.video_codec = probed.video_codec.trim()
+            overlay.video_codec = probed.video_codec.trim()
+          }
         }
         meta.byFilePath[destPath] = overlay
 
@@ -4217,9 +4992,22 @@ function handleRequest(req) {
 
         meta.manualMedia.push(item)
         imported.push(item)
+
+        if (shouldDeleteSource) {
+          try {
+            if (fs.existsSync(sourcePath)) {
+              fs.unlinkSync(sourcePath)
+            }
+          } catch {
+            // Keep import result even if source cleanup fails.
+          }
+        }
       }
 
       saveLocalMeta(meta)
+      if (activeLibraryPath && imported.length > 0) {
+        upsertLibraryMediaIndex(activeLibraryPath, imported)
+      }
       send({
         id: null,
         ok: true,
@@ -4247,7 +5035,7 @@ function handleRequest(req) {
         send({ id, ok: false, error: 'scan_folder requires folderPath' })
         return
       }
-      const scanned = scanLocalMediaFiles(folderPath, 50000)
+      const scanned = scanLocalMediaFiles(folderPath)
       send({ id, ok: true, result: scanned })
     } catch (err) {
       send({ id, ok: false, error: `scan_folder failed: ${err?.message || String(err)}` })
@@ -4410,3 +5198,24 @@ process.on('SIGINT', () => {
 })
 
 send({ id: null, ok: true, event: 'ready', pid: process.pid })
+
+  function normalizeFormatLabel(input, filePath, formatLongName) {
+    const raw = String(input || '').trim().toLowerCase()
+    const longName = String(formatLongName || '').trim()
+    const ext = String(path.extname(String(filePath || '')) || '').replace(/^\./, '').toLowerCase()
+
+    if (raw.includes('mp4') || ext === 'mp4' || ext === 'm4v') return 'MPEG-4'
+    if (raw.includes('matroska') || ext === 'mkv') return 'Matroska'
+    if (raw.includes('webm') || ext === 'webm') return 'WebM'
+    if (raw.includes('mpegts') || raw === 'ts' || ext === 'ts') return 'MPEG-TS'
+
+    if (longName) return longName
+    if (!raw) return ''
+
+    const first = raw.split(',').map((v) => v.trim()).find(Boolean) || raw
+    return first
+  }
+
+  function normalizeCodecLabel(codec) {
+    return String(codec || '').trim().toLowerCase()
+  }

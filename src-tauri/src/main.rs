@@ -5,6 +5,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Mutex;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -48,17 +50,27 @@ fn client_config_path(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 fn sidecar_script_path(app: &AppHandle) -> Result<PathBuf, String> {
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        let bundled = resource_dir.join("scripts").join("tauri-sidecar.cjs");
-        if bundled.exists() {
-            return Ok(bundled);
-        }
-    }
-
     let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("scripts")
         .join("tauri-sidecar.cjs");
+
+    // In debug/dev, always prefer workspace script so code changes are reflected immediately.
+    if cfg!(debug_assertions) && dev_path.exists() {
+        return Ok(dev_path);
+    }
+
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled_candidates = [
+            resource_dir.join("scripts").join("tauri-sidecar.cjs"),
+            resource_dir.join("tauri-sidecar.cjs"),
+        ];
+        for bundled in bundled_candidates {
+            if bundled.exists() {
+                return Ok(bundled);
+            }
+        }
+    }
 
     if dev_path.exists() {
         return Ok(dev_path);
@@ -132,14 +144,21 @@ fn ensure_sidecar_running(app: &AppHandle, state: &SidecarState) -> Result<(), S
 
     let node_bin = sidecar_node_binary(app);
 
-    let mut child = Command::new(&node_bin)
-        .arg(script_path)
+    let mut cmd = Command::new(&node_bin);
+    cmd.arg(script_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .env("OBSCURA_TAURI_SIDECAR", "1")
         .env("OBSCURA_PLUGIN_DIR", plugin_dir)
-        .env("OBSCURA_SIDECAR_DATA_DIR", data_dir)
+        .env("OBSCURA_SIDECAR_DATA_DIR", data_dir);
+    #[cfg(target_os = "windows")]
+    {
+        // CREATE_NO_WINDOW
+        cmd.creation_flags(0x08000000);
+    }
+
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("failed to spawn sidecar with '{}': {e}", node_bin))?;
 
@@ -162,7 +181,7 @@ fn ensure_sidecar_running(app: &AppHandle, state: &SidecarState) -> Result<(), S
 }
 
 #[tauri::command]
-fn sidecar_start(app: AppHandle, sidecar: State<SidecarState>) -> Result<BasicResult, String> {
+async fn sidecar_start(app: AppHandle, sidecar: State<'_, SidecarState>) -> Result<BasicResult, String> {
     ensure_sidecar_running(&app, &sidecar)?;
 
     Ok(BasicResult {
@@ -172,7 +191,7 @@ fn sidecar_start(app: AppHandle, sidecar: State<SidecarState>) -> Result<BasicRe
 }
 
 #[tauri::command]
-fn sidecar_stop(sidecar: State<SidecarState>) -> Result<BasicResult, String> {
+async fn sidecar_stop(sidecar: State<'_, SidecarState>) -> Result<BasicResult, String> {
     let mut guard = sidecar
         .process
         .lock()
@@ -194,7 +213,7 @@ fn sidecar_stop(sidecar: State<SidecarState>) -> Result<BasicResult, String> {
 }
 
 #[tauri::command]
-fn sidecar_status(sidecar: State<SidecarState>) -> Result<SidecarStatus, String> {
+async fn sidecar_status(sidecar: State<'_, SidecarState>) -> Result<SidecarStatus, String> {
     let mut guard = sidecar
         .process
         .lock()
@@ -222,9 +241,9 @@ fn sidecar_status(sidecar: State<SidecarState>) -> Result<SidecarStatus, String>
 }
 
 #[tauri::command]
-fn sidecar_request(
+async fn sidecar_request(
     app: AppHandle,
-    sidecar: State<SidecarState>,
+    sidecar: State<'_, SidecarState>,
     method: String,
     params: Option<Value>,
 ) -> Result<Value, String> {
@@ -334,7 +353,7 @@ fn window_focus(window: Window) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn read_client_config(app: AppHandle) -> Result<String, String> {
+async fn read_client_config(app: AppHandle) -> Result<String, String> {
     let path = client_config_path(&app)?;
     if !path.exists() {
         return Ok("{}".to_string());
@@ -344,7 +363,7 @@ fn read_client_config(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn write_client_config(app: AppHandle, content: String) -> Result<BasicResult, String> {
+async fn write_client_config(app: AppHandle, content: String) -> Result<BasicResult, String> {
     let path = client_config_path(&app)?;
     fs::write(path, content).map_err(|e| format!("write config failed: {e}"))?;
 

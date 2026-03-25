@@ -1417,3 +1417,101 @@ a.resource-item:hover {
     width: 14px;
     height: 14px;
 }
+
+.inspector-option-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--bg-main), var(--bg-hover) 20%);
+    overflow: hidden;
+    width: 100%;
+}
+
+.inspector-option-header {
+    width: 100%;
+    border: none;
+    background: transparent;
+    color: var(--text-main);
+    padding: 10px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    text-align: left;
+}
+
+.inspector-option-header:hover {
+    background: var(--bg-hover);
+}
+
+.inspector-option-title {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.inspector-option-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.inspector-option-chevron {
+    font-size: 12px;
+    color: var(--text-muted);
+    transition: transform 0.2s ease;
+}
+
+.inspector-option-card.open .inspector-option-chevron {
+    transform: rotate(0deg);
+}
+
+.inspector-option-body-wrap {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.25s ease, opacity 0.2s ease;
+    opacity: 0;
+    overflow: hidden;
+}
+
+.inspector-option-body-wrap.open {
+    grid-template-rows: 1fr;
+    opacity: 1;
+}
+
+.inspector-option-body {
+    min-height: 0;
+    overflow: hidden;
+    padding: 0 12px;
+    border-top: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.inspector-option-body-wrap.open .inspector-option-body {
+    padding: 10px 12px 12px;
+    border-top: 1px solid var(--border);
+}
+
+.inspector-settings-group {
+    align-items: stretch;
+}
+
+.inspector-sub-options {
+    margin-top: 8px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.inspector-sub-option-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--bg-card), var(--bg-hover) 15%);
+}

@@ -26,8 +26,37 @@ import { getAuthHeaders, getAuthQuery } from './utils/auth'
 import { toMediaUrl } from './utils/fileUrl'
 import { api } from './api'
 import { initializePluginSystem, loadPluginScripts } from './api/plugin-system'
+import { t as i18nT, AppLanguage } from './i18n'
 
 const ENABLE_RANDOM_THUMB_PREFETCH = false
+const DEFAULT_INSPECTOR_SETTINGS = {
+    sectionVisibility: {
+        artist: true,
+        description: true,
+        relations: true,
+        url: true,
+        tags: true,
+        folders: true,
+        info: true,
+        comments: true,
+        playlist: true
+    },
+    infoVisibility: {
+        rating: true,
+        resolution: true,
+        duration: true,
+        fileSize: true,
+        importedAt: true,
+        createdAt: true,
+        modifiedAt: true,
+        audioBitrate: true,
+        framerate: true,
+        formatName: true,
+        codecId: true
+    },
+    playlistPrevVisibleCount: 1,
+    playlistNextVisibleCount: 10
+} as const
 
 const DEFAULT_SETTINGS: AppSettings = {
     autoPlay: true,
@@ -41,6 +70,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     showTitleOnHover: true,
     videoScaling: 'smooth',
     imageScaling: 'smooth',
+    inspector: DEFAULT_INSPECTOR_SETTINGS,
     extensions: {
         niconico: {
             enabled: false
@@ -48,6 +78,160 @@ const DEFAULT_SETTINGS: AppSettings = {
     }
 }
 
+const mergeAppSettings = (input: Partial<AppSettings> | null | undefined): AppSettings => {
+    const legacyPlaylistVisibleCount = Number.isFinite(Number((input as any)?.inspector?.playlistVisibleCount))
+        ? Math.max(3, Math.min(50, Number((input as any)?.inspector?.playlistVisibleCount)))
+        : 12
+
+    return {
+        ...DEFAULT_SETTINGS,
+        ...(input || {}),
+        inspector: {
+            ...DEFAULT_INSPECTOR_SETTINGS,
+            ...((input as any)?.inspector || {}),
+            sectionVisibility: {
+                ...DEFAULT_INSPECTOR_SETTINGS.sectionVisibility,
+                ...((input as any)?.inspector?.sectionVisibility || {})
+            },
+            infoVisibility: {
+                ...DEFAULT_INSPECTOR_SETTINGS.infoVisibility,
+                ...((input as any)?.inspector?.infoVisibility || {})
+            },
+            playlistPrevVisibleCount: Number.isFinite(Number((input as any)?.inspector?.playlistPrevVisibleCount))
+                ? Math.max(0, Math.min(50, Number((input as any)?.inspector?.playlistPrevVisibleCount)))
+                : DEFAULT_INSPECTOR_SETTINGS.playlistPrevVisibleCount,
+            playlistNextVisibleCount: Number.isFinite(Number((input as any)?.inspector?.playlistNextVisibleCount))
+                ? Math.max(0, Math.min(50, Number((input as any)?.inspector?.playlistNextVisibleCount)))
+                : Math.max(0, legacyPlaylistVisibleCount - 2)
+        }
+    }
+}
+
+function isPipWindowMode(): boolean {
+    if (typeof window === 'undefined') return false
+    try {
+        return new URLSearchParams(window.location.search).get('pip') === '1'
+    } catch {
+        return false
+    }
+}
+
+function parsePipMediaFromQuery(): MediaFile | null {
+    if (typeof window === 'undefined') return null
+    try {
+        const params = new URLSearchParams(window.location.search)
+        const raw = params.get('media')
+        if (!raw) return null
+        let parsed: any = null
+        try {
+            // URLSearchParams already decodes once in many runtimes.
+            parsed = JSON.parse(raw)
+        } catch {
+            parsed = JSON.parse(decodeURIComponent(raw))
+        }
+        if (!parsed || typeof parsed !== 'object') return null
+        if (!parsed.file_path || !parsed.file_name || !parsed.file_type) return null
+        return parsed as MediaFile
+    } catch {
+        return null
+    }
+}
+
+function getPipControlModeFromQuery(): 'navigation' | 'skip' {
+    if (typeof window === 'undefined') return 'skip'
+    try {
+        const mode = new URLSearchParams(window.location.search).get('pipControlMode')
+        return mode === 'navigation' ? 'navigation' : 'skip'
+    } catch {
+        return 'skip'
+    }
+}
+
+function parsePipInitialStateFromQuery(): {
+    currentTime?: number
+    isPlaying?: boolean
+    playbackRate?: number
+    volume?: number
+    muted?: boolean
+} | null {
+    if (typeof window === 'undefined') return null
+    try {
+        const params = new URLSearchParams(window.location.search)
+        const toFiniteNumber = (key: string): number | undefined => {
+            const raw = params.get(key)
+            if (raw == null || raw === '') return undefined
+            const n = Number(raw)
+            return Number.isFinite(n) ? n : undefined
+        }
+
+        const currentTime = toFiniteNumber('currentTime')
+        const playbackRate = toFiniteNumber('playbackRate')
+        const volume = toFiniteNumber('volume')
+        const isPlayingRaw = params.get('isPlaying')
+        const mutedRaw = params.get('muted')
+        const isPlaying = isPlayingRaw == null ? undefined : isPlayingRaw === '1' || isPlayingRaw === 'true'
+        const muted = mutedRaw == null ? undefined : mutedRaw === '1' || mutedRaw === 'true'
+
+        return {
+            currentTime,
+            isPlaying,
+            playbackRate,
+            volume,
+            muted
+        }
+    } catch {
+        return null
+    }
+}
+
+function PipWindowApp() {
+    const media = useMemo(() => parsePipMediaFromQuery(), [])
+    const pipControlMode = useMemo(() => getPipControlModeFromQuery(), [])
+    const pipInitialState = useMemo(() => parsePipInitialStateFromQuery(), [])
+
+    useEffect(() => {
+        const suppressContextMenu = (e: MouseEvent) => {
+            e.preventDefault()
+        }
+        document.addEventListener('contextmenu', suppressContextMenu)
+        return () => {
+            document.removeEventListener('contextmenu', suppressContextMenu)
+        }
+    }, [])
+
+    const closePipWindow = useCallback(async () => {
+        try {
+            const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow')
+            await getCurrentWebviewWindow().close()
+        } catch {
+            window.close()
+        }
+    }, [])
+
+    if (!media) {
+        return (
+            <div className="app" style={{ display: 'grid', placeItems: 'center' }}>
+                <div>PiP media could not be loaded.</div>
+            </div>
+        )
+    }
+
+    return (
+        <div className="app">
+            <div className="player-overlay-container">
+                <Player
+                    media={media}
+                    onBack={closePipWindow}
+                    autoPlayEnabled={false}
+                    pipControlMode={pipControlMode}
+                    pipWindowMode
+                    pipInitialState={pipInitialState}
+                    settings={{ ...DEFAULT_SETTINGS, pipControlMode }}
+                />
+            </div>
+        </div>
+    )
+}
 
 export default function App() {
 
@@ -56,6 +240,14 @@ export default function App() {
         initializePluginSystem()
     }, [])
 
+
+    if (isPipWindowMode()) {
+        return (
+            <ShortcutProvider>
+                <PipWindowApp />
+            </ShortcutProvider>
+        )
+    }
 
     return (
         <ShortcutProvider>
@@ -105,6 +297,7 @@ function AppContent() {
         activeRemoteLibrary,
         switchToRemoteLibrary,
         switchToLocalLibrary,
+        removeLocalLibraryHistory,
         openLibrary,
         myUserToken,
         addTagsToMedia,
@@ -121,6 +314,22 @@ function AppContent() {
     // useThemeは内部でサイドエフェクトとしてCSS変数を適用する
     // clientConfigがロードされるまではデフォルトテーマ（初期状態）が維持される
     useTheme(clientConfig || {} as any, updateClientConfig)
+    useEffect(() => {
+        const lang = clientConfig?.language === 'en' ? 'en' : 'ja'
+        document.documentElement.lang = lang
+        document.documentElement.setAttribute('data-language', lang)
+    }, [clientConfig?.language])
+    const uiLanguage: AppLanguage = clientConfig?.language === 'en' ? 'en' : 'ja'
+    const tr = useCallback((ja: string, en: string) => (uiLanguage === 'en' ? en : ja), [uiLanguage])
+    useEffect(() => {
+        const suppressContextMenu = (e: MouseEvent) => {
+            e.preventDefault()
+        }
+        document.addEventListener('contextmenu', suppressContextMenu)
+        return () => {
+            document.removeEventListener('contextmenu', suppressContextMenu)
+        }
+    }, [])
 
     // サイドバーのアイテム数計算
     const sidebarCounts = useMemo(() => {
@@ -165,6 +374,7 @@ function AppContent() {
 
     const { addNotification, removeNotification, updateProgress } = useNotification()
     const prefetchedRandomThumbsRef = useRef<Set<string>>(new Set())
+    const assetThumbWarmupDoneRef = useRef(false)
 
 
     // Socket.io 接続 (リモートライブラリ選択時のみ)
@@ -191,6 +401,32 @@ function AppContent() {
         }
         console.log(`[Perf][Random] switch start t=${start.toFixed(1)}ms`)
     }, [filterOptions.filterType])
+
+    // Warm up local asset thumbnail pipeline once to reduce first random-tab thumbnail latency.
+    useEffect(() => {
+        if (assetThumbWarmupDoneRef.current) return
+        if (!allMediaFiles || allMediaFiles.length === 0) return
+
+        const candidate = allMediaFiles.find((m) => {
+            const p = String(m?.thumbnail_path || '')
+            return p && !/^https?:\/\//i.test(p)
+        })
+        if (!candidate?.thumbnail_path) return
+
+        const url = toMediaUrl(candidate.thumbnail_path)
+        if (!url.includes('asset.localhost')) return
+
+        assetThumbWarmupDoneRef.current = true
+        const start = performance.now()
+        const img = new Image()
+        const done = (status: 'ok' | 'err') => {
+            const elapsed = performance.now() - start
+            console.log(`[Perf][Thumb] asset warmup ${status} in ${elapsed.toFixed(1)}ms`)
+        }
+        img.onload = () => done('ok')
+        img.onerror = () => done('err')
+        img.src = url
+    }, [allMediaFiles])
 
     useEffect(() => {
         if (filterOptions.filterType !== 'random') return
@@ -224,10 +460,7 @@ function AppContent() {
         let loadedCount = 0
 
         const loadOne = (rawPath: string) => {
-            const base = toMediaUrl(rawPath)
-            const separator = base.includes('?') ? '&' : '?'
-            const isServerThumb = /\/api\/thumbnails\//.test(base)
-            const url = isServerThumb ? `${base}${separator}width=320` : base
+            const url = toMediaUrl(rawPath)
             if (prefetchedRandomThumbsRef.current.has(url)) return
             prefetchedRandomThumbsRef.current.add(url)
 
@@ -285,7 +518,7 @@ function AppContent() {
                 const connectedUrl = await waitForRemoteConnection(activeRemoteLibrary, myUserToken)
 
                 if (!connectedUrl) {
-                    alert(`リモートライブラリ "${activeRemoteLibrary.name}" への接続に失敗しました。\nサーバーが起動していないか、ネットワークに問題があります。`)
+                    alert(tr(`Failed to connect to remote library "${activeRemoteLibrary.name}".\nThe server may be down or the network may be unavailable.`, `Failed to connect to remote library "${activeRemoteLibrary.name}".\nThe server may be down or the network may be unavailable.`))
                     return
                 }
 
@@ -299,7 +532,7 @@ function AppContent() {
 
                 await refreshLibrary()
             } catch (e: any) {
-                alert(`リモートライブラリ "${activeRemoteLibrary.name}" への接続に失敗しました。\nサーバーが起動していないか、ネットワークに問題があります。`)
+                alert(tr(`Failed to connect to remote library "${activeRemoteLibrary.name}".\nThe server may be down or the network may be unavailable.`, `Failed to connect to remote library "${activeRemoteLibrary.name}".\nThe server may be down or the network may be unavailable.`))
             }
         }
         loadAll()
@@ -331,16 +564,16 @@ function AppContent() {
             if (data.status === 'update-downloaded') {
                 addNotification({
                     type: 'success',
-                    title: 'アップデート完了',
-                    message: '新しいバージョンをインストールする準備ができました。設定画面から再起動してください。',
+                    title: i18nT(uiLanguage, 'app.updateDownloadedTitle'),
+                    message: i18nT(uiLanguage, 'app.updateDownloadedMessage'),
                     duration: 0
                 })
             }
             if (data.status === 'update-available') {
                 addNotification({
                     type: 'info',
-                    title: 'アップデートがあります',
-                    message: `新しいバージョン v${data.info?.version} が利用可能です。設定画面からダウンロードできます。`,
+                    title: i18nT(uiLanguage, 'app.updateAvailableTitle'),
+                    message: i18nT(uiLanguage, 'app.updateAvailableMessage', { version: data.info?.version ?? '' }),
                     duration: 10000
                 })
             }
@@ -471,7 +704,7 @@ function AppContent() {
         const saved = localStorage.getItem('app_settings')
         if (saved) {
             const parsed = JSON.parse(saved)
-            return { ...DEFAULT_SETTINGS, ...parsed }
+            return mergeAppSettings(parsed)
         }
         return DEFAULT_SETTINGS
     })
@@ -510,7 +743,7 @@ function AppContent() {
             await api.refreshLibrary()
         } catch (error) {
             console.error('Refresh failed:', error)
-            alert('ライブラリの更新に失敗しました')
+            alert(tr('Failed to refresh the library', 'Failed to refresh the library'))
         } finally {
             setIsRefreshing(false)
         }
@@ -763,7 +996,7 @@ function AppContent() {
     }, [isDragging])
 
     useEffect(() => {
-        const handleTriggerImport = (_: any, filePaths: string[]) => {
+        const handleTriggerImport = (_: any, filePaths: string[], options?: { deleteSource?: boolean; importSource?: string }) => {
             console.log('[App] Received trigger-import:', filePaths)
 
             // 内部ドラッグ中はインポートしない
@@ -781,14 +1014,27 @@ function AppContent() {
             if ((hasActiveLibraryRef.current || activeRemoteLibraryRef.current) && safeFilePaths.length > 0) {
                 // ライブラリに既に存在するファイルを除外（重複防止の安全策）
                 const normalizePath = (p: string) => p.replace(/\\/g, '/').toLowerCase()
-                const existingPaths = new Set(allMediaFilesRef.current.map(m => normalizePath(m.file_path)))
+                const existingPaths = new Set(
+                    allMediaFilesRef.current.flatMap((m: any) => {
+                        const currentPath = typeof m?.file_path === 'string' ? normalizePath(m.file_path) : ''
+                        const sourcePath = typeof m?.import_source_path === 'string' ? normalizePath(m.import_source_path) : ''
+                        return [currentPath, sourcePath].filter(Boolean)
+                    }),
+                )
                 const newFilePaths = safeFilePaths.filter(p => {
                     const normalized = normalizePath(p)
                     return !existingPaths.has(normalized)
                 })
+                const skippedPaths = safeFilePaths.filter(p => !newFilePaths.includes(p))
+
+                if (options?.deleteSource && skippedPaths.length > 0) {
+                    void api.deleteFileSystemFiles(skippedPaths).catch((e) => {
+                        console.warn('Failed to clean skipped auto-import files:', skippedPaths, e)
+                    })
+                }
 
                 if (newFilePaths.length > 0) {
-                    handleSmartImport(newFilePaths).catch(e => console.error('Import failed via trigger:', e))
+                    handleSmartImport(newFilePaths, undefined, options).catch(e => console.error('Import failed via trigger:', e))
                 } else {
                     console.log('[App] All files filtered out as existing in library')
                 }
@@ -801,8 +1047,8 @@ function AppContent() {
             refreshLibrary()
             addNotification({
                 type: 'success',
-                title: '自動インポート完了',
-                message: `${safeFiles.length} 件のファイルをインポートしました`,
+                title: tr('Auto import complete', 'Auto import complete'),
+                message: tr(`Imported ${safeFiles.length} files`, `Imported ${safeFiles.length} files`),
                 duration: 5000
             })
         }
@@ -822,6 +1068,7 @@ function AppContent() {
 
         // イベントリスナー登録
         let unsubscribeTrigger: (() => void) | undefined
+        let unsubscribeAutoImportTrigger: (() => void) | undefined
         let unsubscribeAutoImport: (() => void) | undefined
         let unsubscribeAutoImportCollision: (() => void) | undefined
         let unsubscribeExportProgress: (() => void) | undefined
@@ -831,6 +1078,10 @@ function AppContent() {
 
         if (api && api.on) {
             unsubscribeTrigger = api.on('trigger-import', (_e: any, filePaths: string[]) => handleTriggerImport(null, filePaths))
+            unsubscribeAutoImportTrigger = api.on('auto-import-trigger', (_e: any, payload: any) => {
+                const paths = Array.isArray(payload?.filePaths) ? payload.filePaths : []
+                handleTriggerImport(null, paths, { deleteSource: true, importSource: 'auto-import' })
+            })
             unsubscribeAutoImport = api.on('auto-import-complete', (_e: any, files: string[]) => handleAutoImportComplete(null, files))
             unsubscribeAutoImportCollision = api.on('auto-import-collision', (_e: any, data: any) => handleAutoImportCollision(null, data))
             unsubscribeExportProgress = api.on('export-progress', (_e: any, data: { id: string, progress: number }) => {
@@ -863,6 +1114,7 @@ function AppContent() {
         // クリーンアップ
         return () => {
             if (unsubscribeTrigger) unsubscribeTrigger()
+            if (unsubscribeAutoImportTrigger) unsubscribeAutoImportTrigger()
             if (unsubscribeAutoImport) unsubscribeAutoImport()
             if (unsubscribeAutoImportCollision) unsubscribeAutoImportCollision()
             if (unsubscribeExportProgress) unsubscribeExportProgress()
@@ -901,6 +1153,15 @@ function AppContent() {
 
     // 重複検知・解決用ステート
     const [duplicateQueue, setDuplicateQueue] = useState<{ newMedia: MediaFile; existingMedia: MediaFile; onResolve?: (media: MediaFile) => void }[]>([])
+    const cleanupImportedSource = useCallback(async (media: MediaFile) => {
+        const sourcePath = String((media as any)?.import_source_path || '').trim()
+        if (!sourcePath) return
+        try {
+            await api.deleteFileSystemFiles([sourcePath])
+        } catch (e) {
+            console.warn('Failed to delete imported source file:', sourcePath, e)
+        }
+    }, [])
 
     // 最初の重複アイテムに対する処理
     const handleResolveDuplicate = async (action: 'skip' | 'replace' | 'both') => {
@@ -911,7 +1172,9 @@ function AppContent() {
             if (action === 'replace') {
                 // 元ファイルをゴミ箱へ -> 新しく入れた方は維持
                 await moveToTrash(current.existingMedia.id)
+                await cleanupImportedSource(current.newMedia)
                 // コールバック実行 (新しく入れた方を有効なファイルとして渡す)
+                await cleanupImportedSource(current.newMedia)
                 if (current.onResolve) await current.onResolve(current.newMedia)
             } else if (action === 'both') {
                 // 両方そのまま (すでにインポート済み)
@@ -919,6 +1182,7 @@ function AppContent() {
             } else if (action === 'skip') {
                 // 新しく入れた方を「完全に削除」(重複なので) -> 元ファイルを維持
                 await deletePermanently(current.newMedia.id)
+                await cleanupImportedSource(current.newMedia)
                 // コールバック実行 (既存の方を有効なファイルとして渡す)
                 if (current.onResolve) await current.onResolve(current.existingMedia)
             }
@@ -930,9 +1194,9 @@ function AppContent() {
         setDuplicateQueue(prev => prev.slice(1))
     }
 
-    const handleSmartImport = async (filePaths: string[], onImported?: (media: MediaFile) => void) => {
+    const handleSmartImport = async (filePaths: string[], onImported?: (media: MediaFile) => void, options?: { deleteSource?: boolean; importSource?: string }) => {
         // 先にインポート実行
-        const imported = await importMedia(filePaths)
+        const imported = await importMedia(filePaths, options)
         if (!imported) return
 
         for (const media of imported) {
@@ -959,7 +1223,7 @@ function AppContent() {
             if (!myUserToken) return
             try {
                 const baseUrl = activeRemoteLibrary.url.replace(/\/$/, '')
-                const response = await fetch(`${baseUrl}/api/profile`, {
+                const response = await (globalThis.fetch as any)(`${baseUrl}/api/profile`, {
                     headers: getAuthHeaders(activeRemoteLibrary.token, myUserToken)
                 })
 
@@ -1104,9 +1368,9 @@ function AppContent() {
         updateLastPlayed(media.id)
     }, [updateLastPlayed])
 
-    const handleClosePlayer = () => {
+    const handleClosePlayer = useCallback(() => {
         setPlayingMedia(null)
-    }
+    }, [])
 
     const handleCloseInspector = () => {
         setSelectedMediaIds([])
@@ -1157,8 +1421,8 @@ function AppContent() {
         // 通知IDを生成してプログレス通知を表示（Progress=0）
         const notificationId = addNotification({
             type: 'progress',
-            title: 'エクスポート中',
-            message: `${media.file_name} のメタデータを埋め込み中...`,
+            title: tr('Exporting', 'Exporting'),
+            message: tr(`Embedding metadata into ${media.file_name}...`, `Embedding metadata into ${media.file_name}...`),
             progress: 0,
             duration: 0
         })
@@ -1172,8 +1436,8 @@ function AppContent() {
             if (result.success) {
                 addNotification({
                     type: 'success',
-                    title: 'エクスポート完了',
-                    message: `${media.file_name} を保存しました`,
+                    title: tr('Export complete', 'Export complete'),
+                    message: tr(`Saved ${media.file_name}`, `Saved ${media.file_name}`),
                     duration: 5000
                 })
             } else if (result.message === 'Cancelled') {
@@ -1181,8 +1445,8 @@ function AppContent() {
             } else {
                 addNotification({
                     type: 'error',
-                    title: 'エクスポート失敗',
-                    message: result.message || '不明なエラーが発生しました',
+                    title: tr('Export failed', 'Export failed'),
+                    message: result.message || tr('Unknown error occurred', 'Unknown error occurred'),
                     duration: 5000
                 })
             }
@@ -1190,7 +1454,7 @@ function AppContent() {
             removeNotification(notificationId)
             addNotification({
                 type: 'error',
-                title: 'エクスポート失敗',
+                title: tr('Export failed', 'Export failed'),
                 message: e.message,
                 duration: 5000
             })
@@ -1217,8 +1481,8 @@ function AppContent() {
 
             const notificationId = addNotification({
                 type: 'progress',
-                title: `転送中: ${remoteLib.name}`,
-                message: `${filesToTransfer.length} 個のファイルをアップロードしています...`,
+                title: tr(`Transferring: ${remoteLib.name}`, `Transferring: ${remoteLib.name}`),
+                message: tr(`Uploading ${filesToTransfer.length} files...`, `Uploading ${filesToTransfer.length} files...`),
                 progress: 0,
                 duration: 0
             })
@@ -1251,15 +1515,15 @@ function AppContent() {
                 if (result.success) {
                     addNotification({
                         type: 'success',
-                        title: '転送完了',
-                        message: `${filesToTransfer.length} 個のファイルを ${remoteLib.name} にアップロードしました`,
+                        title: tr('Transfer complete', 'Transfer complete'),
+                        message: tr(`Uploaded ${filesToTransfer.length} files to ${remoteLib.name}`, `Uploaded ${filesToTransfer.length} files to ${remoteLib.name}`),
                         duration: 5000
                     })
                 } else {
                     addNotification({
                         type: 'error',
-                        title: '転送失敗',
-                        message: result.message || '不明なエラーが発生しました',
+                        title: tr('Transfer failed', 'Transfer failed'),
+                        message: result.message || tr('Unknown error occurred', 'Unknown error occurred'),
                         duration: 5000
                     })
                 }
@@ -1267,7 +1531,7 @@ function AppContent() {
                 removeNotification(notificationId)
                 addNotification({
                     type: 'error',
-                    title: '転送失敗',
+                    title: tr('Transfer failed', 'Transfer failed'),
                     message: e.message,
                     duration: 5000
                 })
@@ -1298,8 +1562,8 @@ function AppContent() {
 
         const notificationId = addNotification({
             type: 'progress',
-            title: `転送中: ${libName}`,
-            message: `${targetMediaIds.length} 個のファイルを転送しています...`,
+            title: tr(`Transferring: ${libName}`, `Transferring: ${libName}`),
+            message: tr(`Transferring ${targetMediaIds.length} files...`, `Transferring ${targetMediaIds.length} files...`),
             progress: 0,
             duration: 0
         })
@@ -1312,15 +1576,15 @@ function AppContent() {
             if (result.success) {
                 addNotification({
                     type: 'success',
-                    title: '転送完了',
-                    message: `${targetMediaIds.length} 個のファイルを ${libName} に追加しました`,
+                    title: tr('Transfer complete', 'Transfer complete'),
+                    message: tr(`Added ${targetMediaIds.length} files to ${libName}`, `Added ${targetMediaIds.length} files to ${libName}`),
                     duration: 5000
                 })
             } else {
                 addNotification({
                     type: 'error',
-                    title: '転送失敗',
-                    message: result.message || '不明なエラーが発生しました',
+                    title: tr('Transfer failed', 'Transfer failed'),
+                    message: result.message || tr('Unknown error occurred', 'Unknown error occurred'),
                     duration: 5000
                 })
             }
@@ -1328,7 +1592,7 @@ function AppContent() {
             removeNotification(notificationId)
             addNotification({
                 type: 'error',
-                title: '転送失敗',
+                title: tr('Transfer failed', 'Transfer failed'),
                 message: e.message,
                 duration: 5000
             })
@@ -1416,8 +1680,8 @@ function AppContent() {
 
         const notificationId = addNotification({
             type: 'progress',
-            title: 'メタデータ更新中',
-            message: `${targetIds.length} 件のファイルを更新しています...`,
+            title: tr('Updating metadata', 'Updating metadata'),
+            message: tr(`Updating ${targetIds.length} files...`, `Updating ${targetIds.length} files...`),
             progress: 0,
             duration: 0
         })
@@ -1425,7 +1689,7 @@ function AppContent() {
         try {
             if (activeRemoteLibrary) {
                 // Future: Remote API call
-                throw new Error('リモートライブラリの個別更新はまだサポートされていません')
+                throw new Error(tr('Per-item metadata refresh is not supported for remote libraries yet', 'Per-item metadata refresh is not supported for remote libraries yet'))
             } else {
                 await api.refreshMetadata(targetIds)
             }
@@ -1433,8 +1697,8 @@ function AppContent() {
             removeNotification(notificationId)
             addNotification({
                 type: 'success',
-                title: '更新完了',
-                message: 'メタデータを更新しました',
+                title: tr('Update complete', 'Update complete'),
+                message: tr('Metadata updated', 'Metadata updated'),
                 duration: 3000
             })
             refreshLibrary()
@@ -1442,7 +1706,7 @@ function AppContent() {
             removeNotification(notificationId)
             addNotification({
                 type: 'error',
-                title: '更新失敗',
+                title: tr('Update failed', 'Update failed'),
                 message: e.message || String(e),
                 duration: 5000
             })
@@ -1455,21 +1719,21 @@ function AppContent() {
 
     // ヘッダータイトルの取得
     const getHeaderTitle = () => {
-        if (activeRemoteLibrary) return activeRemoteLibrary.name || 'リモートライブラリ'
+        if (activeRemoteLibrary) return activeRemoteLibrary.name || tr('Remote Library', 'Remote Library')
 
-        if (filterOptions.filterType === 'tag_manager') return 'タグ管理'
-        if (filterOptions.filterType === 'trash') return 'ゴミ箱'
-        if (filterOptions.filterType === 'uncategorized') return '未分類'
-        if (filterOptions.filterType === 'untagged') return 'タグなし'
-        if (filterOptions.filterType === 'recent') return '最近使用'
-        if (filterOptions.filterType === 'random') return 'ランダム'
+        if (filterOptions.filterType === 'tag_manager') return tr('Tag Manager', 'Tag Manager')
+        if (filterOptions.filterType === 'trash') return tr('Trash', 'Trash')
+        if (filterOptions.filterType === 'uncategorized') return tr('Uncategorized', 'Uncategorized')
+        if (filterOptions.filterType === 'untagged') return tr('Untagged', 'Untagged')
+        if (filterOptions.filterType === 'recent') return tr('Recent', 'Recent')
+        if (filterOptions.filterType === 'random') return tr('Random', 'Random')
 
         if (filterOptions.selectedFolders.length > 0) {
             const folder = folders.find(f => filterOptions.selectedFolders.includes(f.id))
-            return folder ? folder.name : 'すべて'
+            return folder ? folder.name : tr('All', 'All')
         }
 
-        return activeLibrary ? activeLibrary.name : 'すべて'
+        return activeLibrary ? activeLibrary.name : tr('All', 'All')
     }
 
     const handleAddParent = async (childId: number, parentId: number) => {
@@ -1538,6 +1802,7 @@ function AppContent() {
                         return currentIndex !== -1 && currentIndex > 0
                     })()}
                     autoPlayEnabled={settings.autoPlay}
+                    pipControlMode={settings.pipControlMode}
                     onToggleAutoPlay={() => {
                         setSettings(prev => ({ ...prev, autoPlay: !prev.autoPlay }))
                     }}
@@ -1625,12 +1890,12 @@ function AppContent() {
                     )}
 
                     {/* Loading Overlay */}
-                    <LoadingOverlay isVisible={loading} message={"データを読み込み中..."} progress={loadingProgress} />
+                    <LoadingOverlay isVisible={loading} message={i18nT(uiLanguage, 'app.loadingData')} progress={loadingProgress} />
 
                     {/* モーダル群 */}
                     {filterOptions.selectedFolders.length > 0 && folders.filter(f => f.parentId === filterOptions.selectedFolders[0]).length > 0 && (
                         <div className="content-section-header">
-                            <span>内容 ({mediaFiles.length})</span>
+                            <span>{i18nT(uiLanguage, 'app.contentWithCount', { count: mediaFiles.length })}</span>
                         </div>
                     )}
 
@@ -1704,16 +1969,7 @@ function AppContent() {
 
     // メタデータバックフィル
     useEffect(() => {
-        if (activeLibrary) {
-            api.backfillMetadata()
-                .then(count => {
-                    if (count > 0) {
-                        console.log(`[App] Backfilled metadata for ${count} videos.`)
-                        refreshLibrary()
-                    }
-                })
-                .catch(err => console.error('[App] Failed to backfill metadata:', err))
-        }
+        // Disabled on startup: probing large libraries can freeze initial launch.
     }, [activeLibrary, refreshLibrary])
 
     const inspectorMedia = useMemo(() => {
@@ -1725,6 +1981,7 @@ function AppContent() {
     return (
         <div className="app">
             <Sidebar
+                language={clientConfig?.language === 'en' ? 'en' : 'ja'}
                 filterOptions={filterOptions}
                 onFilterChange={(options) => {
                     setPlayingMedia(null)
@@ -1744,6 +2001,7 @@ function AppContent() {
                     setPlayingMedia(null)
                     switchToLocalLibrary(path)
                 }}
+                onRemoveLocalLibraryHistory={removeLocalLibraryHistory}
                 onSwitchRemoteLibrary={(lib) => {
                     setPlayingMedia(null)
                     switchToRemoteLibrary(lib)
@@ -1774,7 +2032,7 @@ function AppContent() {
                 {isRefreshing && (
                     <div className="bottom-progress-bar-container">
                         <div className="bottom-progress-info">
-                            <span className="scanning-text">ライブラリを更新中...</span>
+                            <span className="scanning-text">{i18nT(uiLanguage, 'app.updatingLibrary')}</span>
                             <span className="progress-count">{refreshProgress.current} / {refreshProgress.total}</span>
                         </div>
                         <div className="bottom-progress-track">
@@ -1789,8 +2047,10 @@ function AppContent() {
 
             {viewSettings.showInspector && (
                 <Inspector
+                    language={uiLanguage}
                     media={inspectorMedia}
                     playingMedia={playingMedia}
+                    settings={settings}
                     allTags={tags}
                     allFolders={folders}
                     onAddTag={addTagToMedia}
@@ -1842,6 +2102,7 @@ function AppContent() {
 
             {showSettingsModal && (
                 <SettingsModal
+                    language={uiLanguage}
                     settings={settings}
                     onUpdateSettings={(newSettings) => {
                         setSettings(newSettings)
@@ -1882,7 +2143,7 @@ function AppContent() {
                         const filename = media.file_name || 'download.mp4'
 
                         const notificationId = addNotification({
-                            title: 'ダウンロード中...',
+                            title: tr('Downloading...', 'Downloading...'),
                             message: filename,
                             type: 'progress',
                             progress: 0
@@ -1896,15 +2157,15 @@ function AppContent() {
 
                             if (result.success) {
                                 addNotification({
-                                    title: 'ダウンロード完了',
+                                    title: tr('Download complete', 'Download complete'),
                                     message: filename,
                                     type: 'success',
                                     duration: 3000
                                 })
                             } else {
                                 addNotification({
-                                    title: 'ダウンロード失敗',
-                                    message: result.message || '不明なエラー',
+                                    title: tr('Download failed', 'Download failed'),
+                                    message: result.message || tr('Unknown error', 'Unknown error'),
                                     type: 'error',
                                     duration: 5000
                                 })
@@ -1912,7 +2173,7 @@ function AppContent() {
                         } catch (e: any) {
                             removeNotification(notificationId)
                             addNotification({
-                                title: 'エラー',
+                                title: tr('Error', 'Error'),
                                 message: e.message,
                                 type: 'error',
                                 duration: 5000
@@ -1926,17 +2187,17 @@ function AppContent() {
             {/* 完全削除確認モーダル */}
             {deleteConfirmIds.length > 0 && (
                 <ConfirmModal
-                    title="完全に削除"
+                    title={i18nT(uiLanguage, 'app.deletePermanentTitle')}
                     message={deleteConfirmIds.length === 1
-                        ? 'ファイルをデバイスから完全に削除しますか？\nこの操作は取り消せません。'
-                        : `${deleteConfirmIds.length}個のファイルをデバイスから完全に削除しますか？\nこの操作は取り消せません。`
+                        ? i18nT(uiLanguage, 'app.deletePermanentSingleMessage')
+                        : i18nT(uiLanguage, 'app.deletePermanentMultiMessage', { count: deleteConfirmIds.length })
                     }
-                    confirmLabel="削除"
-                    cancelLabel="キャンセル"
+                    confirmLabel={i18nT(uiLanguage, 'common.delete')}
+                    cancelLabel={i18nT(uiLanguage, 'common.cancel')}
                     isDestructive={true}
                     onConfirm={async () => {
                         if (filterOptions.filterType === 'trash') {
-                            if (confirm(`${deleteConfirmIds.length}個のファイルをデバイスから完全に削除しますか？\nこの操作は取り消せません。`)) {
+                            if (confirm(tr(`Delete ${deleteConfirmIds.length} files permanently from this device?\nThis action cannot be undone.`, `Delete ${deleteConfirmIds.length} files permanently from this device?\nThis action cannot be undone.`))) {
                                 await deleteFilesPermanently(deleteConfirmIds)
                             }
                         } else {
@@ -1960,8 +2221,8 @@ function AppContent() {
                                 <line x1="12" y1="3" x2="12" y2="15"></line>
                             </svg>
                         </div>
-                        <h2>ファイルをドロップして追加</h2>
-                        <p>ライブラリにインポートされます</p>
+                        <h2>{i18nT(uiLanguage, 'app.dropAddFilesTitle')}</h2>
+                        <p>{i18nT(uiLanguage, 'app.dropAddFilesDesc')}</p>
                     </div>
                 </div>
             )}
@@ -1976,10 +2237,6 @@ function AppContent() {
         </div>
     )
 }
-
-
-
-
 
 
 

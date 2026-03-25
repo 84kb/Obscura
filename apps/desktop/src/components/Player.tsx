@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef, useContext } from 'react'
+import { createPortal } from 'react-dom'
 import { MediaFile, RemoteLibrary, AppSettings } from '@obscura/core'
 import { usePlayer } from '../hooks/usePlayer'
 import { api } from '../api'
 import './Player.css'
+import './ContextMenu.css'
 import { toMediaUrl } from '../utils/fileUrl'
 import { ShortcutContext } from '../contexts/ShortcutContext'
 import { AudioSettingsModal } from './AudioSettingsModal'
@@ -26,6 +28,14 @@ interface PlayerProps {
     videoScaling?: 'smooth' | 'pixelated'
     imageScaling?: 'smooth' | 'pixelated'
     settings?: AppSettings
+    pipWindowMode?: boolean
+    pipInitialState?: {
+        currentTime?: number
+        isPlaying?: boolean
+        playbackRate?: number
+        volume?: number
+        muted?: boolean
+    } | null
 }
 
 export const Player: React.FC<PlayerProps> = ({
@@ -44,7 +54,9 @@ export const Player: React.FC<PlayerProps> = ({
     onCommentAdded,
     videoScaling = 'smooth',
     imageScaling = 'smooth',
-    settings
+    settings,
+    pipWindowMode = false,
+    pipInitialState = null
 }) => {
     const {
         containerRef,
@@ -84,17 +96,19 @@ export const Player: React.FC<PlayerProps> = ({
     })
     const isVideo = media.file_type === 'video'
     const [videoSize, setVideoSize] = useState({ width: 0, height: 0 })
+    const [videoVisualReady, setVideoVisualReady] = useState(false)
 
-    // オーバーレイCanvasの描画管理
+    // 繧ｪ繝ｼ繝舌・繝ｬ繧､Canvas縺ｮ謠冗判邂｡逅・
     const overlayCanvasRef = useRef<HTMLCanvasElement>(null)
 
-    // オーバーレイ用コンテキストの同期
+    // 繧ｪ繝ｼ繝舌・繝ｬ繧､逕ｨ繧ｳ繝ｳ繝・く繧ｹ繝医・蜷梧悄
+
     const overlayStateRef = useRef({ currentTime, isPlaying, enabled: true })
     useEffect(() => {
         overlayStateRef.current = { currentTime, isPlaying, enabled: true }
     }, [currentTime, isPlaying])
 
-    // ショートカットスコープの管理
+    // 繧ｷ繝ｧ繝ｼ繝医き繝・ヨ繧ｹ繧ｳ繝ｼ繝励・邂｡逅・
     const context = useContext(ShortcutContext)
     useEffect(() => {
         if (context) {
@@ -109,7 +123,8 @@ export const Player: React.FC<PlayerProps> = ({
     const playerExtensionButtons = React.useMemo(() => {
         if (!media) return []
         try {
-            // 設定で有効になっているプラグインのみボタンを表示
+            // 險ｭ螳壹〒譛牙柑縺ｫ縺ｪ縺｣縺ｦ縺・ｋ繝励Λ繧ｰ繧､繝ｳ縺ｮ縺ｿ繝懊ち繝ｳ繧定｡ｨ遉ｺ
+
             return commentProviders
                 .filter(p => settings?.extensions?.[p.id]?.enabled !== false)
                 .flatMap(p =>
@@ -124,23 +139,38 @@ export const Player: React.FC<PlayerProps> = ({
         }
     }, [media, commentProviders, settings?.extensions])
 
-    // 戻るボタン押下時にメディアを明示的に停止してから戻る
+    // 謌ｻ繧九・繧ｿ繝ｳ謚ｼ荳区凾縺ｫ繝｡繝・ぅ繧｢繧呈・遉ｺ逧・↓蛛懈ｭ｢縺励※縺九ｉ謌ｻ繧・
     const handleBack = () => {
         const mediaElement = videoRef.current || audioRef.current
         if (mediaElement) {
             mediaElement.pause()
-            // ロード中の動画を完全に停止するためにsrcをクリアしてload()を呼ぶ
+            // 繝ｭ繝ｼ繝我ｸｭ縺ｮ蜍慕判繧貞ｮ悟・縺ｫ蛛懈ｭ｢縺吶ｋ縺溘ａ縺ｫsrc繧偵け繝ｪ繧｢縺励※load()繧貞他縺ｶ
             mediaElement.src = ''
             if ('load' in mediaElement) mediaElement.load()
         }
         onBack()
     }
 
-    // ESCキーで戻る
-    // キーボードショートカット (ESC, Ctrl+C, Ctrl+Shift+C)
+    const handleReturnToMainWindow = async () => {
+        try {
+            const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
+            const main = await WebviewWindow.getByLabel('main')
+            if (main) {
+                await main.show()
+                await main.setFocus()
+            }
+        } catch {
+            // no-op
+        } finally {
+            handleBack()
+        }
+    }
+
+    // ESC繧ｭ繝ｼ縺ｧ謌ｻ繧・    // 繧ｭ繝ｼ繝懊・繝峨す繝ｧ繝ｼ繝医き繝・ヨ (ESC, Ctrl+C, Ctrl+Shift+C)
+
     useEffect(() => {
         const handleKeyDown = async (e: KeyboardEvent) => {
-            // ESC: 戻る
+            // ESC: 謌ｻ繧・
             if (e.key === 'Escape') {
                 e.preventDefault()
                 handleBack()
@@ -148,8 +178,9 @@ export const Player: React.FC<PlayerProps> = ({
             }
 
             // Ctrl+C / Ctrl+Shift+C
+
             if (e.ctrlKey && (e.code === 'KeyC')) {
-                // テキスト選択中、または入力フォーカス中なら無視してブラウザのデフォルトコピーを優先
+                // 繝・く繧ｹ繝磯∈謚樔ｸｭ縲√∪縺溘・蜈･蜉帙ヵ繧ｩ繝ｼ繧ｫ繧ｹ荳ｭ縺ｪ繧臥┌隕悶＠縺ｦ繝悶Λ繧ｦ繧ｶ縺ｮ繝・ヵ繧ｩ繝ｫ繝医さ繝斐・繧貞━蜈・
                 const selection = window.getSelection()?.toString()
                 const activeElement = document.activeElement
                 const isInputField = activeElement instanceof HTMLInputElement ||
@@ -162,7 +193,8 @@ export const Player: React.FC<PlayerProps> = ({
 
                 e.preventDefault()
 
-                // Shiftあり: ファイルコピー
+                // Shift縺ゅｊ: 繝輔ぃ繧､繝ｫ繧ｳ繝斐・
+
                 if (e.shiftKey) {
                     if (media.file_path) {
                         try {
@@ -173,13 +205,17 @@ export const Player: React.FC<PlayerProps> = ({
                         }
                     }
                 }
-                // Shiftなし: フレームコピー
+                // Shift縺ｪ縺・ 繝輔Ξ繝ｼ繝繧ｳ繝斐・
                 else {
-                    const dataUrl = captureCurrentFrame()
+                    const dataUrl = await captureCurrentFrame()
                     if (dataUrl) {
                         try {
-                            await api.copyFrameToClipboard(dataUrl)
-                            console.log('[Player] Frame copied to clipboard')
+                            const copied = await api.copyFrameToClipboard(dataUrl)
+                            if (copied) {
+                                console.log('[Player] Frame copied to clipboard')
+                            } else {
+                                console.error('[Player] Failed to copy frame: clipboard write returned false')
+                            }
                         } catch (err) {
                             console.error('[Player] Failed to copy frame:', err)
                         }
@@ -197,14 +233,43 @@ export const Player: React.FC<PlayerProps> = ({
     const [previewImage, setPreviewImage] = useState<string | null>(null)
     const [previewX, setPreviewX] = useState(0)
     const [showAudioSettings, setShowAudioSettings] = useState(false)
+    const [playerContextMenu, setPlayerContextMenu] = useState<{ x: number; y: number } | null>(null)
+    const playerContextMenuRef = useRef<HTMLDivElement>(null)
+    const frameCaptureVideoRef = useRef<HTMLVideoElement | null>(null)
+    const frameCaptureCanvasRef = useRef<HTMLCanvasElement | null>(null)
+    const syncChannelRef = useRef<BroadcastChannel | null>(null)
+    const syncSourceRef = useRef(`player-${Math.random().toString(36).slice(2)}`)
+    const applyingRemoteStateRef = useRef(false)
 
-    // GPU加速プレビュー用のスロットリング
+    const getMediaElement = () => (videoRef.current || audioRef.current) as (HTMLVideoElement | HTMLAudioElement | null)
+
+    useEffect(() => {
+        if (!playerContextMenu) return
+        const handleOutside = (e: MouseEvent) => {
+            if (playerContextMenuRef.current && !playerContextMenuRef.current.contains(e.target as Node)) {
+                setPlayerContextMenu(null)
+            }
+        }
+        const handleEscape = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setPlayerContextMenu(null)
+        }
+        document.addEventListener('mousedown', handleOutside)
+        document.addEventListener('keydown', handleEscape)
+        return () => {
+            document.removeEventListener('mousedown', handleOutside)
+            document.removeEventListener('keydown', handleEscape)
+        }
+    }, [playerContextMenu])
+
+    // GPU蜉騾溘・繝ｬ繝薙Η繝ｼ逕ｨ縺ｮ繧ｹ繝ｭ繝・ヨ繝ｪ繝ｳ繧ｰ
+
     const lastPreviewTimeRef = useRef<number>(-1)
-    const lastRequestTimestampRef = useRef<number>(0) // 10msスロットル用
+    const lastRequestTimestampRef = useRef<number>(0) // 10ms繧ｹ繝ｭ繝・ヨ繝ｫ逕ｨ
     const previewVideoRef = useRef<HTMLVideoElement | null>(null)
     const previewCanvasRef = useRef<HTMLCanvasElement | null>(null)
+    const previewRequestSeqRef = useRef<number>(0)
 
-    // 表示モード（ウィンドウに合わせる / オリジナルサイズ）をlocalStorageから復元
+    // 陦ｨ遉ｺ繝｢繝ｼ繝会ｼ医え繧｣繝ｳ繝峨え縺ｫ蜷医ｏ縺帙ｋ / 繧ｪ繝ｪ繧ｸ繝翫Ν繧ｵ繧､繧ｺ・峨ｒlocalStorage縺九ｉ蠕ｩ蜈・
     const [resizeMode, setResizeModeState] = useState<'contain' | 'scale-down'>(() => {
         try {
             const saved = localStorage.getItem('player_resize_mode')
@@ -213,19 +278,18 @@ export const Player: React.FC<PlayerProps> = ({
         return 'contain'
     })
 
-    // 表示モード変更時にlocalStorageに保存
+    // 陦ｨ遉ｺ繝｢繝ｼ繝牙､画峩譎ゅ↓localStorage縺ｫ菫晏ｭ・
     const setResizeMode = (mode: 'contain' | 'scale-down') => {
         setResizeModeState(mode)
         localStorage.setItem('player_resize_mode', mode)
     }
 
-    // showControls関連のロジックを削除（常時表示のため）
-    // GPU加速プレビューを使用するため、ファイルベースのプレビュー読み込みは不要
-
-    // プレビュー用ビデオ要素を事前に初期化（ホバー時の初回遅延を防ぐ）
+    // showControls髢｢騾｣縺ｮ繝ｭ繧ｸ繝・け繧貞炎髯､・亥ｸｸ譎り｡ｨ遉ｺ縺ｮ縺溘ａ・・    // GPU蜉騾溘・繝ｬ繝薙Η繝ｼ繧剃ｽｿ逕ｨ縺吶ｋ縺溘ａ縲√ヵ繧｡繧､繝ｫ繝吶・繧ｹ縺ｮ繝励Ξ繝薙Η繝ｼ隱ｭ縺ｿ霎ｼ縺ｿ縺ｯ荳崎ｦ・
+    // 繝励Ξ繝薙Η繝ｼ逕ｨ繝薙ョ繧ｪ隕∫ｴ繧剃ｺ句燕縺ｫ蛻晄悄蛹厄ｼ医・繝舌・譎ゅ・蛻晏屓驕・ｻｶ繧帝亟縺撰ｼ・
     useEffect(() => {
         if (!media || media.file_type !== 'video') {
-            // クリーンアップ
+            // 繧ｯ繝ｪ繝ｼ繝ｳ繧｢繝・・
+
             if (previewVideoRef.current) {
                 previewVideoRef.current.src = ''
                 previewVideoRef.current = null
@@ -233,11 +297,13 @@ export const Player: React.FC<PlayerProps> = ({
             return
         }
 
-        // 隠しビデオ要素を事前に作成・読み込み開始
+        // 髫縺励ン繝・が隕∫ｴ繧剃ｺ句燕縺ｫ菴懈・繝ｻ隱ｭ縺ｿ霎ｼ縺ｿ髢句ｧ・
         const video = document.createElement('video')
-        video.src = toMediaUrl(media.file_path)
         video.muted = true
-        video.preload = 'auto'  // メタデータとバッファを事前読み込み
+        video.crossOrigin = 'anonymous'
+        video.playsInline = true
+        // Delay source assignment until first hover so startup playback does not compete for I/O.
+        video.preload = 'metadata'
         video.style.display = 'none'
         previewVideoRef.current = video
 
@@ -246,29 +312,36 @@ export const Player: React.FC<PlayerProps> = ({
                 previewVideoRef.current.src = ''
                 previewVideoRef.current = null
             }
+            previewRequestSeqRef.current += 1
         }
     }, [media?.id])
 
-    // 動画読み込み後に自動再生を開始（mediaが変更された時のみ）
+    // 蜍慕判隱ｭ縺ｿ霎ｼ縺ｿ蠕後↓閾ｪ蜍募・逕溘ｒ髢句ｧ具ｼ・edia縺悟､画峩縺輔ｌ縺滓凾縺ｮ縺ｿ・・
     useEffect(() => {
         const mediaElement = videoRef.current || audioRef.current
         if (!mediaElement) return
 
-        // 既にメタデータがロードされている場合は即座に再生
+        // 譌｢縺ｫ繝｡繧ｿ繝・・繧ｿ縺後Ο繝ｼ繝峨＆繧後※縺・ｋ蝣ｴ蜷医・蜊ｳ蠎ｧ縺ｫ蜀咲函
+
         if (mediaElement.readyState >= 1) {
             mediaElement.play().catch(() => { })
         } else {
-            // メタデータロード後に再生（onceで自動的にリスナー解除）
+            // 繝｡繧ｿ繝・・繧ｿ繝ｭ繝ｼ繝牙ｾ後↓蜀咲函・・nce縺ｧ閾ｪ蜍慕噪縺ｫ繝ｪ繧ｹ繝翫・隗｣髯､・・
             mediaElement.addEventListener('loadedmetadata', () => {
                 mediaElement.play().catch(() => { })
             }, { once: true })
         }
-    }, [media?.id]) // media.idのみに依存（オブジェクト参照変更による再トリガーを防止）
+    }, [media?.id]) // media.id縺ｮ縺ｿ縺ｫ萓晏ｭ假ｼ医が繝悶ず繧ｧ繧ｯ繝亥盾辣ｧ螟画峩縺ｫ繧医ｋ蜀阪ヨ繝ｪ繧ｬ繝ｼ繧帝亟豁｢・・
 
+    useEffect(() => {
+        setVideoVisualReady(!isVideo)
+    }, [media?.id, isVideo])
     // Buffered Time State is now managed in usePlayer
+
     const bufferedTime = buffered
 
-    // ループと自動再生の連携
+    // 繝ｫ繝ｼ繝励→閾ｪ蜍募・逕溘・騾｣謳ｺ
+
     useEffect(() => {
         const mediaElement = videoRef.current || audioRef.current
         if (!mediaElement) return
@@ -280,22 +353,170 @@ export const Player: React.FC<PlayerProps> = ({
         }
     }, [autoPlayEnabled, isLooping, media?.id])
 
+    useEffect(() => {
+        if (!pipWindowMode || !pipInitialState) return
+        const mediaElement = getMediaElement()
+        if (!mediaElement) return
+
+        const applyInitialState = async () => {
+            applyingRemoteStateRef.current = true
+            try {
+                if (Number.isFinite(pipInitialState.currentTime)) {
+                    mediaElement.currentTime = Math.max(0, Number(pipInitialState.currentTime))
+                }
+                if (Number.isFinite(pipInitialState.playbackRate) && Number(pipInitialState.playbackRate) > 0) {
+                    mediaElement.playbackRate = Number(pipInitialState.playbackRate)
+                }
+                if (Number.isFinite(pipInitialState.volume)) {
+                    mediaElement.volume = Math.max(0, Math.min(1, Number(pipInitialState.volume)))
+                }
+                if (typeof pipInitialState.muted === 'boolean') {
+                    mediaElement.muted = pipInitialState.muted
+                }
+                if (pipInitialState.isPlaying) {
+                    await mediaElement.play().catch(() => { })
+                } else {
+                    mediaElement.pause()
+                }
+            } finally {
+                applyingRemoteStateRef.current = false
+            }
+        }
+
+        if (mediaElement.readyState >= 1) {
+            void applyInitialState()
+            return
+        }
+
+        const onLoaded = () => {
+            void applyInitialState()
+        }
+        mediaElement.addEventListener('loadedmetadata', onLoaded, { once: true })
+        return () => mediaElement.removeEventListener('loadedmetadata', onLoaded)
+    }, [pipWindowMode, pipInitialState, media?.id])
+
+    useEffect(() => {
+        if (!pipWindowMode) return
+        if (typeof BroadcastChannel === 'undefined') return
+        if (!media) return
+        const channel = new BroadcastChannel('obscura-pip-sync')
+        syncChannelRef.current = channel
+
+        const publishState = () => {
+            const mediaElement = getMediaElement()
+            if (!mediaElement || applyingRemoteStateRef.current) return
+            if (!pipWindowMode && isPiP) return
+            channel.postMessage({
+                type: 'state',
+                mediaId: media.id,
+                source: syncSourceRef.current,
+                currentTime: mediaElement.currentTime,
+                isPaused: mediaElement.paused,
+                playbackRate: mediaElement.playbackRate,
+                volume: mediaElement.volume,
+                muted: mediaElement.muted,
+                at: Date.now(),
+            })
+        }
+
+        const onMessage = (event: MessageEvent) => {
+            const payload = event.data || {}
+            if (payload.source === syncSourceRef.current) return
+            if (payload.mediaId !== media.id) return
+
+            const mediaElement = getMediaElement()
+            if (!mediaElement) return
+
+            if (payload.type === 'request' && !pipWindowMode && !isPiP) {
+                publishState()
+                return
+            }
+            if (payload.type !== 'state') return
+
+            applyingRemoteStateRef.current = true
+            try {
+                const remoteTime = Number(payload.currentTime)
+                if (Number.isFinite(remoteTime) && Math.abs(mediaElement.currentTime - remoteTime) > 0.35) {
+                    mediaElement.currentTime = Math.max(0, remoteTime)
+                }
+
+                const remoteRate = Number(payload.playbackRate)
+                if (Number.isFinite(remoteRate) && remoteRate > 0 && Math.abs(mediaElement.playbackRate - remoteRate) > 0.01) {
+                    mediaElement.playbackRate = remoteRate
+                }
+
+                const remoteVol = Number(payload.volume)
+                if (Number.isFinite(remoteVol) && Math.abs(mediaElement.volume - remoteVol) > 0.01) {
+                    mediaElement.volume = Math.max(0, Math.min(1, remoteVol))
+                }
+                if (typeof payload.muted === 'boolean' && mediaElement.muted !== payload.muted) {
+                    mediaElement.muted = payload.muted
+                }
+
+                // Main window stays passive while PiP exists.
+                if (!pipWindowMode && isPiP) {
+                    if (!mediaElement.paused) mediaElement.pause()
+                    return
+                }
+
+                if (payload.isPaused === true && !mediaElement.paused) {
+                    mediaElement.pause()
+                } else if (payload.isPaused === false && mediaElement.paused) {
+                    void mediaElement.play().catch(() => { })
+                }
+            } finally {
+                applyingRemoteStateRef.current = false
+            }
+        }
+
+        channel.addEventListener('message', onMessage)
+
+        const mediaElement = getMediaElement()
+        const onEvent = () => publishState()
+        mediaElement?.addEventListener('play', onEvent)
+        mediaElement?.addEventListener('pause', onEvent)
+        mediaElement?.addEventListener('seeked', onEvent)
+        mediaElement?.addEventListener('ratechange', onEvent)
+        mediaElement?.addEventListener('volumechange', onEvent)
+        mediaElement?.addEventListener('loadedmetadata', onEvent)
+
+        const timer = window.setInterval(publishState, 350)
+        if (pipWindowMode) {
+            channel.postMessage({ type: 'request', mediaId: media.id, source: syncSourceRef.current })
+        }
+
+        return () => {
+            window.clearInterval(timer)
+            mediaElement?.removeEventListener('play', onEvent)
+            mediaElement?.removeEventListener('pause', onEvent)
+            mediaElement?.removeEventListener('seeked', onEvent)
+            mediaElement?.removeEventListener('ratechange', onEvent)
+            mediaElement?.removeEventListener('volumechange', onEvent)
+            mediaElement?.removeEventListener('loadedmetadata', onEvent)
+            channel.removeEventListener('message', onMessage)
+            channel.close()
+            syncChannelRef.current = null
+        }
+    }, [media?.id, pipWindowMode, isPiP, videoRef.current, audioRef.current])
+
 
     // Discord RPC Integration
+
     useEffect(() => {
         if (!media) return
 
         const updateDiscord = () => {
             const el = videoRef.current || audioRef.current
-            // 実際の要素の状態を優先取得
+            // 螳滄圀縺ｮ隕∫ｴ縺ｮ迥ｶ諷九ｒ蜆ｪ蜈亥叙蠕・
             const curTime = el ? el.currentTime : currentTime
             const dur = el ? el.duration : duration
             const rate = el ? el.playbackRate : playbackRate
 
-            // 状態に応じたアクティビティ更新
+            // 迥ｶ諷九↓蠢懊§縺溘い繧ｯ繝・ぅ繝薙ユ繧｣譖ｴ譁ｰ
+
             if (isPlaying) {
                 const now = Date.now()
-                // 残り時間を計算
+                // 谿九ｊ譎る俣繧定ｨ育ｮ・
                 const remainingSec = (dur - curTime) / (rate || 1)
                 const endTimestamp = Math.floor(now + remainingSec * 1000)
 
@@ -320,15 +541,16 @@ export const Player: React.FC<PlayerProps> = ({
             }
         }
 
-        // 初期実行
+        // 蛻晄悄螳溯｡・
         updateDiscord()
 
-        // Seekイベントの監視 (シーク時に時間を更新するため)
+        // Seek繧､繝吶Φ繝医・逶｣隕・(繧ｷ繝ｼ繧ｯ譎ゅ↓譎る俣繧呈峩譁ｰ縺吶ｋ縺溘ａ)
+
         const el = videoRef.current || audioRef.current
         if (el) {
             const handleSeeked = () => {
-                // シーク直後はステートが安定しない場合があるため少し待つか、
-                // 単に再実行する。
+                // 繧ｷ繝ｼ繧ｯ逶ｴ蠕後・繧ｹ繝・・繝医′螳牙ｮ壹＠縺ｪ縺・ｴ蜷医′縺ゅｋ縺溘ａ蟆代＠蠕・▽縺九・
+                // 蜊倥↓蜀榊ｮ溯｡後☆繧九・
                 updateDiscord()
             }
             el.addEventListener('seeked', handleSeeked)
@@ -336,80 +558,128 @@ export const Player: React.FC<PlayerProps> = ({
                 el.removeEventListener('seeked', handleSeeked)
             }
         }
-    }, [media, isPlaying, playbackRate]) // currentTimeを含めないことで過剰な更新を防ぐ
+    }, [media, isPlaying, playbackRate]) // currentTime繧貞性繧√↑縺・％縺ｨ縺ｧ驕主臆縺ｪ譖ｴ譁ｰ繧帝亟縺・
 
 
 
 
+    // 繧ｷ繝ｼ繧ｯ繝舌・縺ｮ繝槭え繧ｹ遘ｻ蜍輔ワ繝ｳ繝峨Λ・医ヶ繝ｩ繧ｦ繧ｶGPU蜉騾溘・繝ｬ繝薙Η繝ｼ・・
+    const requestPreviewImageFallback = async (requestSeq: number, timeSeconds: number) => {
+        if (!media?.file_path) return
+        try {
+            const dataUrl = await api.captureFrameDataUrl(media.file_path, timeSeconds)
+            if (requestSeq !== previewRequestSeqRef.current) return
+            if (typeof dataUrl === 'string' && dataUrl) {
+                setPreviewImage(dataUrl)
+            } else {
+                setPreviewImage(null)
+            }
+        } catch {
+            if (requestSeq !== previewRequestSeqRef.current) return
+            setPreviewImage(null)
+        }
+    }
 
-    // シークバーのマウス移動ハンドラ（ブラウザGPU加速プレビュー）
     const handleSeekMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
         if (!media || !duration || media.file_type !== 'video') return
 
         const rect = e.currentTarget.getBoundingClientRect()
         const x = e.clientX - rect.left
         const width = rect.width
-        // 0以上duration以下にクランプ
+        // 0莉･荳嚇uration莉･荳九↓繧ｯ繝ｩ繝ｳ繝・
         const hoverTime = Math.max(0, Math.min(duration, (x / width) * duration))
 
-        // 時間は常に表示
+        // 譎る俣縺ｯ蟶ｸ縺ｫ陦ｨ遉ｺ
         setPreviewTime(hoverTime)
         setPreviewX(x)
 
-        // 10msスロットル: 前回のリクエストから10ms以内ならスキップ
+        // 10ms繧ｹ繝ｭ繝・ヨ繝ｫ: 蜑榊屓縺ｮ繝ｪ繧ｯ繧ｨ繧ｹ繝医°繧・0ms莉･蜀・↑繧峨せ繧ｭ繝・・
+
         const now = Date.now()
         if (now - lastRequestTimestampRef.current < 10) return
         lastRequestTimestampRef.current = now
 
-        // キャンバスを初期化（初回のみ）
+        // 繧ｭ繝｣繝ｳ繝舌せ繧貞・譛溷喧・亥・蝗槭・縺ｿ・・
         if (!previewCanvasRef.current) {
             previewCanvasRef.current = document.createElement('canvas')
-            previewCanvasRef.current.width = 160 // プレビューサイズ
+            previewCanvasRef.current.width = 160 // 繝励Ξ繝薙Η繝ｼ繧ｵ繧､繧ｺ
             previewCanvasRef.current.height = 90
         }
 
-        // プレビュー用ビデオ要素がまだなければスキップ（useEffectで初期化中）
-        if (!previewVideoRef.current) return
+        // 繝励Ξ繝薙Η繝ｼ逕ｨ繝薙ョ繧ｪ隕∫ｴ縺後∪縺縺ｪ縺代ｌ縺ｰ繧ｹ繧ｭ繝・・・・seEffect縺ｧ蛻晄悄蛹紋ｸｭ・・
+        if (!previewVideoRef.current) {
+            previewRequestSeqRef.current += 1
+            void requestPreviewImageFallback(previewRequestSeqRef.current, hoverTime)
+            return
+        }
 
         const video = previewVideoRef.current
+        if (!video.src && media?.file_path) {
+            video.src = toMediaUrl(media.file_path)
+            if (typeof video.load === 'function') video.load()
+            previewRequestSeqRef.current += 1
+            void requestPreviewImageFallback(previewRequestSeqRef.current, hoverTime)
+            return
+        }
         const canvas = previewCanvasRef.current
 
-        // 同じ時間（秒単位）ならスキップ（パフォーマンス最適化）
+        // 蜷後§譎る俣・育ｧ貞腰菴搾ｼ峨↑繧峨せ繧ｭ繝・・・医ヱ繝輔か繝ｼ繝槭Φ繧ｹ譛驕ｩ蛹厄ｼ・
         const roundedTime = Math.floor(hoverTime)
         if (roundedTime === lastPreviewTimeRef.current) return
         lastPreviewTimeRef.current = roundedTime
+        previewRequestSeqRef.current += 1
+        const requestSeq = previewRequestSeqRef.current
 
-        // シークしてフレームをキャプチャ
+        // メタデータ読み込み前は sidecar へ落とさず待つ（不要な高コスト呼び出しを防ぐ）
+        if (!Number.isFinite(video.duration)) {
+            setPreviewImage(null)
+            return
+        }
+        if (hoverTime > video.duration) {
+            void requestPreviewImageFallback(requestSeq, hoverTime)
+            return
+        }
         video.currentTime = hoverTime
 
-        // seeked イベントでフレームキャプチャ
+        // seeked 繧､繝吶Φ繝医〒繝輔Ξ繝ｼ繝繧ｭ繝｣繝励メ繝｣
+
         const handleSeeked = () => {
+            if (requestSeq !== previewRequestSeqRef.current) return
             const ctx = canvas.getContext('2d')
             if (ctx && video.videoWidth > 0) {
-                // アスペクト比を維持してキャンバスサイズを調整
-                const aspectRatio = video.videoWidth / video.videoHeight
-                canvas.width = 160
-                canvas.height = Math.round(160 / aspectRatio)
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-                setPreviewImage(canvas.toDataURL('image/jpeg', 0.7))
+                try {
+                    // 繧｢繧ｹ繝壹け繝域ｯ斐ｒ邯ｭ謖√＠縺ｦ繧ｭ繝｣繝ｳ繝舌せ繧ｵ繧､繧ｺ繧定ｪｿ謨ｴ
+
+                    const aspectRatio = video.videoWidth / video.videoHeight
+                    canvas.width = 160
+                    canvas.height = Math.round(160 / aspectRatio)
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+                    setPreviewImage(canvas.toDataURL('image/jpeg', 0.7))
+                } catch (err) {
+                    // Cross-origin / tainted canvas fallback
+                    void requestPreviewImageFallback(requestSeq, hoverTime)
+                }
+                return
             }
-            video.removeEventListener('seeked', handleSeeked)
+            void requestPreviewImageFallback(requestSeq, hoverTime)
         }
-        video.addEventListener('seeked', handleSeeked)
+        video.addEventListener('seeked', handleSeeked, { once: true })
     }
 
     const handleSeekMouseLeave = () => {
+        previewRequestSeqRef.current += 1
         setPreviewTime(null)
         setPreviewImage(null)
         lastPreviewTimeRef.current = -1
     }
 
-    // コメント送信
+    // 繧ｳ繝｡繝ｳ繝磯∽ｿ｡
+
     const handleSendComment = async () => {
         if (!media || !commentText.trim()) return
         try {
             if (activeRemoteLibrary) {
-                // リモート
+                // 繝ｪ繝｢繝ｼ繝・
                 const response = await fetch(`${activeRemoteLibrary.url} /api/media / ${media.id}/comments`, {
                     method: 'POST',
                     headers: {
@@ -426,14 +696,14 @@ export const Player: React.FC<PlayerProps> = ({
                     throw new Error('Failed to post remote comment')
                 }
             } else {
-                // ローカル
+                // 繝ｭ繝ｼ繧ｫ繝ｫ
                 await api.addComment(media.id, commentText, currentTime)
             }
 
             setCommentText('')
             setShowCommentInput(false)
             console.log('Comment added')
-            // コメント追加後に通知（Inspector更新用）
+            // 繧ｳ繝｡繝ｳ繝郁ｿｽ蜉蠕後↓騾夂衍・・nspector譖ｴ譁ｰ逕ｨ・・
             if (onCommentAdded) {
                 onCommentAdded()
             }
@@ -442,8 +712,9 @@ export const Player: React.FC<PlayerProps> = ({
         }
     }
 
-    // キャプチャ機能
-    const captureCurrentFrame = (): string | null => {
+    // 繧ｭ繝｣繝励メ繝｣讖溯・
+
+    const captureCurrentFrameSync = (): string | null => {
         const video = videoRef.current
         if (!video) return null
 
@@ -454,17 +725,205 @@ export const Player: React.FC<PlayerProps> = ({
         const ctx = canvas.getContext('2d')
         if (!ctx) return null
 
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-        return canvas.toDataURL('image/jpeg', 0.9) // JPEG品質90%
+        try {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+            return canvas.toDataURL('image/jpeg', 0.9) // JPEG蜩∬ｳｪ90%
+        } catch (error) {
+            console.error('[Player] captureCurrentFrame failed (tainted canvas):', error)
+            return null
+        }
     }
 
-    // コンテキストメニューからのキャプチャ要求をリッスン
+    const waitForMediaEvent = (target: HTMLMediaElement, eventName: string, timeoutMs = 5000) => new Promise<void>((resolve, reject) => {
+        let timeoutId: ReturnType<typeof setTimeout> | null = null
+        const cleanup = () => {
+            target.removeEventListener(eventName, onEvent)
+            target.removeEventListener('error', onError)
+            if (timeoutId) clearTimeout(timeoutId)
+        }
+        const onEvent = () => {
+            cleanup()
+            resolve()
+        }
+        const onError = () => {
+            cleanup()
+            reject(new Error(`media event failed: ${eventName}`))
+        }
+        target.addEventListener(eventName, onEvent, { once: true })
+        target.addEventListener('error', onError, { once: true })
+        timeoutId = setTimeout(() => {
+            cleanup()
+            reject(new Error(`media event timeout: ${eventName}`))
+        }, timeoutMs)
+    })
+
+    const captureCurrentFrame = async (): Promise<string | null> => {
+        const direct = captureCurrentFrameSync()
+        if (direct) return direct
+        if (!isVideo || !media?.file_path) return null
+
+        const captureViaSidecar = async (): Promise<string | null> => {
+            try {
+                const mediaElement = getMediaElement()
+                const timeSeconds = Number.isFinite(Number(mediaElement?.currentTime))
+                    ? Number(mediaElement?.currentTime)
+                    : Number(currentTime || 0)
+                const dataUrl = await api.captureFrameDataUrl(media.file_path, timeSeconds)
+                return typeof dataUrl === 'string' && dataUrl ? dataUrl : null
+            } catch (error) {
+                console.error('[Player] captureCurrentFrame sidecar fallback failed:', error)
+                return null
+            }
+        }
+
+        try {
+            let captureVideo = frameCaptureVideoRef.current
+            if (!captureVideo) {
+                captureVideo = document.createElement('video')
+                captureVideo.preload = 'auto'
+                captureVideo.muted = true
+                captureVideo.crossOrigin = 'anonymous'
+                frameCaptureVideoRef.current = captureVideo
+            }
+
+            const src = toMediaUrl(media.file_path)
+            if (captureVideo.src !== src) {
+                captureVideo.src = src
+            }
+
+            if (captureVideo.readyState < 1) {
+                await waitForMediaEvent(captureVideo, 'loadedmetadata')
+            }
+
+            const mediaElement = getMediaElement()
+            const currentTimeValue = mediaElement ? Number(mediaElement.currentTime || 0) : 0
+            const boundedTime = Number.isFinite(currentTimeValue)
+                ? Math.max(0, currentTimeValue)
+                : 0
+            const targetTime = Number.isFinite(captureVideo.duration)
+                ? Math.min(boundedTime, Math.max(0, captureVideo.duration - 0.05))
+                : boundedTime
+
+            if (Math.abs(captureVideo.currentTime - targetTime) > 0.001) {
+                captureVideo.currentTime = targetTime
+                await waitForMediaEvent(captureVideo, 'seeked')
+            }
+
+            if (captureVideo.readyState < 2) {
+                await waitForMediaEvent(captureVideo, 'canplay')
+            }
+
+            let canvas = frameCaptureCanvasRef.current
+            if (!canvas) {
+                canvas = document.createElement('canvas')
+                frameCaptureCanvasRef.current = canvas
+            }
+
+            const width = Math.max(1, captureVideo.videoWidth || 0)
+            const height = Math.max(1, captureVideo.videoHeight || 0)
+            canvas.width = width
+            canvas.height = height
+
+            const ctx = canvas.getContext('2d')
+            if (!ctx) return await captureViaSidecar()
+
+            ctx.drawImage(captureVideo, 0, 0, width, height)
+            return canvas.toDataURL('image/jpeg', 0.9)
+        } catch (error) {
+            console.error('[Player] captureCurrentFrame fallback failed:', error)
+            return await captureViaSidecar()
+        }
+    }
+
+    useEffect(() => {
+        return () => {
+            if (frameCaptureVideoRef.current) {
+                frameCaptureVideoRef.current.src = ''
+                frameCaptureVideoRef.current = null
+            }
+            frameCaptureCanvasRef.current = null
+        }
+    }, [])
+
+    const handlePlayerContextMenu = (e: React.MouseEvent) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setPlayerContextMenu({ x: e.clientX, y: e.clientY })
+    }
+
+    const closePlayerContextMenu = () => {
+        setPlayerContextMenu(null)
+    }
+
+    const handleCopyCurrentFrame = async () => {
+        const dataUrl = await captureCurrentFrame()
+        if (!dataUrl) return
+        try {
+            const copied = await api.copyFrameToClipboard(dataUrl)
+            if (!copied) {
+                console.error('[Player] Failed to copy frame from context menu: clipboard write returned false')
+            }
+        } catch (error) {
+            console.error('[Player] Failed to copy frame from context menu:', error)
+        } finally {
+            closePlayerContextMenu()
+        }
+    }
+
+    const handleSaveCurrentFrame = async () => {
+        const dataUrl = await captureCurrentFrame()
+        if (!dataUrl) return
+        try {
+            await api.saveCapturedFrame(dataUrl)
+        } catch (error) {
+            console.error('[Player] Failed to save frame from context menu:', error)
+        } finally {
+            closePlayerContextMenu()
+        }
+    }
+
+    const handleSetCurrentFrameAsThumbnail = async () => {
+        const dataUrl = await captureCurrentFrame()
+        if (!dataUrl) return
+        try {
+            await api.setCapturedThumbnail(media.id, dataUrl)
+        } catch (error) {
+            console.error('[Player] Failed to set thumbnail from context menu:', error)
+        } finally {
+            closePlayerContextMenu()
+        }
+    }
+
+    const handleCopyFileToClipboard = async () => {
+        if (!media.file_path) return
+        try {
+            await api.copyFileToClipboard(media.file_path)
+        } catch (error) {
+            console.error('[Player] Failed to copy file from context menu:', error)
+        } finally {
+            closePlayerContextMenu()
+        }
+    }
+
+    const handleCopyFilePath = async () => {
+        if (!media.file_path) return
+        try {
+            await api.copyToClipboard(media.file_path)
+        } catch (error) {
+            console.error('[Player] Failed to copy file path from context menu:', error)
+        } finally {
+            closePlayerContextMenu()
+        }
+    }
+
+    // 繧ｳ繝ｳ繝・く繧ｹ繝医Γ繝九Η繝ｼ縺九ｉ縺ｮ繧ｭ繝｣繝励メ繝｣隕∵ｱゅｒ繝ｪ繝・せ繝ｳ
+
     useEffect(() => {
         if (!media) return
 
         const cleanup = api.onTriggerFrameCapture(async (action: string) => {
             console.log('[Player] Frame capture trigger:', action)
-            const dataUrl = captureCurrentFrame()
+            const dataUrl = await captureCurrentFrame()
             if (!dataUrl) {
                 console.error('[Player] Failed to capture frame')
                 return
@@ -472,15 +931,17 @@ export const Player: React.FC<PlayerProps> = ({
 
             try {
                 if (action === 'copy-frame') {
-                    // Electron IPCを使用してクリップボードにコピー（フォーカス問題を回避）
-                    await api.copyFrameToClipboard(dataUrl)
-                    console.log('[Player] Frame copied to clipboard via Electron')
+                    // Electron IPC繧剃ｽｿ逕ｨ縺励※繧ｯ繝ｪ繝・・繝懊・繝峨↓繧ｳ繝斐・・医ヵ繧ｩ繝ｼ繧ｫ繧ｹ蝠城｡後ｒ蝗樣∩・・
+                    const copied = await api.copyFrameToClipboard(dataUrl)
+                    if (copied) {
+                        console.log('[Player] Frame copied to clipboard via Electron')
+                    } else {
+                        console.error('[Player] Failed to copy frame via Electron trigger: clipboard write returned false')
+                    }
                 } else if (action === 'save-frame') {
-                    // ファイルに保存
-                    await api.saveCapturedFrame(dataUrl)
+                    // 繝輔ぃ繧､繝ｫ縺ｫ菫晏ｭ・                    await api.saveCapturedFrame(dataUrl)
                 } else if (action === 'set-thumbnail') {
-                    // サムネイルに設定
-                    await api.setCapturedThumbnail(media.id, dataUrl)
+                    // 繧ｵ繝繝阪う繝ｫ縺ｫ險ｭ螳・                    await api.setCapturedThumbnail(media.id, dataUrl)
                     console.log('[Player] Thumbnail updated')
                 }
             } catch (error) {
@@ -500,15 +961,17 @@ export const Player: React.FC<PlayerProps> = ({
 
     const progress = duration > 0 ? (currentTime / duration) * 100 : 0
 
-    // media:// プロトコルを使用 (httpの場合はそのまま)
+    // media:// 繝励Ο繝医さ繝ｫ繧剃ｽｿ逕ｨ (http縺ｮ蝣ｴ蜷医・縺昴・縺ｾ縺ｾ)
+
     const fileUrl = toMediaUrl(media.file_path)
 
-    // オーバーレイ描画ループとCanvasの物理解像度調整（DPI対応）
+    // 繧ｪ繝ｼ繝舌・繝ｬ繧､謠冗判繝ｫ繝ｼ繝励→Canvas縺ｮ迚ｩ逅・ｧ｣蜒丞ｺｦ隱ｿ謨ｴ・・PI蟇ｾ蠢懶ｼ・
     useEffect(() => {
         const canvas = overlayCanvasRef.current
         if (!canvas || !media || !isVideo) return
 
-        // メディア切り替え時にCanvasを一度だけ確実にクリアする
+        // 繝｡繝・ぅ繧｢蛻・ｊ譖ｿ縺域凾縺ｫCanvas繧剃ｸ蠎ｦ縺縺醍｢ｺ螳溘↓繧ｯ繝ｪ繧｢縺吶ｋ
+
         const initialCtx = canvas.getContext('2d')
         if (initialCtx) {
             initialCtx.setTransform(1, 0, 0, 1, 0, 0)
@@ -537,9 +1000,7 @@ export const Player: React.FC<PlayerProps> = ({
             animationFrameId = requestAnimationFrame(render)
         }
 
-        // ビデオの実際の表示領域にCanvasを正確に一致させるリサイズ処理
-        // video.getBoundingClientRect()はobject-fitの影響を反映しないため、
-        // コンテナサイズとアスペクト比から映像の表示領域を自前で計算する
+        // 繝薙ョ繧ｪ縺ｮ螳滄圀縺ｮ陦ｨ遉ｺ鬆伜沺縺ｫCanvas繧呈ｭ｣遒ｺ縺ｫ荳閾ｴ縺輔○繧九Μ繧ｵ繧､繧ｺ蜃ｦ逅・        // video.getBoundingClientRect()縺ｯobject-fit縺ｮ蠖ｱ髻ｿ繧貞渚譏縺励↑縺・◆繧√・        // 繧ｳ繝ｳ繝・リ繧ｵ繧､繧ｺ縺ｨ繧｢繧ｹ繝壹け繝域ｯ斐°繧画丐蜒上・陦ｨ遉ｺ鬆伜沺繧定・蜑阪〒險育ｮ励☆繧・
         const handleResize = () => {
             const parent = canvas.parentElement
             if (!parent || videoSize.width === 0) return
@@ -550,19 +1011,18 @@ export const Player: React.FC<PlayerProps> = ({
             const videoRatio = videoSize.width / videoSize.height
             const containerRatio = rect.width / rect.height
 
-            let displayWidth: number
-            let displayHeight: number
+            let displayWidth = 0
+            let displayHeight = 0
 
             if (resizeMode === 'scale-down') {
-                // オリジナルサイズ: ネイティブ解像度を超えない範囲でコンテナに収める
-                displayWidth = Math.min(videoSize.width, rect.width)
+                // 繧ｪ繝ｪ繧ｸ繝翫Ν繧ｵ繧､繧ｺ: 繝阪う繝・ぅ繝冶ｧ｣蜒丞ｺｦ繧定ｶ・∴縺ｪ縺・ｯ・峇縺ｧ繧ｳ繝ｳ繝・リ縺ｫ蜿弱ａ繧・                displayWidth = Math.min(videoSize.width, rect.width)
                 displayHeight = displayWidth / videoRatio
                 if (displayHeight > rect.height) {
                     displayHeight = rect.height
                     displayWidth = displayHeight * videoRatio
                 }
             } else {
-                // ウィンドウに合わせる: コンテナ内でアスペクト比を維持して最大化
+                // 繧ｦ繧｣繝ｳ繝峨え縺ｫ蜷医ｏ縺帙ｋ: 繧ｳ繝ｳ繝・リ蜀・〒繧｢繧ｹ繝壹け繝域ｯ斐ｒ邯ｭ謖√＠縺ｦ譛螟ｧ蛹・
                 if (containerRatio > videoRatio) {
                     displayHeight = rect.height
                     displayWidth = displayHeight * videoRatio
@@ -601,11 +1061,21 @@ export const Player: React.FC<PlayerProps> = ({
 
     return (
         <div
-            className="player-container"
+            className={`player-container ${pipWindowMode ? 'pip-window-mode' : ''}`}
             ref={containerRef}
-        /* 常時表示のためマウス制御は削除 */
+        /* 蟶ｸ譎り｡ｨ遉ｺ縺ｮ縺溘ａ繝槭え繧ｹ蛻ｶ蠕｡縺ｯ蜑企勁 */
         >
-            {/* コメント表示 (オーバーレイ) */}
+            {pipWindowMode && (
+                <div className="pip-drag-bar">
+                    <button className="pip-return-btn" onClick={handleReturnToMainWindow} title="元のウィンドウへ戻る">
+                        戻る
+                    </button>
+                    <button className="pip-close-btn" onClick={handleBack} title="閉じる">
+                        ×
+                    </button>
+                </div>
+            )}
+            {/* 繧ｳ繝｡繝ｳ繝郁｡ｨ遉ｺ (繧ｪ繝ｼ繝舌・繝ｬ繧､) */}
             <div className="player-comment-overlay">
                 {(media.comments || []).filter(c => Math.abs(c.time - currentTime) < 3).map(c => (
                     <div key={c.id} className="comment-bubble">
@@ -615,7 +1085,7 @@ export const Player: React.FC<PlayerProps> = ({
                 ))}
             </div>
 
-            {/* ヘッダーバー (上部固定) */}
+            {/* 繝倥ャ繝繝ｼ繝舌・ (荳企Κ蝗ｺ螳・ */}
             <div className="player-header-bar">
                 <div className="header-left">
                     <button className="header-back-button" onClick={handleBack}>
@@ -628,7 +1098,7 @@ export const Player: React.FC<PlayerProps> = ({
                 </div>
 
                 <div className="header-right">
-                    {/* プラグインボタン群（リサイズボタンの左に配置） */}
+                    {/* 繝励Λ繧ｰ繧､繝ｳ繝懊ち繝ｳ鄒､・医Μ繧ｵ繧､繧ｺ繝懊ち繝ｳ縺ｮ蟾ｦ縺ｫ驟咲ｽｮ・・*/}
                     {playerExtensionButtons.length > 0 && (
                         <div className="nav-buttons" style={{ marginRight: '8px' }}>
                             {playerExtensionButtons.map(btn => {
@@ -660,7 +1130,7 @@ export const Player: React.FC<PlayerProps> = ({
                         </div>
                     )}
 
-                    {/* リサイズモード切り替えボタン */}
+                    {/* 繝ｪ繧ｵ繧､繧ｺ繝｢繝ｼ繝牙・繧頑崛縺医・繧ｿ繝ｳ */}
                     <div className="nav-buttons" style={{ marginRight: '16px' }}>
                         <button
                             className={`nav-btn ${resizeMode === 'contain' ? 'active' : ''}`}
@@ -675,7 +1145,7 @@ export const Player: React.FC<PlayerProps> = ({
                         <button
                             className={`nav-btn ${resizeMode === 'scale-down' ? 'active' : ''}`}
                             onClick={() => setResizeMode('scale-down')}
-                            title="オリジナルサイズ（拡大なし）"
+                            title="オリジナルサイズ（拡大しない）"
                             style={resizeMode === 'scale-down' ? { color: 'var(--primary)', borderColor: 'var(--primary)' } : {}}
                         >
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -724,7 +1194,7 @@ export const Player: React.FC<PlayerProps> = ({
                 </div >
             </div >
 
-            <div className="player-content">
+            <div className="player-content" onContextMenu={handlePlayerContextMenu}>
                 {!configLoaded ? (
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#666' }}>
                         Loading configuration...
@@ -749,13 +1219,14 @@ export const Player: React.FC<PlayerProps> = ({
                                 autoPlay
                                 preload="auto"
                                 style={{
-                                    gridArea: '1 / 1 / 2 / 2', // 同じグリッドセルに重ねる
+                                    gridArea: '1 / 1 / 2 / 2',
                                     width: resizeMode === 'scale-down' ? 'auto' : '100%',
                                     height: resizeMode === 'scale-down' ? 'auto' : '100%',
                                     maxWidth: '100%',
                                     maxHeight: '100%',
                                     objectFit: resizeMode === 'scale-down' ? 'scale-down' : 'contain',
-                                    visibility: (isPiP === true) ? 'hidden' : 'visible',
+                                    opacity: videoVisualReady ? 1 : 0,
+                                    transition: 'opacity 120ms ease',
                                     imageRendering: videoScaling === 'pixelated' ? 'pixelated' : 'auto',
                                     zIndex: 1
                                 }}
@@ -763,6 +1234,7 @@ export const Player: React.FC<PlayerProps> = ({
                                     const v = e.currentTarget;
                                     setVideoSize({ width: v.videoWidth, height: v.videoHeight });
                                 }}
+                                onLoadedData={() => setVideoVisualReady(true)}
                                 onClick={togglePlay}
                                 onEnded={() => {
                                     if (autoPlayEnabled) {
@@ -775,7 +1247,7 @@ export const Player: React.FC<PlayerProps> = ({
                                 }}
                             />
 
-                            {/* 共通オーバーレイレイヤー (Gridでビデオと完全に重ねる) */}
+                            {/* 蜈ｱ騾壹が繝ｼ繝舌・繝ｬ繧､繝ｬ繧､繝､繝ｼ (Grid縺ｧ繝薙ョ繧ｪ縺ｨ螳悟・縺ｫ驥阪・繧・ */}
                             <div className="player-canvas-layer" style={{
                                 gridArea: '1 / 1 / 2 / 2',
                                 width: '100%',
@@ -843,7 +1315,33 @@ export const Player: React.FC<PlayerProps> = ({
 
             </div>
 
-            {/* コントロールバー (下部固定) */}
+            {playerContextMenu && createPortal(
+                <div
+                    ref={playerContextMenuRef}
+                    className="context-menu"
+                    style={{ position: 'fixed', top: playerContextMenu.y, left: playerContextMenu.x, zIndex: 100001 }}
+                >
+                    <div className={`context-menu-item ${isVideo ? '' : 'disabled'}`} onClick={isVideo ? handleCopyCurrentFrame : undefined}>
+                        フレームをコピー
+                    </div>
+                    <div className={`context-menu-item ${isVideo ? '' : 'disabled'}`} onClick={isVideo ? handleSaveCurrentFrame : undefined}>
+                        フレームを保存
+                    </div>
+                    <div className={`context-menu-item ${isVideo ? '' : 'disabled'}`} onClick={isVideo ? handleSetCurrentFrameAsThumbnail : undefined}>
+                        このフレームをサムネイルに設定
+                    </div>
+                    <div className="context-menu-separator" />
+                    <div className="context-menu-item" onClick={handleCopyFileToClipboard}>
+                        ファイルをコピー
+                    </div>
+                    <div className="context-menu-item" onClick={handleCopyFilePath}>
+                        パスをコピー
+                    </div>
+                </div>,
+                document.body
+            )}
+
+            {/* 繧ｳ繝ｳ繝医Ο繝ｼ繝ｫ繝舌・ (荳矩Κ蝗ｺ螳・ */}
             <div className="player-controls-bar">
                 <div className="controls-left">
                     <button className="control-btn" onClick={togglePlay}>
@@ -902,13 +1400,13 @@ export const Player: React.FC<PlayerProps> = ({
                     </div>
                 </div>
 
-                {/* シークバー (中央) */}
+                {/* 繧ｷ繝ｼ繧ｯ繝舌・ (荳ｭ螟ｮ) */}
                 <div
                     className="player-seek-container"
                     onMouseMove={handleSeekMouseMove}
                     onMouseLeave={handleSeekMouseLeave}
                 >
-                    {/* プレビューツールチップ */}
+                    {/* 繝励Ξ繝薙Η繝ｼ繝・・繝ｫ繝√ャ繝・*/}
                     {previewTime !== null && (
                         <div
                             className="seek-preview-tooltip"
@@ -954,7 +1452,7 @@ export const Player: React.FC<PlayerProps> = ({
                 </div>
 
                 <div className="controls-right">
-                    {/* 再生速度 */}
+                    {/* 蜀咲函騾溷ｺｦ */}
                     <div className="speed-control-group">
                         <button className="control-btn text-btn">
                             {playbackRate}x
@@ -972,7 +1470,7 @@ export const Player: React.FC<PlayerProps> = ({
                         </div>
                     </div>
 
-                    {/* 自動再生 */}
+                    {/* 閾ｪ蜍募・逕・*/}
                     {onToggleAutoPlay && (
                         <button
                             className={`control-btn ${autoPlayEnabled ? 'active' : ''}`}
@@ -986,8 +1484,8 @@ export const Player: React.FC<PlayerProps> = ({
                         </button>
                     )}
 
-                    {/* リピート */}
-                    <button className={`control-btn ${isLooping ? 'active' : ''}`} onClick={toggleLoop} title="リピート">
+                    {/* 繝ｪ繝斐・繝・*/}
+                    <button className={`control-btn ${isLooping ? 'active' : ''}`} onClick={toggleLoop} title="ループ">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <polyline points="17 1 21 5 17 9" />
                             <path d="M3 11V9a4 4 0 0 1 4-4h14" />
@@ -997,8 +1495,8 @@ export const Player: React.FC<PlayerProps> = ({
                     </button>
 
                     {/* PiP */}
-                    {isVideo && (
-                        <button className={`control-btn ${isPiP ? 'active' : ''}`} onClick={togglePiP} title="ピクチャーインピクチャー">
+                    {isVideo && !pipWindowMode && (
+                        <button className={`control-btn pip-toggle-btn ${isPiP ? 'active' : ''}`} onClick={togglePiP} title="ピクチャーインピクチャー">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <rect x="2" y="6" width="20" height="14" rx="2" ry="2" />
                                 <rect x="13" y="11" width="8" height="5" rx="1" ry="1" fill="currentColor" />
@@ -1006,7 +1504,7 @@ export const Player: React.FC<PlayerProps> = ({
                         </button>
                     )}
 
-                    {/* コメント */}
+                    {/* 繧ｳ繝｡繝ｳ繝・*/}
                     <div className="comment-control-group">
                         <button className={`control-btn ${showCommentInput ? 'active' : ''}`} onClick={() => setShowCommentInput(!showCommentInput)}>
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1028,7 +1526,7 @@ export const Player: React.FC<PlayerProps> = ({
                         )}
                     </div>
 
-                    {/* フルスクリーン */}
+                    {/* 繝輔Ν繧ｹ繧ｯ繝ｪ繝ｼ繝ｳ */}
                     <button className="control-btn" onClick={toggleFullscreen}>
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
@@ -1037,9 +1535,9 @@ export const Player: React.FC<PlayerProps> = ({
                 </div>
             </div>
 
-            {/* 以前のback-button-overlayは削除済み */}
+            {/* 莉･蜑阪・back-button-overlay縺ｯ蜑企勁貂医∩ */}
 
-            {/* オーディオエンジン設定モーダル */}
+            {/* 繧ｪ繝ｼ繝・ぅ繧ｪ繧ｨ繝ｳ繧ｸ繝ｳ險ｭ螳壹Δ繝ｼ繝繝ｫ */}
             {
                 showAudioSettings && (
                     <AudioSettingsModal
@@ -1053,3 +1551,6 @@ export const Player: React.FC<PlayerProps> = ({
         </div >
     )
 }
+
+
+

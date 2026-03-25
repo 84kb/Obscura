@@ -41,7 +41,7 @@ export interface IMediaLibraryAPI {
     deleteFilesPermanently(ids: number[]): Promise<void>;
     updateLastPlayed(id: number): Promise<void>;
 
-    importMedia(filePaths: string[]): Promise<MediaFile[]>;
+    importMedia(filePaths: string[], options?: { deleteSource?: boolean; importSource?: string }): Promise<MediaFile[]>;
     checkImportDuplicates(filePaths: string[]): Promise<{ newFile: any; existing: any }[]>;
     checkEntryDuplicates(mediaId: number): Promise<{ newMedia: MediaFile; existingMedia: MediaFile }[]>;
     findLibraryDuplicates(criteria?: { name: boolean; size: boolean; duration: boolean; modified: boolean }): Promise<{ [key: string]: MediaFile[] }[]>;
@@ -54,6 +54,7 @@ export interface IMediaLibraryAPI {
     copyFrameToClipboard(dataUrl: string): Promise<boolean>;
     saveCapturedFrame(dataUrl: string): Promise<boolean>;
     setCapturedThumbnail(mediaId: number, dataUrl: string): Promise<string | null>;
+    captureFrameDataUrl(filePath: string, timeSeconds: number): Promise<string | null>;
 
     // コメント
     addComment(mediaId: number, text: string, time: number): Promise<MediaComment>;

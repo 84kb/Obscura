@@ -22,6 +22,7 @@ interface SidebarProps {
     onOpenLibraryModal: () => void
     onOpenLibrary: () => Promise<any>
     onSwitchLibrary: (lib: Library) => void
+    onRemoveLocalLibraryHistory: (libraryPath: string) => Promise<void>
     onSwitchRemoteLibrary: (lib: RemoteLibrary) => void
     onOpenSettings: () => void
     hasActiveLibrary: boolean
@@ -30,25 +31,22 @@ interface SidebarProps {
     onInternalDragStart?: () => void
     onInternalDragEnd?: () => void
     itemCounts?: { [key: string]: number }
+    language?: 'ja' | 'en'
 }
 
-// サブフォルダー対応のためのヘルパー型と関数
 interface FolderWithChildren extends Folder {
     children: FolderWithChildren[]
     level: number
 }
 
-// フラットなリストをツリー構造に変換
 const buildFolderTree = (folders: Folder[]): FolderWithChildren[] => {
     const folderMap = new Map<number, FolderWithChildren>()
     const roots: FolderWithChildren[] = []
 
-    // まず全てのフォルダーをマップに登録
     folders.forEach(f => {
         folderMap.set(f.id, { ...f, children: [], level: 0 })
     })
 
-    // 親子関係を構築
     folders.forEach(f => {
         const node = folderMap.get(f.id)!
         if (f.parentId && folderMap.has(f.parentId)) {
@@ -60,7 +58,6 @@ const buildFolderTree = (folders: Folder[]): FolderWithChildren[] => {
         }
     })
 
-    // orderIndexでソート
     const sortNodes = (nodes: FolderWithChildren[]) => {
         nodes.sort((a, b) => {
             const orderA = a.orderIndex || 0
@@ -75,7 +72,6 @@ const buildFolderTree = (folders: Folder[]): FolderWithChildren[] => {
     return roots
 }
 
-// アイコンコンポーネント（シンプル）
 const Icons = {
     All: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>,
     Uncategorized: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>,
@@ -90,7 +86,6 @@ const Icons = {
     Plus: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 }
 
-// リネーム用入力コンポーネント
 function RenameInput({
     initialValue,
     onSubmit,
@@ -104,14 +99,13 @@ function RenameInput({
     const inputRef = useRef<HTMLInputElement>(null)
 
     useEffect(() => {
-        // マウント時に確実にフォーカスを当てる
         const timer = setTimeout(() => {
             if (inputRef.current) {
                 console.log('[RenameInput] Focusing...')
                 inputRef.current.focus()
                 inputRef.current.select()
             }
-        }, 50) // レンダリング完了とイベントループのクリーンアップを待つ
+        }, 50) // 鬯ｯ・ｯ繝ｻ・ｯ郢晢ｽｻ繝ｻ・ｩ鬮ｯ譎｢・ｽ・ｷ郢晢ｽｻ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｯ・ｮ繝ｻ・ｫ郢晢ｽｻ繝ｻ・ｴ鬯ｮ・ｮ隲幢ｽｶ繝ｻ・ｽ繝ｻ・｣驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｬ鬯ｯ・ｯ繝ｻ・ｯ郢晢ｽｻ繝ｻ・ｩ鬮ｯ譎｢・ｽ・ｷ郢晢ｽｻ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｯ・ｮ繝ｻ・ｫ郢晢ｽｻ繝ｻ・ｴ鬯ｮ・ｮ隲幢ｽｶ繝ｻ・ｽ繝ｻ・｣驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｳ鬯ｯ・ｯ繝ｻ・ｯ郢晢ｽｻ繝ｻ・ｩ鬮ｯ譎｢・ｽ・ｷ郢晢ｽｻ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｯ・ｮ繝ｻ・ｫ郢晢ｽｻ繝ｻ・ｰ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｨ鬯ｯ・ｯ繝ｻ・ｲ髫ｰ繝ｻ竏槭・・ｽ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｴ驛｢譎｢・ｽ・ｻ驍ｵ・ｺ繝ｻ・､繝ｻ縺､ﾂ鬯ｯ・ｯ繝ｻ・ｯ郢晢ｽｻ繝ｻ・ｩ鬮ｯ譎｢・ｽ・ｷ郢晢ｽｻ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｯ・ｮ繝ｻ・ｫ郢晢ｽｻ繝ｻ・ｴ鬯ｮ・ｮ隲幢ｽｶ繝ｻ・ｽ繝ｻ・｣驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｪ鬯ｯ・ｯ繝ｻ・ｯ郢晢ｽｻ繝ｻ・ｩ鬮ｯ譎｢・ｽ・ｷ郢晢ｽｻ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｯ・ｮ繝ｻ・ｫ郢晢ｽｻ繝ｻ・ｴ鬯ｮ・ｮ隲幢ｽｶ繝ｻ・ｽ繝ｻ・｣驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｳ鬯ｯ・ｯ繝ｻ・ｯ郢晢ｽｻ繝ｻ・ｩ鬮ｯ譎｢・ｽ・ｷ郢晢ｽｻ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｧ鬯ｯ・ｩ陝ｷ・｢繝ｻ・ｽ繝ｻ・｢鬮ｫ・ｴ髮懶ｽ｣繝ｻ・ｽ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｻ鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｰ鬯ｯ・ｯ繝ｻ・ｯ郢晢ｽｻ繝ｻ・ｮ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｯ鬯ｮ・ｫ繝ｻ・ｶ髯ｷ・ｴ郢晢ｽｻ繝ｻ・ｽ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｸ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｳ鬯ｯ・ｯ繝ｻ・ｮ郢晢ｽｻ繝ｻ・ｯ鬮ｮ荵昴・繝ｻ・ｽ繝ｻ・ｷ鬮ｫ・ｴ繝ｻ・ｯ驕ｶ荳橸ｽ｣・ｹ郢晢ｽｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｡鬯ｯ・ｩ陝ｷ・｢繝ｻ・ｽ繝ｻ・｢鬮ｫ・ｴ髮懶ｽ｣繝ｻ・ｽ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｻ鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｺ鬯ｯ・ｯ繝ｻ・ｩ髯晢ｽｷ繝ｻ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・｢鬯ｮ・ｫ繝ｻ・ｴ鬮ｮ諛ｶ・ｽ・｣郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・｢鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｻ鬯ｯ・ｯ繝ｻ・ｩ髯具ｽｹ郢晢ｽｻ繝ｻ・ｽ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｶ鬯ｯ・ｯ繝ｻ・ｮ郢晢ｽｻ繝ｻ・ｮ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｣驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｰ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・､鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｹ鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｧ鬯ｯ・ｩ陝ｷ・｢繝ｻ・ｽ繝ｻ・｢鬮ｫ・ｴ髮懶ｽ｣繝ｻ・ｽ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｻ鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・､鬯ｯ・ｯ繝ｻ・ｯ郢晢ｽｻ繝ｻ・ｩ鬮ｯ譎｢・ｽ・ｷ郢晢ｽｻ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｯ・ｮ繝ｻ・ｫ郢晢ｽｻ繝ｻ・ｴ鬮｣蛹・ｽｽ・ｳ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ鬯ｮ・ｯ繝ｻ・ｷ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽ鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬯ｯ・ｮ繝ｻ・ｮ髫ｲ蟷｢・ｽ・ｶ郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・｣鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｦ鬯ｯ・ｯ繝ｻ・ｯ郢晢ｽｻ繝ｻ・ｩ鬮ｯ譎｢・ｽ・ｷ郢晢ｽｻ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｯ・ｮ繝ｻ・ｫ郢晢ｽｻ繝ｻ・ｴ鬮｣蛹・ｽｽ・ｳ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ鬯ｮ・ｫ繝ｻ・ｶ髫ｰ謦ｰ・ｽ・ｺ郢晢ｽｻ繝ｻ・ｺ髯区ｻゑｽｽ・･驛｢譎｢・ｽ・ｻ鬯ｮ・ｯ繝ｻ・ｷ郢晢ｽｻ繝ｻ・ｿ鬯ｯ・ｮ繝ｻ・｢繝ｻ縺､ﾂ鬮ｫ・ｴ鬲・ｼ夲ｽｽ・ｽ繝ｻ・ｭ鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｹ鬯ｯ・ｮ繝ｻ・ｫ郢晢ｽｻ繝ｻ・ｴ鬯ｮ・ｮ隲幢ｽｶ繝ｻ・ｽ繝ｻ・｣驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｼ鬯ｯ・ｯ繝ｻ・ｯ郢晢ｽｻ繝ｻ・ｩ鬮ｯ譎｢・ｽ・ｷ郢晢ｽｻ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｯ・ｮ繝ｻ・ｫ郢晢ｽｻ繝ｻ・ｴ鬮ｫ・ｲ繝ｻ・ｰ郢晢ｽｻ繝ｻ・ｹ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｸ鬮ｫ・ｶ陷ｴ繝ｻ・ｽ・ｽ繝ｻ・ｸ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｹ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｲ鬯ｯ・ｯ繝ｻ・ｩ髯晢ｽｷ繝ｻ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・｢鬯ｮ・ｫ繝ｻ・ｴ鬮ｮ諛ｶ・ｽ・｣郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・｢鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｻ鬯ｯ・ｯ繝ｻ・ｯ郢晢ｽｻ繝ｻ・ｩ鬮ｯ譎｢・ｽ・ｷ郢晢ｽｻ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｧ鬯ｯ・ｩ陝ｷ・｢繝ｻ・ｽ繝ｻ・｢鬮ｫ・ｴ髮懶ｽ｣繝ｻ・ｽ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｻ鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｯ鬯ｯ・ｯ繝ｻ・ｯ郢晢ｽｻ繝ｻ・ｩ鬮ｯ譎｢・ｽ・ｷ郢晢ｽｻ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｯ・ｮ繝ｻ・ｫ郢晢ｽｻ繝ｻ・ｴ鬯ｮ・ｮ隲幢ｽｶ繝ｻ・ｽ繝ｻ・｣驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｪ鬯ｯ・ｯ繝ｻ・ｯ郢晢ｽｻ繝ｻ・ｩ鬮ｯ譎｢・ｽ・ｷ郢晢ｽｻ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｯ・ｮ繝ｻ・ｫ郢晢ｽｻ繝ｻ・ｴ鬯ｮ・ｮ隲幢ｽｶ繝ｻ・ｽ繝ｻ・｣驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｼ鬯ｯ・ｯ繝ｻ・ｯ郢晢ｽｻ繝ｻ・ｩ鬮ｯ譎｢・ｽ・ｷ郢晢ｽｻ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｯ・ｮ繝ｻ・ｫ郢晢ｽｻ繝ｻ・ｴ鬯ｮ・ｮ隲幢ｽｶ繝ｻ・ｽ繝ｻ・｣驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｳ鬯ｯ・ｯ繝ｻ・ｯ郢晢ｽｻ繝ｻ・ｩ鬮ｯ譎｢・ｽ・ｷ郢晢ｽｻ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｧ鬯ｯ・ｩ陝ｷ・｢繝ｻ・ｽ繝ｻ・｢鬮ｫ・ｴ髮懶ｽ｣繝ｻ・ｽ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｻ鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｯ・ｯ繝ｻ・ｯ郢晢ｽｻ繝ｻ・ｩ鬮ｯ譎｢・ｽ・ｷ郢晢ｽｻ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｯ・ｮ繝ｻ・ｫ郢晢ｽｻ繝ｻ・ｴ鬮ｫ・ｰ繝ｻ・ｫ郢晢ｽｻ繝ｻ・ｾ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｴ鬯ｯ・ｩ陝ｷ・｢繝ｻ・ｽ繝ｻ・｢鬮ｫ・ｴ髮懶ｽ｣繝ｻ・ｽ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｻ鬯ｯ・ｯ繝ｻ・ｩ髯晢ｽｷ繝ｻ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・｢鬯ｮ・ｫ繝ｻ・ｴ鬮ｮ諛ｶ・ｽ・｣郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・｢鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｻ鬯ｯ・ｯ繝ｻ・ｯ郢晢ｽｻ繝ｻ・ｩ鬮ｯ譎｢・ｽ・ｷ郢晢ｽｻ繝ｻ・｢驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・｢鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｧ鬯ｯ・ｯ繝ｻ・ｯ郢晢ｽｻ繝ｻ・ｮ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｮ鬯ｮ・ｯ陷茨ｽｷ繝ｻ・ｽ繝ｻ・ｹ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｺ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｩ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｸ鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｾ鬯ｯ・ｯ繝ｻ・ｩ髯晢ｽｷ繝ｻ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・｢鬯ｮ・ｫ繝ｻ・ｴ鬮ｮ諛ｶ・ｽ・｣郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・｢鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｻ鬯ｯ・ｯ繝ｻ・ｮ郢晢ｽｻ繝ｻ・ｫ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｨ鬯ｩ蟷｢・ｽ・｢髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽ
         return () => clearTimeout(timer)
     }, [])
 
@@ -154,6 +148,7 @@ export function Sidebar({
     onOpenLibraryModal,
     onOpenLibrary,
     onSwitchLibrary,
+    onRemoveLocalLibraryHistory,
     onSwitchRemoteLibrary,
     onOpenSettings,
     hasActiveLibrary,
@@ -161,8 +156,45 @@ export function Sidebar({
     onDropFileOnFolder,
     onInternalDragStart,
     onInternalDragEnd,
-    itemCounts
+    itemCounts,
+    language = 'ja'
 }: SidebarProps) {
+    const isEnglish = language === 'en'
+    const t = {
+        selectLibrary: isEnglish ? 'Select library...' : 'ライブラリを選択...',
+        search: isEnglish ? 'Search...' : '検索...',
+        createNewLibrary: isEnglish ? 'Create new library...' : '新しいライブラリを作成...',
+        openExistingLibrary: isEnglish ? 'Open existing library...' : '既存のライブラリを開く...',
+        localLibraries: isEnglish ? 'Local Libraries' : 'ローカルライブラリ',
+        remoteLibraries: isEnglish ? 'Remote Libraries' : 'リモートライブラリ',
+        all: isEnglish ? 'All' : 'すべて',
+        uncategorized: isEnglish ? 'Uncategorized' : '未分類',
+        untagged: isEnglish ? 'Untagged' : 'タグなし',
+        recent: isEnglish ? 'Recent' : '最近',
+        random: isEnglish ? 'Random' : 'ランダム',
+        allTags: isEnglish ? 'All Tags' : 'すべてのタグ',
+        trash: isEnglish ? 'Trash' : 'ゴミ箱',
+        folders: isEnglish ? 'Folders' : 'フォルダー',
+        noLibrarySelected: isEnglish ? 'No library selected' : 'ライブラリが選択されていません',
+        createFolder: isEnglish ? 'Create folder' : 'フォルダーを作成',
+        settings: isEnglish ? 'Settings' : '設定',
+        rename: isEnglish ? 'Rename' : '名前を変更',
+        newFolder: isEnglish ? 'New folder' : '新しいフォルダー',
+        newSubfolder: isEnglish ? 'New subfolder' : '新しいサブフォルダー',
+        delete: isEnglish ? 'Delete' : '削除',
+        deleteFolder: isEnglish ? 'Delete folder' : 'フォルダーを削除',
+        deleteFolderMessage: isEnglish ? 'Delete this folder?' : 'このフォルダーを削除しますか？',
+        cancel: isEnglish ? 'Cancel' : 'キャンセル',
+        showAuditLog: isEnglish ? 'Show audit log' : '監査ログを表示',
+        removeFromHistory: isEnglish ? 'Remove from history' : '履歴から削除',
+        removeFromHistoryTitle: isEnglish ? 'Remove from history' : '履歴から削除',
+        removeFromHistoryMessage: isEnglish
+            ? 'from local history?\nLibrary files will not be deleted.'
+            : 'をローカル履歴から削除しますか？\nライブラリファイル自体は削除されません。',
+        remove: isEnglish ? 'Remove' : '削除'
+    }
+    const defaultFolderName = isEnglish ? 'New Folder' : '新しいフォルダー'
+    const toDisplayLibraryName = (name: string) => String(name || '').replace(/\.library$/i, '')
     const [renamingFolderId, setRenamingFolderId] = useState<number | null>(null)
     const [renamingName, setRenamingName] = useState("")
     const [isLibraryMenuOpen, setIsLibraryMenuOpen] = useState(false)
@@ -174,15 +206,14 @@ export function Sidebar({
     const [libraryMenuPos, setLibraryMenuPos] = useState<{ top: number; left: number; width: number } | null>(null)
     const [libContextMenu, setLibContextMenu] = useState<{ x: number; y: number; library: Library } | null>(null)
     const [auditLogLibrary, setAuditLogLibrary] = useState<Library | null>(null)
+    const [libraryToRemoveHistory, setLibraryToRemoveHistory] = useState<Library | null>(null)
     const libraryDropdownRef = useRef<HTMLDivElement>(null)
     const libraryMenuRef = useRef<HTMLDivElement>(null)
     const folderContextMenuRef = useRef<HTMLDivElement>(null)
     const libContextMenuRef = useRef<HTMLDivElement>(null)
 
-    // フォルダーツリーの構築 (メモ化)
     const folderTree = useMemo(() => buildFolderTree(folders), [folders])
 
-    // 位置調整フックの適用
     useFloatingPosition(
         folderContextMenuRef,
         contextMenu?.x || 0,
@@ -226,33 +257,29 @@ export function Sidebar({
         }
     }, [isLibraryMenuOpen])
 
-    const handleCreateClick = async (e: React.MouseEvent) => {
+        const handleCreateClick = async (e: React.MouseEvent) => {
         e.preventDefault()
         try {
-            // ユーザー要望により、選択状態に関わらず常にルートに作成する
-            const parentId = null
-
-            const newFolder = await onCreateFolder("無題", parentId)
+            const newFolder = await onCreateFolder(defaultFolderName, null)
             if (newFolder) {
                 setRenamingFolderId(newFolder.id)
                 setRenamingName(newFolder.name)
             }
         } catch (error) {
-            console.error("Failed to create folder", error)
+            console.error('Failed to create folder', error)
         }
     }
 
     const handleRenameSubmit = (id: number, newName: string) => {
         const trimmed = newName.trim()
         const originalName = folders.find(f => f.id === id)?.name
-        if (trimmed && trimmed !== "無題" && trimmed !== originalName) {
+        if (trimmed && trimmed !== originalName) {
             onRenameFolder(id, trimmed)
         }
         setRenamingFolderId(null)
-        setRenamingName("")
+        setRenamingName('')
     }
 
-    // コンテキストメニュー関連
     const handleContextMenu = (e: React.MouseEvent, folderId: number) => {
         e.preventDefault()
         e.stopPropagation()
@@ -273,28 +300,25 @@ export function Sidebar({
             setRenamingFolderId(folderId)
             setRenamingName(folder.name)
         } else if (action === 'new-folder') {
-            // 兄弟を作成 (同じparentId)
             try {
-                const newFolder = await onCreateFolder("無題", folder.parentId)
+                const newFolder = await onCreateFolder(defaultFolderName, folder.parentId)
                 if (newFolder) {
                     setRenamingFolderId(newFolder.id)
                     setRenamingName(newFolder.name)
                 }
             } catch (error) {
-                console.error("Failed to create sibling folder", error)
+                console.error('Failed to create sibling folder', error)
             }
         } else if (action === 'new-subfolder') {
-            // 子を作成 (parentId = folderId)
             try {
-                // 親を展開
                 setExpandedFolders(prev => new Set(prev).add(folderId))
-                const newFolder = await onCreateFolder("無題", folderId)
+                const newFolder = await onCreateFolder(defaultFolderName, folderId)
                 if (newFolder) {
                     setRenamingFolderId(newFolder.id)
                     setRenamingName(newFolder.name)
                 }
             } catch (error) {
-                console.error("Failed to create subfolder", error)
+                console.error('Failed to create subfolder', error)
             }
         }
     }
@@ -310,7 +334,6 @@ export function Sidebar({
         onFilterChange({ ...filterOptions, filterType: 'all', selectedFolders: newFolders })
     }
 
-    // フォルダーの開閉
     const toggleFolderExpand = (e: React.MouseEvent, genreId: number) => {
         e.stopPropagation()
         setExpandedFolders(prev => {
@@ -324,7 +347,6 @@ export function Sidebar({
         })
     }
 
-    // D&D ハンドラー
     const handleDragStart = (e: React.DragEvent, folderId: number) => {
         onInternalDragStart?.()
         e.stopPropagation()
@@ -333,7 +355,6 @@ export function Sidebar({
         e.dataTransfer.dropEffect = 'move'
         const data = JSON.stringify({ type: 'folder', id: folderId })
         e.dataTransfer.setData('application/json', data)
-        // ブラウザ互換性のためのプレーンテキスト
         e.dataTransfer.setData('text/plain', data)
     }
 
@@ -357,7 +378,6 @@ export function Sidebar({
         e.preventDefault()
         const isFileDrag = e.dataTransfer.types.includes('Files')
 
-        // ファイルドラッグでない場合のみバブリングを止める（グローバルなインポート表示を優先するため）
         if (!isFileDrag) {
             e.stopPropagation()
         }
@@ -366,14 +386,11 @@ export function Sidebar({
         if (draggedFolderId === targetId) return
 
         if (isFileDrag) {
-            // ファイルドラッグの場合は常に「中に入れる」扱いにする
             setDropTarget({ id: targetId, position: 'middle' })
-            // ドロップ効果を copy にする（追加の意味）
             e.dataTransfer.dropEffect = 'copy'
             return
         }
 
-        // 内部ドラッグの場合は move を明示
         e.dataTransfer.dropEffect = 'move'
 
         const position = getDropPosition(e, e.currentTarget as HTMLElement)
@@ -381,14 +398,12 @@ export function Sidebar({
     }
 
     const handleDragLeave = (e: React.DragEvent) => {
-        // 子要素への移動でも発火するので、currentTargetの外に出た場合のみクリアする
         if (e.currentTarget.contains(e.relatedTarget as Node)) {
             return
         }
         setDropTarget(null)
     }
 
-    // IDの正規化と比較（null, undefined, 0, 文字列の混在に対応）
     const normalizeId = (id: any): number | null => {
         if (id === null || id === undefined || id === '' || id === 0) return null
         const num = Number(id)
@@ -399,13 +414,11 @@ export function Sidebar({
         e.preventDefault()
         e.stopPropagation()
 
-        // 常に最新のドロップ位置を使用
         const position = getDropPosition(e, e.currentTarget as HTMLElement)
         const currentDropTarget = { id: targetId, position }
 
         setDropTarget(null)
 
-        // ドラッグ中のIDを取得（ステート優先、バックアップとしてdataTransferも確認）
         let effectiveDraggedId = normalizeId(draggedFolderId)
 
         if (effectiveDraggedId === null) {
@@ -422,7 +435,6 @@ export function Sidebar({
             }
         }
 
-        // ファイルドロップの処理
         if (effectiveDraggedId === null) {
             if (e.dataTransfer.types.includes('Files') && onDropFileOnFolder) {
                 onDropFileOnFolder(targetId, e.dataTransfer.files)
@@ -445,20 +457,15 @@ export function Sidebar({
         if (!targetFolder) return
 
         if (currentDropTarget.position === 'middle') {
-            // 子にする
             newParentId = normalizedTargetId
-            // 末尾に追加（現在の子供の最大orderIndex + 1）
             const children = folders.filter(f => normalizeId(f.parentId) === normalizedTargetId)
             const maxOrder = children.reduce((max, c) => Math.max(max, c.orderIndex || 0), 0)
             newOrderIndex = maxOrder + 100
 
-            // 親フォルダーを展開する
             setExpandedFolders(prev => new Set(prev).add(normalizedTargetId))
         } else {
-            // 兄弟にする
             newParentId = normalizeId(targetFolder.parentId)
 
-            // 兄弟を抽出（正規化したIDで比較）
             const siblings = folders.filter(f =>
                 normalizeId(f.parentId) === newParentId &&
                 normalizeId(f.id) !== effectiveDraggedId
@@ -510,20 +517,16 @@ export function Sidebar({
 
     const handleContainerDragOver = (e: React.DragEvent) => {
         e.preventDefault()
-        // 少なくともサイドバーの上にいる間はドロップ可とする
         if (draggedFolderId !== null) {
             e.dataTransfer.dropEffect = 'move'
         }
     }
 
     const handleContainerDrop = (_e: React.DragEvent) => {
-        // 子要素（renderFolderNode）でキャッチされなかったドロップを処理
-        // 何もせずに dragEnd に任せるか、必要なら末尾への移動などを検討
         console.log('[Sidebar] Container drop (ignored or fallback)')
         setDropTarget(null)
     }
 
-    // 再帰レンダリング関数
     const renderFolderNode = (node: FolderWithChildren) => {
         const isSelected = filterOptions.selectedFolders.includes(node.id)
         const isExpanded = expandedFolders.has(node.id)
@@ -554,7 +557,6 @@ export function Sidebar({
                     onDragLeave={handleDragLeave}
                     onDrop={(e) => handleDrop(e, node.id)}
                 >
-                    {/* 展開トグル（左端） */}
                     <div
                         className="folder-toggle-btn"
                         onClick={(e) => {
@@ -584,7 +586,6 @@ export function Sidebar({
                         </svg>
                     </div>
 
-                    {/* フォルダーアイコン */}
                     <div className="folder-icon">
                         {isExpanded ? <Icons.FolderOpen /> : <Icons.Folder />}
                     </div>
@@ -608,7 +609,6 @@ export function Sidebar({
                     )}
                 </div>
 
-                {/* 子要素（再帰） */}
                 {isExpanded && hasChildren && (
                     <div className="sidebar-sub-folders">
                         {node.children.map(renderFolderNode)}
@@ -653,10 +653,10 @@ export function Sidebar({
                         </span>
                         <span className="library-name">
                             {hasActiveLibrary && activeLibrary
-                                ? activeLibrary.name
+                                ? toDisplayLibraryName(activeLibrary.name)
                                 : activeRemoteLibrary
                                     ? activeRemoteLibrary.name
-                                    : 'ライブラリを選択...'}
+                                    : t.selectLibrary}
                         </span>
                         <svg className={`chevron ${isLibraryMenuOpen ? 'open' : ''} `} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <polyline points="6 9 12 15 18 9"></polyline>
@@ -680,7 +680,7 @@ export function Sidebar({
                                     <circle cx="11" cy="11" r="8"></circle>
                                     <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                                 </svg>
-                                <input type="text" placeholder="検索..." className="library-menu-search" />
+                                <input type="text" placeholder={t.search} className="library-menu-search" />
                                 <button className="close-menu-btn" onClick={() => setIsLibraryMenuOpen(false)}>
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                         <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -702,7 +702,7 @@ export function Sidebar({
                                     <line x1="12" y1="18" x2="12" y2="12"></line>
                                     <line x1="9" y1="15" x2="15" y2="15"></line>
                                 </svg>
-                                <span>新しいライブラリを作成...</span>
+                                <span>{t.createNewLibrary}</span>
                             </button>
 
                             <button
@@ -717,10 +717,10 @@ export function Sidebar({
                                     <line x1="9" y1="13" x2="15" y2="13"></line>
                                     <line x1="12" y1="10" x2="12" y2="16"></line>
                                 </svg>
-                                <span>既存のライブラリを開く...</span>
+                                <span>{t.openExistingLibrary}</span>
                             </button>
 
-                            <div className="library-menu-item-header">ローカルライブラリ</div>
+                            <div className="library-menu-item-header">{t.localLibraries}</div>
                             {libraries.map(lib => (
                                 <button
                                     key={lib.path}
@@ -736,14 +736,14 @@ export function Sidebar({
                                     }}
                                 >
                                     <Icons.Folder />
-                                    <span>{lib.name}</span>
+                                    <span>{toDisplayLibraryName(lib.name)}</span>
                                     {activeLibrary?.path === lib.path && <div className="active-dot" />}
                                 </button>
                             ))}
 
                             {remoteLibraries && remoteLibraries.length > 0 && (
                                 <>
-                                    <div className="library-menu-item-header" style={{ marginTop: '8px' }}>リモートライブラリ</div>
+                                    <div className="library-menu-item-header" style={{ marginTop: '8px' }}>{t.remoteLibraries}</div>
                                     {remoteLibraries.map(lib => (
                                         <button
                                             key={lib.id}
@@ -774,7 +774,7 @@ export function Sidebar({
                             onClick={() => setFilterType('all')}
                         >
                             <Icons.All />
-                            <span>すべて</span>
+                            <span>{t.all}</span>
                             {itemCounts && itemCounts['all'] !== undefined && (
                                 <span className="sidebar-count">{itemCounts['all'].toLocaleString()}</span>
                             )}
@@ -784,7 +784,7 @@ export function Sidebar({
                             onClick={() => setFilterType('uncategorized')}
                         >
                             <Icons.Uncategorized />
-                            <span>未分類</span>
+                            <span>{t.uncategorized}</span>
                             {itemCounts && itemCounts['uncategorized'] !== undefined && (
                                 <span className="sidebar-count">{itemCounts['uncategorized'].toLocaleString()}</span>
                             )}
@@ -794,7 +794,7 @@ export function Sidebar({
                             onClick={() => setFilterType('untagged')}
                         >
                             <Icons.Untagged />
-                            <span>タグなし</span>
+                            <span>{t.untagged}</span>
                             {itemCounts && itemCounts['untagged'] !== undefined && (
                                 <span className="sidebar-count">{itemCounts['untagged'].toLocaleString()}</span>
                             )}
@@ -804,21 +804,21 @@ export function Sidebar({
                             onClick={() => setFilterType('recent')}
                         >
                             <Icons.Recent />
-                            <span>最近使用</span>
+                            <span>{t.recent}</span>
                         </div>
                         <div
                             className={`sidebar-nav-item ${filterOptions.filterType === 'random' ? 'active' : ''}`}
                             onClick={() => setFilterType('random')}
                         >
                             <Icons.Random />
-                            <span>ランダム</span>
+                            <span>{t.random}</span>
                         </div>
                         <div
                             className={`sidebar-nav-item ${filterOptions.filterType === 'tag_manager' ? 'active' : ''}`}
                             onClick={() => setFilterType('tag_manager')}
                         >
                             <Icons.Tags />
-                            <span>すべてのタグ</span>
+                            <span>{t.allTags}</span>
                             {itemCounts && itemCounts['tags'] !== undefined && (
                                 <span className="sidebar-count">{itemCounts['tags'].toLocaleString()}</span>
                             )}
@@ -828,7 +828,7 @@ export function Sidebar({
                             onClick={() => setFilterType('trash')}
                         >
                             <Icons.Trash />
-                            <span>ゴミ箱</span>
+                            <span>{t.trash}</span>
                             {itemCounts && itemCounts['trash'] !== undefined && (
                                 <span className="sidebar-count">{itemCounts['trash'].toLocaleString()}</span>
                             )}
@@ -839,11 +839,11 @@ export function Sidebar({
                 <div className="sidebar-section">
                     <div className="flex justify-between items-center px-2 mb-1">
                         <div className="sidebar-section-header">
-                            <span>フォルダー</span>
+                            <span>{t.folders}</span>
                             <button
                                 className="sidebar-action-btn"
                                 onClick={handleCreateClick}
-                                title={(!hasActiveLibrary && !activeRemoteLibrary) ? "ライブラリが選択されていません" : "フォルダーを作成"}
+                                title={(!hasActiveLibrary && !activeRemoteLibrary) ? t.noLibrarySelected : t.createFolder}
                                 disabled={!hasActiveLibrary && !activeRemoteLibrary}
                             >
                                 +
@@ -858,16 +858,15 @@ export function Sidebar({
             </div>
 
             <div className="sidebar-footer">
-                <button className="sidebar-settings-btn" onClick={onOpenSettings} title="設定">
+                <button className="sidebar-settings-btn" onClick={onOpenSettings} title={t.settings}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M12.22 2h-0.44a2 2 0 0 0-2 2v0.18a2 2 0 0 1-1 1.73l-0.43 0.25a2 2 0 0 1-2 0l-0.15-0.08a2 2 0 0 0-2.73 0.73l-0.22 0.38a2 2 0 0 0 0.73 2.73l0.15 0.1a2 2 0 0 1 1 1.72v0.51a2 2 0 0 1-1 1.74l-0.15 0.09a2 2 0 0 0-0.73 2.73l-0.22-0.38a2 2 0 0 0-2.73-0.73l-0.15 0.08a2 2 0 0 1-2 0l-0.43-0.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
                         <circle cx="12" cy="12" r="3"></circle>
                     </svg>
-                    <span>設定</span>
+                    <span>{t.settings}</span>
                 </button>
             </div>
 
-            {/* コンテキストメニュー */}
             {
                 contextMenu && createPortal(
                     <div
@@ -876,17 +875,17 @@ export function Sidebar({
                         style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 99999 }}
                     >
                         <div className="context-menu-item" onClick={() => handleContextAction('rename')}>
-                            名前を変更
+                            {t.rename}
                         </div>
                         <div className="context-menu-item" onClick={() => handleContextAction('new-folder')}>
-                            新しいフォルダーを作成
+                            {t.newFolder}
                         </div>
                         <div className="context-menu-item" onClick={() => handleContextAction('new-subfolder')}>
-                            新しいサブフォルダーを作成
+                            {t.newSubfolder}
                         </div>
                         <div className="context-menu-divider"></div>
                         <div className="context-menu-item delete" onClick={() => handleContextAction('delete')}>
-                            削除
+                            {t.delete}
                         </div>
                     </div>,
                     document.body
@@ -895,10 +894,10 @@ export function Sidebar({
             {
                 folderToDelete !== null && (
                     <ConfirmModal
-                        title="フォルダーを削除"
-                        message="このフォルダーを削除してもよろしいですか？"
-                        confirmLabel="削除"
-                        cancelLabel="キャンセル"
+                        title={t.deleteFolder}
+                        message={t.deleteFolderMessage}
+                        confirmLabel={t.delete}
+                        cancelLabel={t.cancel}
                         isDestructive={true}
                         onConfirm={async () => {
                             const id = folderToDelete
@@ -910,7 +909,6 @@ export function Sidebar({
                 )
             }
 
-            {/* ライブラリコンテキストメニュー */}
             {
                 libContextMenu && createPortal(
                     <div
@@ -923,19 +921,46 @@ export function Sidebar({
                             setLibContextMenu(null)
                             setIsLibraryMenuOpen(false)
                         }}>
-                            監査ログを表示
+                            {t.showAuditLog}
+                        </div>
+                        <div className="context-menu-divider"></div>
+                        <div
+                            className={`context-menu-item ${activeLibrary?.path === libContextMenu.library.path ? 'disabled' : 'delete'}`}
+                            onClick={() => {
+                                if (activeLibrary?.path === libContextMenu.library.path) return
+                                setLibraryToRemoveHistory(libContextMenu.library)
+                                setLibContextMenu(null)
+                            }}
+                            style={activeLibrary?.path === libContextMenu.library.path ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+                        >
+                            {t.removeFromHistory}
                         </div>
                     </div>,
                     document.body
                 )
             }
 
-            {/* 監査ログモーダル */}
+            {libraryToRemoveHistory && (
+                <ConfirmModal
+                    title={t.removeFromHistoryTitle}
+                    message={`"${toDisplayLibraryName(libraryToRemoveHistory.name)}" ${t.removeFromHistoryMessage}`}
+                    confirmLabel={t.remove}
+                    cancelLabel={t.cancel}
+                    isDestructive={true}
+                    onConfirm={async () => {
+                        const target = libraryToRemoveHistory
+                        setLibraryToRemoveHistory(null)
+                        await onRemoveLocalLibraryHistory(target.path)
+                    }}
+                    onCancel={() => setLibraryToRemoveHistory(null)}
+                />
+            )}
+
             {
                 auditLogLibrary && (
                     <AuditLogModal
                         libraryPath={auditLogLibrary.path}
-                        libraryName={auditLogLibrary.name}
+                        libraryName={toDisplayLibraryName(auditLogLibrary.name)}
                         onClose={() => setAuditLogLibrary(null)}
                     />
                 )
@@ -943,3 +968,4 @@ export function Sidebar({
         </div >
     )
 }
+

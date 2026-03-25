@@ -4,7 +4,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.7);
+    background: color-mix(in srgb, #000, transparent 30%);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -14,27 +14,27 @@
 
 .audio-settings-modal {
     width: 640px;
-    background: #18191c;
+    background: var(--bg-dark);
     border-radius: 16px;
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--border);
 }
 
 .audio-settings-header {
     padding: 18px 24px;
-    background: #1e1f22;
+    background: var(--bg-sidebar);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid var(--border);
 }
 
 .audio-settings-header h3 {
     margin: 0;
-    color: #ffffff;
+    color: var(--text-main);
     font-size: 15px;
     letter-spacing: 0.5px;
     text-transform: uppercase;
@@ -48,12 +48,12 @@
 }
 
 .visualizer-container {
-    background: #000;
+    background: color-mix(in srgb, var(--bg-main), #000 25%);
     padding: 10px 24px;
     display: flex;
     align-items: center;
     gap: 20px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid var(--border);
 }
 
 .visualizer-container canvas {
@@ -65,14 +65,14 @@
     flex-direction: column;
     align-items: center;
     gap: 6px;
-    color: #949ba4;
+    color: var(--text-muted);
     font-size: 11px;
     font-weight: 600;
 }
 
 .audio-tabs {
     display: flex;
-    background: #1e1f22;
+    background: var(--bg-sidebar);
     padding: 2px;
 }
 
@@ -81,7 +81,7 @@
     padding: 12px;
     border: none;
     background: none;
-    color: #949ba4;
+    color: var(--text-muted);
     font-size: 11px;
     font-weight: 700;
     cursor: pointer;
@@ -90,7 +90,7 @@
 }
 
 .tab-btn:hover {
-    color: #fff;
+    color: var(--text-main);
 }
 
 .tab-btn.active {
@@ -103,7 +103,7 @@
     padding: 24px;
     height: 320px;
     overflow-y: auto;
-    background: #18191c;
+    background: var(--bg-dark);
 }
 
 .tab-content.disabled {
@@ -124,7 +124,7 @@
     align-items: center;
     gap: 12px;
     font-weight: 600;
-    color: #fff;
+    color: var(--text-main);
     cursor: pointer;
 }
 
@@ -138,7 +138,7 @@
     display: flex;
     gap: 12px;
     height: 200px;
-    background: rgba(0, 0, 0, 0.2);
+    background: color-mix(in srgb, var(--bg-main), #000 20%);
     padding: 16px;
     border-radius: 12px;
 }
@@ -159,7 +159,7 @@
 
 .freq-label {
     font-size: 10px;
-    color: #555;
+    color: var(--text-muted);
     font-weight: bold;
 }
 
@@ -211,14 +211,14 @@
 
 .setting-item span {
     font-size: 12px;
-    color: #949ba4;
+    color: var(--text-muted);
     font-weight: 600;
 }
 
 .setting-item input[type="text"] {
-    background: #2b2d31;
-    border: 1px solid #333;
-    color: #fff;
+    background: var(--bg-sidebar);
+    border: 1px solid var(--border);
+    color: var(--text-main);
     padding: 8px 12px;
     border-radius: 6px;
     font-size: 13px;
@@ -230,8 +230,8 @@
 
 .footer-controls {
     padding: 16px 24px;
-    background: #1e1f22;
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    background: var(--bg-sidebar);
+    border-top: 1px solid var(--border);
 }
 
 .master-gain-full {
@@ -243,7 +243,7 @@
 .master-gain-full span {
     font-size: 12px;
     font-weight: 700;
-    color: #fff;
+    color: var(--text-main);
 }
 
 .master-gain-full input {
@@ -271,7 +271,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: #333;
+    background-color: var(--bg-hover);
     transition: .4s;
 }
 
@@ -282,7 +282,7 @@
     width: 14px;
     left: 3px;
     bottom: 3px;
-    background-color: white;
+    background-color: var(--text-main);
     transition: .4s;
 }
 
@@ -306,10 +306,10 @@ input:checked+.slider:before {
     border-radius: 50%;
 }
 
-select {
-    background: #2b2d31;
-    color: #fff;
-    border: 1px solid #333;
+.audio-settings-modal select {
+    background: var(--bg-sidebar);
+    color: var(--text-main);
+    border: 1px solid var(--border);
     padding: 6px 10px;
     border-radius: 4px;
     font-size: 12px;
@@ -318,13 +318,13 @@ select {
 .close-btn {
     background: none;
     border: none;
-    color: #949ba4;
+    color: var(--text-muted);
     cursor: pointer;
     border-radius: 4px;
     padding: 4px;
 }
 
 .close-btn:hover {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-main);
+    background: var(--bg-hover);
 }

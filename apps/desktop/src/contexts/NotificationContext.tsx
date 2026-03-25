@@ -15,7 +15,7 @@ interface NotificationContextType {
     notifications: Notification[]
     addNotification: (notification: Omit<Notification, 'id'>) => string
     removeNotification: (id: string) => void
-    updateProgress: (id: string, progress: number) => void
+    updateProgress: (id: string, progress: number, message?: string) => void
     clearNotifications: () => void
 }
 
@@ -60,9 +60,15 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
         return id
     }, [removeNotification])
 
-    const updateProgress = useCallback((id: string, progress: number) => {
+    const updateProgress = useCallback((id: string, progress: number, message?: string) => {
         setNotifications(prev => prev.map(n =>
-            n.id === id ? { ...n, progress } : n
+            n.id === id
+                ? {
+                    ...n,
+                    progress,
+                    ...(typeof message === 'string' ? { message } : {})
+                }
+                : n
         ))
     }, [])
 

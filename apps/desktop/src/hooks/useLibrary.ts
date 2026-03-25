@@ -26,6 +26,7 @@ export function useLibrary() {
     // Keep full fetch until list/filter/folder features are fully server-paginated.
     const FULL_FETCH_LIMIT = 100000
     const loadingRef = useRef(false) // Prevent concurrent loads
+    const loadRequestSeq = useRef(0)
     const [filterOptions, setFilterOptions] = useState<FilterOptions>({
         searchQuery: '',
         searchTargets: {
@@ -279,33 +280,45 @@ export function useLibrary() {
     }, [myUserToken])
 
     // Media file loading
-    const loadMediaFiles = useCallback(async (reset = true, _silent = false) => {
+    const loadMediaFiles = useCallback(async (reset = true, silent = false) => {
         if (loadingRef.current) return
 
         // In full-fetch compatibility mode, incremental paging is disabled.
         if (!reset) return
 
         loadingRef.current = true
+        const requestSeq = ++loadRequestSeq.current
         const startTime = performance.now()
+        if (!silent) {
+            setLoading(true)
+            setLoadingProgress(5)
+        }
 
         try {
             // Wait for user token if accessing a remote library
             if (activeRemoteLibrary) {
                 if (!isUserTokenLoaded) {
                     loadingRef.current = false
-                    setLoading(false)
+                    if (!silent) {
+                        setLoading(false)
+                        setLoadingProgress(0)
+                    }
                     return
                 }
                 if (!myUserToken) {
                     console.warn('[loadMediaFiles] User token is empty. Skipping request.')
                     loadingRef.current = false
-                    setLoading(false)
+                    if (!silent) {
+                        setLoading(false)
+                        setLoadingProgress(0)
+                    }
                     return
                 }
             }
 
             const targetPage = 1
             const result = await api.getMediaFiles(targetPage, FULL_FETCH_LIMIT, filterOptions)
+            if (requestSeq !== loadRequestSeq.current) return
 
             let newFiles = Array.isArray(result) ? result : (result.media || [])
 
@@ -318,6 +331,9 @@ export function useLibrary() {
 
             setPage(1)
             setHasMore(false)
+            if (!silent) {
+                setLoadingProgress(95)
+            }
 
             // Measure time
             const endTime = performance.now()
@@ -327,8 +343,13 @@ export function useLibrary() {
             console.error('Failed to load media files:', error)
             // Do not re-throw if it's just a background fetch failing, but maybe notify...
         } finally {
-            loadingRef.current = false
-            setLoading(false)
+            if (requestSeq === loadRequestSeq.current) {
+                loadingRef.current = false
+                if (!silent) {
+                    setLoading(false)
+                    setLoadingProgress(0)
+                }
+            }
         }
     }, [activeRemoteLibrary, activeLibrary, transformRemoteMedia, myUserToken, isUserTokenLoaded, addNotification, filterOptions])
 
@@ -740,7 +761,7 @@ export function useLibrary() {
     }, [])
 
     // メディアインポート
-    const importMedia = useCallback(async (filePaths: string[]) => {
+    const importMedia = useCallback(async (filePaths: string[], options?: { deleteSource?: boolean; importSource?: string }) => {
         if (filePaths.length === 0) return
 
         setLoading(true)
@@ -767,7 +788,7 @@ export function useLibrary() {
                 return res.results || []
             }
 
-            const importedFiles = await api.importMedia(filePaths)
+            const importedFiles = await (api.importMedia as any)(filePaths, options)
             removeNotification(notificationId)
             addNotification({ type: 'success', title: 'インポート完了', message: `${filePaths.length}個のファイルを追加しました。` })
             await loadMediaFiles()
@@ -886,6 +907,16 @@ export function useLibrary() {
         }
 
         let result = [...mediaFiles]
+        const selectedFolderSet = new Set(filterOptions.selectedFolders)
+        const excludedFolderSet = new Set(filterOptions.excludedFolders)
+        const selectedRatingSet = new Set(filterOptions.selectedRatings)
+        const excludedRatingSet = new Set(filterOptions.excludedRatings)
+        const selectedExtensionSet = new Set(filterOptions.selectedExtensions)
+        const excludedExtensionSet = new Set(filterOptions.excludedExtensions)
+        const selectedTagSet = new Set(filterOptions.selectedTags)
+        const excludedTagSet = new Set(filterOptions.excludedTags)
+        const selectedArtistSet = new Set(filterOptions.selectedArtists)
+        const excludedArtistSet = new Set(filterOptions.excludedArtists)
 
         // 基本フィルター (Trash以外はis_deletedを除外)
         if (filterOptions.filterType === 'trash') {
@@ -994,7 +1025,7 @@ export function useLibrary() {
             } else {
                 // OR: いずれかのフォルダーを含む
                 result = result.filter(m =>
-                    m.folders?.some(g => filterOptions.selectedFolders.includes(g.id))
+                    m.folders?.some(g => selectedFolderSet.has(g.id))
                 )
             }
         }
@@ -1004,7 +1035,7 @@ export function useLibrary() {
         // フォルダー除外フィルター
         if (filterOptions.excludedFolders && filterOptions.excludedFolders.length > 0) {
             result = result.filter(m =>
-                !m.folders?.some(g => filterOptions.excludedFolders.includes(g.id))
+                !m.folders?.some(g => excludedFolderSet.has(g.id))
             )
         }
 
@@ -1015,13 +1046,13 @@ export function useLibrary() {
                 const rating = m.rating || 0
 
                 // 除外チェック
-                if (filterOptions.excludedRatings?.includes(rating)) {
+                if (excludedRatingSet.has(rating)) {
                     return false
                 }
 
                 // 選択チェック (選択されているものがある場合のみ)
                 if (filterOptions.selectedRatings?.length > 0) {
-                    return filterOptions.selectedRatings.includes(rating)
+                    return selectedRatingSet.has(rating)
                 }
 
                 return true
@@ -1035,13 +1066,13 @@ export function useLibrary() {
                 const ext = m.file_name.split('.').pop()?.toLowerCase() || ''
 
                 // 除外チェック
-                if (filterOptions.excludedExtensions.includes(ext)) {
+                if (excludedExtensionSet.has(ext)) {
                     return false
                 }
 
                 // 選択チェック (選択されているものがある場合のみ)
                 if (filterOptions.selectedExtensions.length > 0) {
-                    return filterOptions.selectedExtensions.includes(ext)
+                    return selectedExtensionSet.has(ext)
                 }
 
                 return true
@@ -1060,7 +1091,7 @@ export function useLibrary() {
             } else {
                 // OR: いずれかのタグを含む
                 result = result.filter(m =>
-                    m.tags?.some(t => filterOptions.selectedTags.includes(t.id))
+                    m.tags?.some(t => selectedTagSet.has(t.id))
                 )
             }
         }
@@ -1068,7 +1099,7 @@ export function useLibrary() {
         // タグ除外フィルター
         if (filterOptions.excludedTags.length > 0) {
             result = result.filter(m =>
-                !m.tags?.some(t => filterOptions.excludedTags.includes(t.id))
+                !m.tags?.some(t => excludedTagSet.has(t.id))
             )
         }
         // 投稿者フィルター
@@ -1090,7 +1121,7 @@ export function useLibrary() {
                 // 除外チェック
                 if (filterOptions.excludedArtists.length > 0) {
                     // 除外リストにあるアーティストが1つでも含まれていれば除外
-                    if (artists.some(a => filterOptions.excludedArtists.includes(a))) {
+                    if (artists.some(a => excludedArtistSet.has(a))) {
                         return false
                     }
                 }
@@ -1098,7 +1129,7 @@ export function useLibrary() {
                 // 選択チェック (選択されているものがある場合のみ)
                 if (filterOptions.selectedArtists.length > 0) {
                     // 選択リストにあるアーティストが1つでも含まれていれば許可
-                    return artists.some(a => filterOptions.selectedArtists.includes(a))
+                    return artists.some(a => selectedArtistSet.has(a))
                 }
 
                 return true
@@ -1113,26 +1144,33 @@ export function useLibrary() {
             result = result.filter(m => (m.duration || 0) <= filterOptions.durationMax!)
         }
 
-        if (filterOptions.durationMax !== null && filterOptions.durationMax !== undefined) {
-            result = result.filter(m => (m.duration || 0) <= filterOptions.durationMax!)
-        }
-
         // 変更日フィルター
         if (filterOptions.dateModifiedMin || filterOptions.dateModifiedMax) {
+            const minModifiedDate = filterOptions.dateModifiedMin
+                ? (() => {
+                    const d = new Date(filterOptions.dateModifiedMin)
+                    d.setHours(0, 0, 0, 0)
+                    return d.getTime()
+                })()
+                : null
+            const maxModifiedDate = filterOptions.dateModifiedMax
+                ? (() => {
+                    const d = new Date(filterOptions.dateModifiedMax)
+                    d.setHours(23, 59, 59, 999)
+                    return d.getTime()
+                })()
+                : null
+
             result = result.filter(m => {
                 if (!m.modified_date) return false
                 const modDate = new Date(m.modified_date).getTime()
 
-                if (filterOptions.dateModifiedMin) {
-                    const minDate = new Date(filterOptions.dateModifiedMin)
-                    minDate.setHours(0, 0, 0, 0)
-                    if (modDate < minDate.getTime()) return false
+                if (minModifiedDate !== null) {
+                    if (modDate < minModifiedDate) return false
                 }
 
-                if (filterOptions.dateModifiedMax) {
-                    const maxDate = new Date(filterOptions.dateModifiedMax)
-                    maxDate.setHours(23, 59, 59, 999)
-                    if (modDate > maxDate.getTime()) return false
+                if (maxModifiedDate !== null) {
+                    if (modDate > maxModifiedDate) return false
                 }
 
                 return true
@@ -1152,48 +1190,57 @@ export function useLibrary() {
             return shuffleArray(result, randomSeed)
         }
 
-        result.sort((a, b) => {
-            let comparison = 0
+        const sortDirection = filterOptions.sortDirection === 'asc' ? 1 : -1
+        const decorated = result.map((item) => {
+            let key: string | number
             switch (effectiveSortOrder) {
                 case 'name':
-                    comparison = a.file_name.localeCompare(b.file_name)
+                    key = item.file_name
                     break
                 case 'date':
-                    comparison = new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                    key = new Date(item.created_at).getTime()
                     break
                 case 'size':
-                    comparison = (a.file_size || 0) - (b.file_size || 0)
+                    key = item.file_size || 0
                     break
                 case 'duration':
-                    comparison = (a.duration || 0) - (b.duration || 0)
+                    key = item.duration || 0
                     break
                 case 'last_played':
-                    const dateA = a.last_played_at ? new Date(a.last_played_at).getTime() : 0
-                    const dateB = b.last_played_at ? new Date(b.last_played_at).getTime() : 0
-                    comparison = dateA - dateB
+                    key = item.last_played_at ? new Date(item.last_played_at).getTime() : 0
                     break
                 case 'rating':
-                    comparison = (a.rating || 0) - (b.rating || 0)
+                    key = item.rating || 0
                     break
                 case 'modified':
-                    const modA = a.modified_date ? new Date(a.modified_date).getTime() : 0
-                    const modB = b.modified_date ? new Date(b.modified_date).getTime() : 0
-                    comparison = modA - modB
+                    key = item.modified_date ? new Date(item.modified_date).getTime() : 0
                     break
                 case 'artist':
-                    const artistA = a.artist || (a.artists && a.artists[0]) || ''
-                    const artistB = b.artist || (b.artists && b.artists[0]) || ''
-                    comparison = artistA.toLocaleLowerCase().localeCompare(artistB.toLocaleLowerCase())
+                    key = (item.artist || (item.artists && item.artists[0]) || '').toLocaleLowerCase()
                     break
                 case 'tags':
-                    const tagsA = (a.tags || []).map(t => t.name).sort().join(', ')
-                    const tagsB = (b.tags || []).map(t => t.name).sort().join(', ')
-                    comparison = tagsA.localeCompare(tagsB, 'ja')
+                    key = (item.tags || []).map(t => t.name).sort().join(', ')
                     break
-
+                default:
+                    key = item.file_name
+                    break
             }
-            return filterOptions.sortDirection === 'asc' ? comparison : -comparison
+            return { item, key }
         })
+
+        decorated.sort((a, b) => {
+            let comparison = 0
+            if (typeof a.key === 'number' && typeof b.key === 'number') {
+                comparison = a.key - b.key
+            } else if (effectiveSortOrder === 'tags') {
+                comparison = String(a.key).localeCompare(String(b.key), 'ja')
+            } else {
+                comparison = String(a.key).localeCompare(String(b.key))
+            }
+            return comparison * sortDirection
+        })
+
+        result = decorated.map(entry => entry.item)
 
         return result
     }, [mediaFiles, filterOptions, randomSeed])
@@ -1323,6 +1370,35 @@ export function useLibrary() {
             // useEffectにより自動リロード
         })
     }, [activeLibrary, activeRemoteLibrary])
+
+    const removeLocalLibraryHistory = useCallback(async (libraryPath: string) => {
+        const normalizedTarget = String(libraryPath || '').trim().replace(/[\\\/]+$/, '')
+        if (!normalizedTarget) return
+        try {
+            const config = await api.getClientConfig()
+            const currentLocalLibraries = Array.isArray((config as any)?.localLibraries)
+                ? (config as any).localLibraries
+                : []
+            const nextLocalLibraries = currentLocalLibraries
+                .filter((entry: any) => {
+                    const pathValue = String(entry?.path || '').trim().replace(/[\\\/]+$/, '')
+                    return pathValue && pathValue !== normalizedTarget
+                })
+                .map((entry: any) => ({
+                    name: String(entry?.name || '').trim() || String(entry?.path || '').split(/[\\\/]/).pop() || '',
+                    path: String(entry?.path || '').trim().replace(/[\\\/]+$/, ''),
+                }))
+                .filter((entry: any) => entry.path)
+
+            await api.updateClientConfig({ localLibraries: nextLocalLibraries } as any)
+            setLibraries(nextLocalLibraries)
+        } catch (error) {
+            console.error('Failed to remove local library history:', error)
+            setLibraries((prev) =>
+                prev.filter((entry) => String(entry?.path || '').trim().replace(/[\\\/]+$/, '') !== normalizedTarget),
+            )
+        }
+    }, [])
 
     // ライブラリ作成
     const createLibrary = useCallback(async (name: string, parentPath: string) => {
@@ -1473,6 +1549,7 @@ export function useLibrary() {
         activeRemoteLibrary,
         switchToRemoteLibrary,
         switchToLocalLibrary,
+        removeLocalLibraryHistory,
         openLibrary,
         myUserToken,
         updateDescription,
@@ -1520,7 +1597,7 @@ export function useLibrary() {
         moveFilesToTrash, restoreFilesFromTrash, deleteFilesPermanently,
         updateLastPlayed, importMedia, updateRating, renameMedia, updateArtist, libraryStats,
         loadMediaFiles, loadFolders, renameFolder, activeRemoteLibrary, switchToRemoteLibrary,
-        switchToLocalLibrary, openLibrary, myUserToken, updateDescription, updateUrl,
+        switchToLocalLibrary, removeLocalLibraryHistory, openLibrary, myUserToken, updateDescription, updateUrl,
         page, hasMore, loadingTime
     ])
 }

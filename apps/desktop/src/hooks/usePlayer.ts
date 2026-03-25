@@ -120,7 +120,31 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
     const videoRef = useRef<HTMLVideoElement>(null)
     const audioRef = useRef<HTMLAudioElement>(null)
     const containerRef = useRef<HTMLDivElement>(null)
+    const blockFullscreenUntilRef = useRef(0)
     const playPromiseRef = useRef<Promise<void> | null>(null)
+
+    const isPlayInterruptedError = (err: unknown): boolean => {
+        const anyErr = err as any
+        const name = String(anyErr?.name || '')
+        const message = String(anyErr?.message || '')
+        return name === 'AbortError' || message.includes('play() request was interrupted')
+    }
+
+    const waitCurrentPlayPromiseSafely = async (): Promise<void> => {
+        const pending = playPromiseRef.current
+        if (!pending) return
+        try {
+            await pending
+        } catch (err) {
+            if (!isPlayInterruptedError(err)) {
+                throw err
+            }
+        } finally {
+            if (playPromiseRef.current === pending) {
+                playPromiseRef.current = null
+            }
+        }
+    }
 
     // Refs for callback access inside MPV events
     const onNextRef = useRef(onNext)
@@ -166,25 +190,28 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
         try {
             if (mediaElement.paused) {
                 // 既存のplay()呼び出しが完了するのを待つ
-                if (playPromiseRef.current) {
-                    await playPromiseRef.current
-                }
-                playPromiseRef.current = mediaElement.play()
-                await playPromiseRef.current
-                playPromiseRef.current = null
+                await waitCurrentPlayPromiseSafely()
+                const nextPlayPromise = mediaElement.play()
+                playPromiseRef.current = nextPlayPromise
+                await nextPlayPromise
                 setIsPlaying(true)
             } else {
                 // 再生中の場合は一時停止
                 if (playPromiseRef.current) {
-                    await playPromiseRef.current
+                    void playPromiseRef.current.catch(() => { })
                     playPromiseRef.current = null
                 }
                 mediaElement.pause()
                 setIsPlaying(false)
             }
         } catch (err) {
-            console.error('Toggle play failed:', err)
-            playPromiseRef.current = null
+            if (!isPlayInterruptedError(err)) {
+                console.error('Toggle play failed:', err)
+            }
+        } finally {
+            if (mediaElement.paused) {
+                playPromiseRef.current = null
+            }
         }
     }
 
@@ -207,14 +234,13 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
 
         try {
             // 進行中のplay()を待つ
-            if (playPromiseRef.current) {
-                await playPromiseRef.current
-                playPromiseRef.current = null
-            }
+            await waitCurrentPlayPromiseSafely()
             media.currentTime = time
             setCurrentTime(time)
         } catch (err) {
-            console.error('Seek failed:', err)
+            if (!isPlayInterruptedError(err)) {
+                console.error('Seek failed:', err)
+            }
         }
     }
 
@@ -309,6 +335,7 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
 
     // フルスクリーン切り替え
     const toggleFullscreen = () => {
+        if (Date.now() < blockFullscreenUntilRef.current) return
         if (!document.fullscreenElement) {
             containerRef.current?.requestFullscreen().catch(err => {
                 console.error(`Error attempting to enable fullscreen: ${err.message}`)
@@ -525,11 +552,10 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
         try {
             if (document.pictureInPictureElement) {
                 await document.exitPictureInPicture()
-            } else if (media.requestPictureInPicture) {
-                if (media.readyState < 1) {
-                    console.log('Waiting for metadata before PiP...')
-                    return
-                }
+                return
+            }
+            if (media.readyState < 1) return
+            if (media.requestPictureInPicture) {
                 await media.requestPictureInPicture()
             }
         } catch (err) {
@@ -537,7 +563,7 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
         }
     }
 
-    // PiPイベントリスナー
+    // PiP event listeners
     useEffect(() => {
         const media = videoRef.current
         if (!media) return
@@ -545,10 +571,8 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
         const handleEnterPiP = () => setIsPiP(true)
         const handleLeavePiP = () => {
             setIsPiP(false)
-            // PiP終了時にウィンドウへフォーカス＆最前面化
-            // 型定義の反映ラグ回避のため any キャスト
             const appApi = api as any
-            if (appApi && appApi.focusWindow) {
+            if (appApi?.focusWindow) {
                 appApi.focusWindow().catch((err: any) => console.error('Failed to focus window:', err))
             }
         }
@@ -618,6 +642,24 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
         const handleNextAction = () => {
             if (hasNext && onNext) onNext()
         }
+        const skipBy = (deltaSeconds: number) => {
+            const mediaElement = videoRef.current || audioRef.current
+            if (!mediaElement) return
+            const durationSafe = Number.isFinite(mediaElement.duration) ? mediaElement.duration : Number.MAX_SAFE_INTEGER
+            const target = Math.max(0, Math.min(durationSafe, mediaElement.currentTime + deltaSeconds))
+            mediaElement.currentTime = target
+            setCurrentTime(target)
+        }
+        const handleSeekBackwardAction = (details: MediaSessionActionDetails) => {
+            const offset = Number(details?.seekOffset)
+            const seconds = Number.isFinite(offset) && offset > 0 ? offset : 10
+            skipBy(-seconds)
+        }
+        const handleSeekForwardAction = (details: MediaSessionActionDetails) => {
+            const offset = Number(details?.seekOffset)
+            const seconds = Number.isFinite(offset) && offset > 0 ? offset : 10
+            skipBy(seconds)
+        }
 
         const handleSeekTo = (details: MediaSessionActionDetails) => {
             if (details.seekTime !== undefined) {
@@ -631,15 +673,17 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
             navigator.mediaSession.setActionHandler('pause', handlePlayPause)
             navigator.mediaSession.setActionHandler('seekto', handleSeekTo)
 
-            navigator.mediaSession.setActionHandler('seekbackward', null)
-            navigator.mediaSession.setActionHandler('seekforward', null)
-            navigator.mediaSession.setActionHandler('previoustrack', null)
-            navigator.mediaSession.setActionHandler('nexttrack', null)
-
-            // Determine controls based on availability (Skip mode removed)
-            // Determine controls based on availability (Skip mode removed)
-            navigator.mediaSession.setActionHandler('previoustrack', handlePrevAction)
-            navigator.mediaSession.setActionHandler('nexttrack', handleNextAction)
+            if (pipControlMode === 'skip') {
+                navigator.mediaSession.setActionHandler('seekbackward', handleSeekBackwardAction)
+                navigator.mediaSession.setActionHandler('seekforward', handleSeekForwardAction)
+                navigator.mediaSession.setActionHandler('previoustrack', null)
+                navigator.mediaSession.setActionHandler('nexttrack', null)
+            } else {
+                navigator.mediaSession.setActionHandler('seekbackward', null)
+                navigator.mediaSession.setActionHandler('seekforward', null)
+                navigator.mediaSession.setActionHandler('previoustrack', handlePrevAction)
+                navigator.mediaSession.setActionHandler('nexttrack', handleNextAction)
+            }
 
         } catch (e) {
             console.error('[usePlayer] Failed to set media session handlers:', e)
@@ -715,6 +759,11 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
             media.removeEventListener('timeupdate', updateBuffered)
         }
     }, [videoRef.current, audioRef.current, isMpv])
+
+    useEffect(() => {
+        // Guard against accidental fullscreen trigger while switching from library to player.
+        blockFullscreenUntilRef.current = Date.now() + 350
+    }, [media?.id])
 
     return {
         containerRef,

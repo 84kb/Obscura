@@ -376,12 +376,12 @@
     position: absolute;
     bottom: 30px;
     transform: translateX(-50%);
-    background: rgba(20, 20, 20, 0.9);
+    background: color-mix(in srgb, var(--bg-card), transparent 8%);
     padding: 4px;
     border-radius: 4px;
     pointer-events: none;
     z-index: 20;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--border);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -393,7 +393,7 @@
     aspect-ratio: 16/9;
     border-radius: 2px;
     overflow: hidden;
-    background: black;
+    background: var(--bg-main);
 }
 
 .preview-image-box img {
@@ -403,7 +403,7 @@
 }
 
 .preview-time {
-    color: white;
+    color: var(--text-main);
     font-size: 12px;
     font-weight: 500;
 }
@@ -446,16 +446,16 @@
     right: 0;
     bottom: 8px;
     /* padding-bottom 縺ｮ荳驛ｨ繧貞ｼ輔＞縺ｦ髫咎俣繧剃ｽ懊ｋ */
-    background: rgba(20, 20, 20, 0.95);
+    background: color-mix(in srgb, var(--bg-card), transparent 5%);
     border-radius: 8px;
     backdrop-filter: blur(8px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--border);
     z-index: -1;
 }
 
 .speed-option {
     padding: 4px 12px;
-    color: rgba(255, 255, 255, 0.8);
+    color: var(--text-muted);
     font-size: 13px;
     cursor: pointer;
     border-radius: 4px;
@@ -464,8 +464,8 @@
 }
 
 .speed-option:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: white;
+    background: var(--bg-hover);
+    color: var(--text-main);
 }
 
 .speed-option.active {
@@ -650,4 +650,108 @@
     width: 100% !important;
     height: 100% !important;
     object-fit: contain;
+}
+
+/* Keep exit button visible in mini player mode and remove extra controls. */
+.player-container.pip-mode .pip-toggle-btn {
+    display: flex !important;
+}
+
+.player-container.pip-mode .speed-control-group,
+.player-container.pip-mode .comment-control-group {
+    display: none;
+}
+
+/* Firefox-like separate PiP window mode */
+.player-container.pip-window-mode {
+    background: #000;
+}
+
+.player-container.pip-window-mode .player-header-bar,
+.player-container.pip-window-mode .player-seek-container,
+.player-container.pip-window-mode .time-display,
+.player-container.pip-window-mode .volume-control-group,
+.player-container.pip-window-mode .speed-control-group,
+.player-container.pip-window-mode .comment-control-group,
+.player-container.pip-window-mode .player-comment-overlay,
+.player-container.pip-window-mode .player-danmaku-overlay {
+    display: none !important;
+}
+
+.player-container.pip-window-mode .player-content {
+    position: absolute;
+    inset: 0;
+}
+
+.player-container.pip-window-mode .player-controls-bar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 56px;
+    padding: 0 12px;
+    justify-content: center;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0));
+    border-top: none;
+}
+
+.player-container.pip-window-mode .controls-left {
+    gap: 10px;
+}
+
+.player-container.pip-window-mode .controls-right {
+    display: none !important;
+}
+
+.player-container.pip-window-mode .control-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 18px;
+    color: #fff;
+    background: rgba(255, 255, 255, 0.14);
+}
+
+.player-container.pip-window-mode .control-btn:hover {
+    background: rgba(255, 255, 255, 0.24);
+}
+
+.pip-drag-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 28px;
+    z-index: 30;
+    -webkit-app-region: drag;
+}
+
+.pip-close-btn {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    width: 20px;
+    height: 20px;
+    border: none;
+    border-radius: 10px;
+    color: #fff;
+    background: rgba(255, 255, 255, 0.15);
+    cursor: pointer;
+    line-height: 18px;
+    font-size: 14px;
+    -webkit-app-region: no-drag;
+}
+
+.pip-return-btn {
+    position: absolute;
+    top: 4px;
+    left: 6px;
+    height: 20px;
+    border: none;
+    border-radius: 10px;
+    padding: 0 8px;
+    color: #fff;
+    background: rgba(255, 255, 255, 0.15);
+    cursor: pointer;
+    font-size: 12px;
+    -webkit-app-region: no-drag;
 }

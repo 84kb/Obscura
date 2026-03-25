@@ -1,9 +1,10 @@
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
+import { Image as TauriImage } from '@tauri-apps/api/image'
 import { getVersion } from '@tauri-apps/api/app'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open, save, confirm, message } from '@tauri-apps/plugin-dialog'
 import { openUrl } from '@tauri-apps/plugin-opener'
-import { writeText } from '@tauri-apps/plugin-clipboard-manager'
+import { writeImage, writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { sendNotification, isPermissionGranted, requestPermission } from '@tauri-apps/plugin-notification'
 import { emit, listen, type Event as TauriEvent } from '@tauri-apps/api/event'
 import { mockDesktopAPI } from './mockDesktopAPI'
@@ -20,6 +21,7 @@ let nativeDropUnlisten: (() => void) | null = null
 let autoImportPollTimer: ReturnType<typeof setInterval> | null = null
 let autoImportPollRunning = false
 const autoImportSeenByWatchId = new Map<string, Set<string>>()
+let cachedEnableGpuAcceleration: boolean | null = null
 
 const TAURI_EVENTS = {
     UPDATE_STATUS: 'update-status',
@@ -46,6 +48,30 @@ function getFallbackConfig() {
         discordRichPresenceEnabled: false,
         libraryViewSettings: {},
     }
+}
+
+function updateCachedGpuAcceleration(config: any): void {
+    if (typeof config?.enableGPUAcceleration === 'boolean') {
+        cachedEnableGpuAcceleration = config.enableGPUAcceleration
+    }
+}
+
+function getEnableGpuAccelerationFast(): boolean {
+    if (typeof cachedEnableGpuAcceleration === 'boolean') {
+        return cachedEnableGpuAcceleration
+    }
+    try {
+        const raw = localStorage.getItem(STORAGE_KEY)
+        if (!raw) return true
+        const parsed = JSON.parse(raw)
+        if (typeof parsed?.enableGPUAcceleration === 'boolean') {
+            cachedEnableGpuAcceleration = parsed.enableGPUAcceleration
+            return parsed.enableGPUAcceleration
+        }
+    } catch {
+        // Ignore cache read errors and keep default true.
+    }
+    return true
 }
 
 function createLocalUserToken(): string {
@@ -159,6 +185,61 @@ async function copyTextWithFallback(text: string): Promise<void> {
     }
 }
 
+function getDataUrlMimeType(dataUrl: string): string | null {
+    const match = String(dataUrl || '').match(/^data:([^;,]+)[;,]/i)
+    return match?.[1]?.toLowerCase() || null
+}
+
+async function dataUrlToBytes(dataUrl: string): Promise<Uint8Array> {
+    const input = String(dataUrl || '')
+    const match = input.match(/^data:([^;,]+)?(?:;charset=[^;,]+)?(;base64)?,(.*)$/i)
+    if (!match) {
+        throw new Error('Invalid data URL')
+    }
+
+    const isBase64 = Boolean(match[2])
+    const payload = match[3] || ''
+
+    if (isBase64) {
+        const binary = atob(payload)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i)
+        }
+        return bytes
+    }
+
+    const decoded = decodeURIComponent(payload)
+    return new TextEncoder().encode(decoded)
+}
+
+async function normalizeImageDataUrlForClipboard(dataUrl: string): Promise<string> {
+    const input = String(dataUrl || '')
+    if (!/^data:image\//i.test(input)) return input
+    const mime = getDataUrlMimeType(input)
+    if (!mime || mime === 'image/png') return input
+
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image()
+        img.onload = () => resolve(img)
+        img.onerror = () => reject(new Error('Failed to decode image data URL'))
+        img.src = input
+    })
+
+    const width = Math.max(1, image.naturalWidth || image.width || 1)
+    const height = Math.max(1, image.naturalHeight || image.height || 1)
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) {
+        throw new Error('Failed to get canvas context for image conversion')
+    }
+    ctx.drawImage(image, 0, 0, width, height)
+    return canvas.toDataURL('image/png')
+}
+
 async function emitBridgeEvent(eventName: string, payload: any): Promise<void> {
     try {
         await emit(eventName, payload)
@@ -184,11 +265,15 @@ async function getStoredClientConfig() {
     try {
         const raw = await invoke<string>('read_client_config')
         const parsed = JSON.parse(raw || '{}')
-        return { ...getFallbackConfig(), ...parsed }
+        const merged = { ...getFallbackConfig(), ...parsed }
+        updateCachedGpuAcceleration(merged)
+        return merged
     } catch {
         try {
             const localRaw = localStorage.getItem(STORAGE_KEY)
-            return localRaw ? { ...getFallbackConfig(), ...JSON.parse(localRaw) } : getFallbackConfig()
+            const merged = localRaw ? { ...getFallbackConfig(), ...JSON.parse(localRaw) } : getFallbackConfig()
+            updateCachedGpuAcceleration(merged)
+            return merged
         } catch {
             return getFallbackConfig()
         }
@@ -201,7 +286,7 @@ function toLibraryEntry(libraryPath: string) {
     const normalizedNoSlash = normalized.replace(/[\\\/]+$/, '')
     if (!normalizedNoSlash) return null
 
-    const name = normalizedNoSlash.split(/[/\\]/).pop() || normalizedNoSlash
+    const name = (normalizedNoSlash.split(/[/\\]/).pop() || normalizedNoSlash).replace(/\.library$/i, '')
     return { name, path: normalizedNoSlash }
 }
 
@@ -335,7 +420,10 @@ async function pollAutoImport(): Promise<void> {
             }
             importedPathSet = new Set(
                 mediaList
-                    .map((m) => normalizeFsPath(String(m?.file_path || '')))
+                    .flatMap((m) => ([
+                        normalizeFsPath(String(m?.file_path || '')),
+                        normalizeFsPath(String(m?.import_source_path || '')),
+                    ]))
                     .filter((p) => p.length > 0),
             )
             return importedPathSet
@@ -377,7 +465,11 @@ async function pollAutoImport(): Promise<void> {
                         return key.length > 0 && !knownImported.has(key)
                     })
                 if (existingNotImported.length > 0) {
-                    void emitBridgeEvent('trigger-import', existingNotImported)
+                    void emitBridgeEvent('auto-import-trigger', {
+                        watchId,
+                        watchPath,
+                        filePaths: existingNotImported,
+                    })
                 }
                 continue
             }
@@ -392,7 +484,11 @@ async function pollAutoImport(): Promise<void> {
 
             autoImportSeenByWatchId.set(watchId, currentSet)
             if (newPaths.length > 0) {
-                void emitBridgeEvent('trigger-import', newPaths)
+                void emitBridgeEvent('auto-import-trigger', {
+                    watchId,
+                    watchPath,
+                    filePaths: newPaths,
+                })
             }
         }
 
@@ -857,11 +953,11 @@ export function initTauriDesktopBridge(): void {
                 params: { updates },
             })
         },
-        importMedia: async (filePaths: string[]) => {
+        importMedia: async (filePaths: string[], options?: { deleteSource?: boolean; importSource?: string }) => {
             try {
                 const result = await invoke<any>('sidecar_request', {
                     method: 'import_media',
-                    params: { filePaths: filePaths ?? [] },
+                    params: { filePaths: filePaths ?? [], options: options ?? {} },
                 })
                 return Array.isArray(result) ? result.map((m) => normalizeMediaRecord(m)) : []
             } catch {
@@ -970,22 +1066,48 @@ export function initTauriDesktopBridge(): void {
         },
         copyFrameToClipboard: async (dataUrl: string) => {
             try {
+                const rawDataUrl = String(dataUrl || '')
+                if (/^data:image\//i.test(rawDataUrl)) {
+                    try {
+                        // Fast path: let Tauri decode the data URL directly.
+                        await writeImage(rawDataUrl)
+                        return true
+                    } catch {
+                        // Fall through to normalized conversion paths.
+                    }
+                    try {
+                        const imageBytes = await dataUrlToBytes(rawDataUrl)
+                        const tauriImage = await TauriImage.fromBytes(imageBytes)
+                        try {
+                            await writeImage(tauriImage)
+                            return true
+                        } finally {
+                            await tauriImage.close().catch(() => { })
+                        }
+                    } catch (error) {
+                        console.error('[Bridge] writeImage failed in copyFrameToClipboard:', error)
+                        // Fall through to browser clipboard APIs.
+                    }
+                }
+
                 const canWriteImage =
                     typeof ClipboardItem !== 'undefined' &&
                     Boolean(navigator?.clipboard?.write) &&
                     typeof fetch === 'function'
                 if (canWriteImage) {
-                    const response = await fetch(dataUrl)
+                    const normalizedDataUrl = await normalizeImageDataUrlForClipboard(rawDataUrl)
+                    const response = await fetch(normalizedDataUrl)
                     const blob = await response.blob()
-                    const item = new ClipboardItem({ [blob.type || 'image/png']: blob })
+                    const mimeType = blob.type && blob.type.startsWith('image/') ? blob.type : 'image/png'
+                    const item = new ClipboardItem({ [mimeType]: blob })
                     await navigator.clipboard.write([item])
                     return true
                 }
-                await copyTextWithFallback(dataUrl)
-                return true
-            } catch {
+            } catch (error) {
+                console.error('[Bridge] copyFrameToClipboard failed:', error)
                 return false
             }
+            return false
         },
         saveCapturedFrame: async (dataUrl: string) => {
             try {
@@ -1008,6 +1130,21 @@ export function initTauriDesktopBridge(): void {
                 const result = await invoke<string | null>('sidecar_request', {
                     method: 'set_captured_thumbnail',
                     params: { mediaId, dataUrl },
+                })
+                return typeof result === 'string' && result ? result : null
+            } catch {
+                return null
+            }
+        },
+        captureFrameDataUrl: async (filePath: string, timeSeconds: number) => {
+            try {
+                const result = await invoke<string | null>('sidecar_request', {
+                    method: 'capture_frame_data_url',
+                    params: {
+                        filePath,
+                        timeSeconds,
+                        enableGpuAcceleration: getEnableGpuAccelerationFast(),
+                    },
                 })
                 return typeof result === 'string' && result ? result : null
             } catch {
@@ -1443,6 +1580,7 @@ export function initTauriDesktopBridge(): void {
             const current = await getStoredClientConfig()
             const nextConfig = { ...current, ...updates }
             const payload = JSON.stringify(nextConfig, null, 2)
+            updateCachedGpuAcceleration(nextConfig)
 
             try {
                 await invoke('write_client_config', { content: payload })

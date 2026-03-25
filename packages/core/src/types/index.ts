@@ -25,6 +25,12 @@
     dominant_color?: string | null
     title?: string | null
     framerate?: number
+    audio_bitrate?: number
+    video_bitrate?: number
+    format_name?: string
+    codec_id?: string
+    audio_codec?: string
+    video_codec?: string
     parentIds?: number[]
     parents?: MediaFile[]
     children?: MediaFile[]
@@ -285,6 +291,7 @@ export interface DesktopAPI {
     copyFrameToClipboard: (dataUrl: string) => Promise<boolean>
     saveCapturedFrame: (dataUrl: string) => Promise<boolean>
     setCapturedThumbnail: (mediaId: number, dataUrl: string) => Promise<string | null>
+    captureFrameDataUrl: (filePath: string, timeSeconds: number) => Promise<string | null>
 
     // 繧ｳ繝｡繝ｳ繝・    addComment: (mediaId: number, text: string, time: number) => Promise<MediaComment>
     getComments: (mediaId: number) => Promise<MediaComment[]>
@@ -485,6 +492,12 @@ export interface ExtensionButton {
     onClick: (context: { media: MediaFile; updateMedia?: (media: MediaFile) => void }) => void;
 }
 
+export interface ExtensionInfoRow {
+    id: string
+    label: string
+    value: string | number | boolean | null | undefined
+}
+
 export interface PlayerOverlayContext {
     currentTime: number;
     isPlaying: boolean;
@@ -509,6 +522,8 @@ export interface ExtensionMessageBoxOptions {
 
 export interface ExtensionUIHooks {
     inspectorActions?: (media: MediaFile) => ExtensionButton[];
+    inspectorInfo?: (media: MediaFile) => ExtensionInfoRow[];
+    inspectorInfoRows?: (media: MediaFile) => ExtensionInfoRow[];
     playerTopBar?: (media: MediaFile) => ExtensionButton[];
     playerOverlay?: (canvas: HTMLCanvasElement, media: MediaFile, context: PlayerOverlayContext) => void;
 }
@@ -627,7 +642,42 @@ export interface AppSettings {
     showTitleOnHover: boolean
     videoScaling: 'smooth' | 'pixelated'
     imageScaling: 'smooth' | 'pixelated'
+    inspector?: InspectorSettings
     extensions: ExtensionsSettings
+}
+
+export interface InspectorSectionVisibility {
+    artist: boolean
+    description: boolean
+    relations: boolean
+    url: boolean
+    tags: boolean
+    folders: boolean
+    info: boolean
+    comments: boolean
+    playlist: boolean
+}
+
+export interface InspectorInfoVisibility {
+    rating: boolean
+    resolution: boolean
+    duration: boolean
+    fileSize: boolean
+    importedAt: boolean
+    createdAt: boolean
+    modifiedAt: boolean
+    audioBitrate: boolean
+    framerate: boolean
+    formatName: boolean
+    codecId: boolean
+}
+
+export interface InspectorSettings {
+    sectionVisibility: InspectorSectionVisibility
+    infoVisibility: InspectorInfoVisibility
+    playlistPrevVisibleCount: number
+    playlistNextVisibleCount: number
+    playlistVisibleCount?: number
 }
 
 export type ItemInfoType = 'duration' | 'size' | 'tags' | 'rating' | 'modified' | 'created'

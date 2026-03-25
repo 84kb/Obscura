@@ -57,6 +57,7 @@ export interface DesktopAPI {
     copyFrameToClipboard: (dataUrl: string) => Promise<boolean>
     saveCapturedFrame: (dataUrl: string) => Promise<boolean>
     setCapturedThumbnail: (mediaId: number, dataUrl: string) => Promise<string | null>
+    captureFrameDataUrl: (filePath: string, timeSeconds: number) => Promise<string | null>
 
     // 繧ｳ繝｡繝ｳ繝・
     addComment: (mediaId: number, text: string, time: number) => Promise<MediaComment>

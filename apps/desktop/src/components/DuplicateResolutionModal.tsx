@@ -51,8 +51,7 @@ export const DuplicateResolutionModal: React.FC<DuplicateResolutionModalProps> =
         return null // Or render a "Completed" screen if desired
     }
 
-    // We only compare the first two for now. Any extras are ignored in this pass.
-    // Ideally, we'd handle >2, but the UI is designed for pairs.
+    // UI compares first two cards, but resolution can affect the whole duplicate group.
     const fileA = currentFiles[0]
     const fileB = currentFiles[1]
 
@@ -71,11 +70,23 @@ export const DuplicateResolutionModal: React.FC<DuplicateResolutionModalProps> =
 
         try {
             if (selectedOption === 'left') {
-                // Keep A, Delete B
-                await api.moveToTrash(fileB.id)
+                // Keep A, delete all others in this group.
+                const deleteTargets = currentFiles
+                    .slice(1)
+                    .map((f) => Number(f?.id))
+                    .filter((id) => Number.isFinite(id))
+                for (const id of deleteTargets) {
+                    await api.deletePermanently(id)
+                }
             } else if (selectedOption === 'right') {
-                // Keep B, Delete A
-                await api.moveToTrash(fileA.id)
+                // Keep B, delete all others in this group.
+                const keepId = Number(fileB.id)
+                const deleteTargets = currentFiles
+                    .map((f) => Number(f?.id))
+                    .filter((id) => Number.isFinite(id) && id !== keepId)
+                for (const id of deleteTargets) {
+                    await api.deletePermanently(id)
+                }
             }
             // 'both' does nothing (keeps both)
 

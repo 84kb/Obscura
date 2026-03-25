@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { MediaFile, Tag, Folder, MediaComment, SharedUser, ObscuraPlugin } from '@obscura/core'
+import { MediaFile, Tag, Folder, MediaComment, SharedUser, ObscuraPlugin, AppSettings, ExtensionInfoRow } from '@obscura/core'
 import './Inspector.css'
 import { toMediaUrl } from '../utils/fileUrl'
 import { api } from '../api'
@@ -9,6 +9,7 @@ import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSo
 import { InspectorSection, InfoSectionContent, CommentSectionContent, PlaylistSectionContent, RelationSectionContent, MediaPicker } from './InspectorSections'
 import { useNotification } from '../contexts/NotificationContext'
 import { usePlugins } from '../hooks/usePlugins'
+import { t as i18nT, AppLanguage } from '../i18n'
 
 interface InspectorProps {
     media: MediaFile[]
@@ -43,6 +44,8 @@ interface InspectorProps {
     enableRichText?: boolean
     contextTitle?: string
     sharedUsers?: SharedUser[]
+    settings?: AppSettings
+    language?: AppLanguage
 }
 
 export function Inspector({
@@ -78,8 +81,11 @@ export function Inspector({
     enableRichText,
     contextTitle,
     sharedUsers = [],
+    settings,
+    language = 'ja',
 }: InspectorProps) {
     const { addNotification } = useNotification()
+    const tr = (ja: string, en: string) => (language === 'en' ? en : ja)
 
     // ユーザー要望により基本すべて展開状態に変更されていたが、DnD導入でセクション個別管理へ移行
     const [comments, setComments] = useState<MediaComment[]>([])
@@ -155,13 +161,16 @@ export function Inspector({
         let targetUrl = url;
         if (!targetUrl || !provider.canHandle(targetUrl)) {
             // Electron では window.prompt が使えないためカスタムダイアログを await して入力を待つ
-            const input = await showCustomPrompt(`${provider.name} に対応する動画URLを入力してください:`, targetUrl || '');
+            const input = await showCustomPrompt(
+                tr(`${provider.name} に対応する動画URLを入力してください:`, `Enter a video URL for ${provider.name}:`),
+                targetUrl || ''
+            );
             if (!input) return; // キャンセルされた場合
             if (!provider.canHandle(input)) {
                 addNotification({
                     type: 'error',
-                    title: '無効なURL',
-                    message: '入力されたURLはこのプラグインで処理できません',
+                    title: tr('無効なURL', 'Invalid URL'),
+                    message: tr('入力されたURLはこのプラグインで処理できません', 'The entered URL cannot be handled by this plugin'),
                     duration: 5000
                 });
                 return;
@@ -173,22 +182,22 @@ export function Inspector({
         try {
             // 1. プラグインからデータを取得
             if (typeof provider.fetchData !== 'function') {
-                throw new Error(`プラグイン ${provider.name} は fetchData メソッドを実装していません。`);
+                throw new Error(tr(`プラグイン ${provider.name} は fetchData メソッドを実装していません。`, `Plugin ${provider.name} does not implement fetchData.`));
             }
             const resourceData = await provider.fetchData(media[0].id, targetUrl);
 
             // 2. 動画ファイルと同階層にデータを保存
             const filePath = media[0].file_path;
             if (!filePath) {
-                throw new Error('メディアファイルのパスが見つかりません');
+                throw new Error(tr('メディアファイルのパスが見つかりません', 'Media file path not found'));
             }
             const success = await window.ObscuraAPI.system.saveAssociatedData(filePath, resourceData);
 
             if (success) {
                 addNotification({
                     type: 'success',
-                    title: '取得完了',
-                    message: `${provider.name} からデータを取得・保存しました`,
+                    title: tr('取得完了', 'Fetch complete'),
+                    message: tr(`${provider.name} からデータを取得・保存しました`, `Fetched and saved data from ${provider.name}`),
                     duration: 3000
                 });
 
@@ -199,8 +208,8 @@ export function Inspector({
             } else {
                 addNotification({
                     type: 'error',
-                    title: '保存失敗',
-                    message: 'データの保存に失敗しました',
+                    title: tr('保存失敗', 'Save failed'),
+                    message: tr('データの保存に失敗しました', 'Failed to save data'),
                     duration: 5000
                 });
             }
@@ -208,8 +217,8 @@ export function Inspector({
             console.error(`Failed to fetch data from ${pluginId}: `, error);
             addNotification({
                 type: 'error',
-                title: '取得エラー',
-                message: error.message || 'データの取得に失敗しました',
+                title: tr('取得エラー', 'Fetch error'),
+                message: error.message || tr('データの取得に失敗しました', 'Failed to fetch data'),
                 duration: 5000
             });
         } finally {
@@ -622,6 +631,39 @@ export function Inspector({
 
     // --- DnD & Layout State ---
     const initialOrder = ['artist', 'description', 'relations', 'url', 'tags', 'folders', 'info', 'comments', 'playlist']
+    const sectionVisibility = {
+        artist: settings?.inspector?.sectionVisibility?.artist ?? true,
+        description: settings?.inspector?.sectionVisibility?.description ?? true,
+        relations: settings?.inspector?.sectionVisibility?.relations ?? true,
+        url: settings?.inspector?.sectionVisibility?.url ?? true,
+        tags: settings?.inspector?.sectionVisibility?.tags ?? true,
+        folders: settings?.inspector?.sectionVisibility?.folders ?? true,
+        info: settings?.inspector?.sectionVisibility?.info ?? true,
+        comments: settings?.inspector?.sectionVisibility?.comments ?? true,
+        playlist: settings?.inspector?.sectionVisibility?.playlist ?? true
+    }
+    const infoVisibility = {
+        rating: settings?.inspector?.infoVisibility?.rating ?? true,
+        resolution: settings?.inspector?.infoVisibility?.resolution ?? true,
+        duration: settings?.inspector?.infoVisibility?.duration ?? true,
+        fileSize: settings?.inspector?.infoVisibility?.fileSize ?? true,
+        importedAt: settings?.inspector?.infoVisibility?.importedAt ?? true,
+        createdAt: settings?.inspector?.infoVisibility?.createdAt ?? true,
+        modifiedAt: settings?.inspector?.infoVisibility?.modifiedAt ?? true,
+        audioBitrate: settings?.inspector?.infoVisibility?.audioBitrate ?? true,
+        framerate: settings?.inspector?.infoVisibility?.framerate ?? true,
+        formatName: settings?.inspector?.infoVisibility?.formatName ?? true,
+        codecId: settings?.inspector?.infoVisibility?.codecId ?? true
+    }
+    const legacyPlaylistVisibleCount = Number.isFinite(Number(settings?.inspector?.playlistVisibleCount))
+        ? Math.max(3, Math.min(50, Number(settings?.inspector?.playlistVisibleCount)))
+        : 12
+    const playlistPrevVisibleCount = Number.isFinite(Number(settings?.inspector?.playlistPrevVisibleCount))
+        ? Math.max(0, Math.min(50, Number(settings?.inspector?.playlistPrevVisibleCount)))
+        : 1
+    const playlistNextVisibleCount = Number.isFinite(Number(settings?.inspector?.playlistNextVisibleCount))
+        ? Math.max(0, Math.min(50, Number(settings?.inspector?.playlistNextVisibleCount)))
+        : Math.max(0, legacyPlaylistVisibleCount - 2)
     const [sectionOrder, setSectionOrder] = useState<string[]>(() => {
         try {
             const saved = localStorage.getItem('inspector_layout_order_v2')
@@ -692,25 +734,25 @@ export function Inspector({
         return (
             <div className={`inspector ${enableRichText ? 'rich-text-enabled' : ''} `} ref={inspectorRef}>
                 <div className="inspector-header">
-                    <h2 className="inspector-title">情報</h2>
+                    <h2 className="inspector-title">{i18nT(language, 'inspector.info')}</h2>
                     <div className="window-controls">
-                        <button className="control-btn" title="常に手前に表示">
+                        <button className="control-btn" title={tr('常に手前に表示', 'Always on top')}>
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <line x1="12" y1="17" x2="12" y2="22"></line>
                                 <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17z"></path>
                             </svg>
                         </button>
-                        <button className="control-btn" onClick={() => api.minimizeWindow()} title="最小化">
+                        <button className="control-btn" onClick={() => api.minimizeWindow()} title={tr('最小化', 'Minimize')}>
                             <svg viewBox="0 0 10 1" fill="currentColor" width="10" height="10">
                                 <rect width="10" height="1" y="4.5" />
                             </svg>
                         </button>
-                        <button className="control-btn" onClick={() => api.maximizeWindow()} title="最大化">
+                        <button className="control-btn" onClick={() => api.maximizeWindow()} title={tr('最大化', 'Maximize')}>
                             <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1" width="10" height="10">
                                 <rect x="0.5" y="0.5" width="9" height="9" />
                             </svg>
                         </button>
-                        <button className="control-btn close-btn" onClick={() => api.closeWindow()} title="閉じる">
+                        <button className="control-btn close-btn" onClick={() => api.closeWindow()} title={tr('閉じる', 'Close')}>
                             <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1" width="10" height="10">
                                 <path d="M1,1 L9,9 M9,1 L1,9" />
                             </svg>
@@ -719,7 +761,7 @@ export function Inspector({
                 </div>
                 <div className="inspector-content empty-state">
                     <div className="library-stats simple-stats">
-                        <div className="stats-header">{contextTitle || 'インフォメーション'}</div>
+                        <div className="stats-header">{contextTitle || tr('インフォメーション', 'Information')}</div>
                         <div className="stat-row">
                             <span className="stat-label">項目</span>
                             <span className="stat-value">{totalStats.totalCount.toLocaleString()}</span>
@@ -780,7 +822,9 @@ export function Inspector({
                                                     {user.isHost && <span className="host-badge">Host</span>}
                                                 </div>
                                                 <div className="user-status-text">
-                                                    {user.isOnline ? 'オンライン' : `最終アクセス: ${new Date(user.lastAccessAt).toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} `}
+                                                    {user.isOnline
+                                                        ? tr('オンライン', 'Online')
+                                                        : `${tr('最終アクセス', 'Last seen')}: ${new Date(user.lastAccessAt).toLocaleString(language === 'en' ? 'en-US' : 'ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })} `}
                                                 </div>
                                             </div>
                                         </div>
@@ -797,25 +841,25 @@ export function Inspector({
     return (
         <div className="inspector slide-in-right" ref={inspectorRef}>
             <div className="inspector-header">
-                <h2 className="inspector-title">インスペクタ</h2>
+                <h2 className="inspector-title">{i18nT(language, 'inspector.title')}</h2>
                 <div className="window-controls">
-                    <button className="control-btn" title="常に手前に表示">
+                    <button className="control-btn" title={i18nT(language, 'inspector.alwaysOnTop')}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <line x1="12" y1="17" x2="12" y2="22"></line>
                             <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17z"></path>
                         </svg>
                     </button>
-                    <button className="control-btn" onClick={() => api.minimizeWindow()} title="最小化">
+                    <button className="control-btn" onClick={() => api.minimizeWindow()} title={i18nT(language, 'inspector.minimize')}>
                         <svg viewBox="0 0 10 1" fill="currentColor" width="10" height="10">
                             <rect width="10" height="1" y="4.5" />
                         </svg>
                     </button>
-                    <button className="control-btn" onClick={() => api.maximizeWindow()} title="最大化">
+                    <button className="control-btn" onClick={() => api.maximizeWindow()} title={i18nT(language, 'inspector.maximize')}>
                         <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1" width="10" height="10">
                             <rect x="0.5" y="0.5" width="9" height="9" />
                         </svg>
                     </button>
-                    <button className="control-btn close-btn" onClick={() => api.closeWindow()} title="閉じる">
+                    <button className="control-btn close-btn" onClick={() => api.closeWindow()} title={i18nT(language, 'common.close')}>
                         <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1" width="10" height="10">
                             <path d="M1,1 L9,9 M9,1 L1,9" />
                         </svg>
@@ -897,6 +941,7 @@ export function Inspector({
                         strategy={verticalListSortingStrategy}
                     >
                         {sectionOrder.map(sectionId => {
+                            if (!sectionVisibility[sectionId as keyof typeof sectionVisibility]) return null
                             const isOpen = !collapsedSections[sectionId]
 
                             switch (sectionId) {
@@ -905,7 +950,7 @@ export function Inspector({
                                         <InspectorSection
                                             key={sectionId}
                                             id={sectionId}
-                                            title="タグ"
+                                            title={i18nT(language, 'inspector.tagsSection')}
                                             isOpen={isOpen}
                                             onToggle={() => toggleSection(sectionId)}
                                         >
@@ -927,7 +972,7 @@ export function Inspector({
                                         <InspectorSection
                                             key={sectionId}
                                             id={sectionId}
-                                            title="フォルダー"
+                                            title={i18nT(language, 'inspector.foldersSection')}
                                             isOpen={isOpen}
                                             onToggle={() => toggleSection(sectionId)}
                                         >
@@ -949,14 +994,14 @@ export function Inspector({
                                         <InspectorSection
                                             key={sectionId}
                                             id={sectionId}
-                                            title="投稿者"
+                                            title={i18nT(language, 'inspector.artistSection')}
                                             isOpen={isOpen}
                                             onToggle={() => toggleSection(sectionId)}
                                         >
                                             <input
                                                 type="text"
                                                 className="artist-input"
-                                                placeholder={media.length > 1 && !artistName ? "（複数の値が存在します）" : "投稿者名を入力..."}
+                                                placeholder={media.length > 1 && !artistName ? i18nT(language, 'inspector.multiValue') : i18nT(language, 'inspector.enterArtist')}
                                                 value={artistName}
                                                 onChange={(e) => setArtistName(e.target.value)}
                                                 onBlur={handleArtistSave}
@@ -973,12 +1018,13 @@ export function Inspector({
                                         <InspectorSection
                                             key={sectionId}
                                             id={sectionId}
-                                            title="関連作品"
+                                            title={i18nT(language, 'inspector.relationsSection')}
                                             isOpen={isOpen}
                                             onToggle={() => toggleSection(sectionId)}
                                         >
                                             {onAddParent && onRemoveParent && onSearchMedia ? (
                                                 <RelationSectionContent
+                                                    language={language}
                                                     media={media as unknown as MediaFile[]}
                                                     toMediaUrl={toMediaUrl}
                                                     onRemoveParent={onRemoveParent}
@@ -995,7 +1041,7 @@ export function Inspector({
                                                         }
                                                     }}
                                                 />
-                                            ) : <div>機能が無効です</div>}
+                                            ) : <div>{i18nT(language, 'inspector.featureDisabled')}</div>}
                                         </InspectorSection>
                                     )
                                 case 'description':
@@ -1003,7 +1049,7 @@ export function Inspector({
                                         <InspectorSection
                                             key={sectionId}
                                             id={sectionId}
-                                            title="説明"
+                                            title={i18nT(language, 'inspector.descriptionSection')}
                                             isOpen={isOpen}
                                             onToggle={() => toggleSection(sectionId)}
                                         >
@@ -1011,7 +1057,7 @@ export function Inspector({
                                             {enableRichText && !isDescriptionExpanded ? (
                                                 <div
                                                     className="description-preview-html artist-input"
-                                                    dangerouslySetInnerHTML={{ __html: media.length === 1 ? (media[0].description || '<span style="color:var(--text-muted)">説明を入力...</span>') : '' }}
+                                                    dangerouslySetInnerHTML={{ __html: media.length === 1 ? (media[0].description || `<span style="color:var(--text-muted)">${i18nT(language, 'inspector.enterDescription')}</span>`) : '' }}
                                                     onClick={(e) => {
                                                         const target = e.target as HTMLElement
                                                         if (target.tagName === 'A') {
@@ -1042,7 +1088,7 @@ export function Inspector({
                                                 <textarea
                                                     key={media.length === 1 ? media[0].id : 'multi'}
                                                     className={`artist-input ${isDescriptionExpanded ? 'expanded' : ''}`}
-                                                    placeholder="説明を入力..."
+                                                    placeholder={i18nT(language, 'inspector.enterDescription')}
                                                     rows={3}
                                                     autoFocus={isDescriptionExpanded && enableRichText}
                                                     style={{
@@ -1091,7 +1137,7 @@ export function Inspector({
                                         <InspectorSection
                                             key={sectionId}
                                             id={sectionId}
-                                            title="URL"
+                                            title={i18nT(language, 'inspector.urlSection')}
                                             isOpen={isOpen}
                                             onToggle={() => toggleSection(sectionId)}
                                         >
@@ -1109,7 +1155,7 @@ export function Inspector({
                                                             handleUrlSave();
                                                         }
                                                     }}
-                                                    placeholder="URLを入力..."
+                                                    placeholder={i18nT(language, 'inspector.urlInput')}
                                                 />
                                             </div>
                                             <div className="url-actions">
@@ -1120,16 +1166,16 @@ export function Inspector({
                                                         api.copyToClipboard(url)
                                                         addNotification({
                                                             type: 'success',
-                                                            title: 'コピーしました',
-                                                            message: 'URLをクリップボードにコピーしました',
+                                                            title: i18nT(language, 'inspector.copied'),
+                                                            message: i18nT(language, 'inspector.urlCopied'),
                                                             duration: 2000
                                                         })
                                                     }}
-                                                    title="URLをコピー"
+                                                    title={i18nT(language, 'inspector.copyUrl')}
                                                     disabled={!url}
                                                 >
                                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                                                    コピー
+                                                    {i18nT(language, 'inspector.copy')}
                                                 </button>
                                                 <button
                                                     className="url-action-btn"
@@ -1137,11 +1183,11 @@ export function Inspector({
                                                         e.stopPropagation();
                                                         if (url) api.openExternal(url)
                                                     }}
-                                                    title="ブラウザで開く"
+                                                    title={i18nT(language, 'inspector.openInBrowser')}
                                                     disabled={!url}
                                                 >
                                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-                                                    開く
+                                                    {i18nT(language, 'inspector.open')}
                                                 </button>
                                             </div>
                                         </InspectorSection>
@@ -1151,11 +1197,12 @@ export function Inspector({
                                         <InspectorSection
                                             key={sectionId}
                                             id={sectionId}
-                                            title="インフォメーション"
+                                            title={i18nT(language, 'inspector.infoSection')}
                                             isOpen={isOpen}
                                             onToggle={() => toggleSection(sectionId)}
                                         >
                                             <InfoSectionContent
+                                                language={language}
                                                 media={media}
                                                 hoverRating={hoverRating}
                                                 currentRating={currentRating}
@@ -1165,6 +1212,18 @@ export function Inspector({
                                                 formatFileSize={formatFileSize}
                                                 formatTime={formatTime}
                                                 formatDate={formatDate}
+                                                infoVisibility={infoVisibility}
+                                                extensionInfoRows={(media.length === 1
+                                                    ? availableProviders.flatMap((p: ObscuraPlugin) =>
+                                                        (p.uiHooks?.inspectorInfoRows || p.uiHooks?.inspectorInfo)
+                                                            ? (p.uiHooks.inspectorInfoRows || p.uiHooks.inspectorInfo)!(media[0]).map((row: ExtensionInfoRow) => ({
+                                                                ...row,
+                                                                id: `${p.id}:${row.id}`
+                                                            }))
+                                                            : []
+                                                    )
+                                                    : []
+                                                )}
                                             />
                                         </InspectorSection>
                                     )
@@ -1173,12 +1232,13 @@ export function Inspector({
                                         <InspectorSection
                                             key={sectionId}
                                             id={sectionId}
-                                            title={`コメント(${comments.length})`}
+                                            title={i18nT(language, 'inspector.commentsWithCount', { count: comments.length })}
                                             isOpen={isOpen}
                                             onToggle={() => toggleSection(sectionId)}
                                         >
                                             <div className="section-content">
                                                 <CommentSectionContent
+                                                    language={language}
                                                     comments={comments}
                                                     formatTime={formatTime}
                                                     providers={availableProviders.map((p: ObscuraPlugin) => ({
@@ -1208,7 +1268,7 @@ export function Inspector({
                                         <InspectorSection
                                             key={sectionId}
                                             id={sectionId}
-                                            title="プレイリスト"
+                                            title={i18nT(language, 'inspector.playlistSection')}
                                             isOpen={isOpen}
                                             onToggle={() => toggleSection(sectionId)}
                                         >
@@ -1219,6 +1279,8 @@ export function Inspector({
                                                 toMediaUrl={toMediaUrl}
                                                 formatTime={formatTime}
                                                 formatFileSize={formatFileSize}
+                                                prevVisibleCount={playlistPrevVisibleCount}
+                                                nextVisibleCount={playlistNextVisibleCount}
                                             />
                                         </InspectorSection>
                                     )
@@ -1241,7 +1303,7 @@ export function Inspector({
                             <div className="picker-popover-header">
                                 <input
                                     type="text"
-                                    placeholder="タグを検索..."
+                                    placeholder={tr('タグを検索...', 'Search tags...')}
                                     value={tagInput}
                                     onChange={(e) => setTagInput(e.target.value)}
                                     onKeyDown={handleTagInputKeyDown}
@@ -1299,7 +1361,7 @@ export function Inspector({
                             <div className="picker-popover-footer">
                                 <span className="picker-shortcuts">移動 ↑ ↓ ← →  選択 ⏎</span>
                                 <button className="picker-close-btn" onClick={() => { setShowTagInput(false); setTagInput(''); setFocusedTagIndex(-1) }}>
-                                    閉じる ESC
+                                    {tr('閉じる', 'Close')} ESC
                                 </button>
                             </div>
                         </div>,
@@ -1317,7 +1379,7 @@ export function Inspector({
                             <div className="picker-popover-header">
                                 <input
                                     type="text"
-                                    placeholder="フォルダーを検索..."
+                                    placeholder={tr('フォルダーを検索...', 'Search folders...')}
                                     value={folderInput}
                                     onChange={(e) => setFolderInput(e.target.value)}
                                     onKeyDown={handleFolderInputKeyDown}
@@ -1380,7 +1442,7 @@ export function Inspector({
                             <div className="picker-popover-footer">
                                 <span className="picker-shortcuts">移動 ↑ ↓  選択 ⏎</span>
                                 <button className="picker-close-btn" onClick={() => { setShowFolderInput(false); setFolderInput(''); setFocusedFolderIndex(-1) }}>
-                                    閉じる ESC
+                                    {tr('閉じる', 'Close')} ESC
                                 </button>
                             </div>
                         </div>,
@@ -1392,17 +1454,17 @@ export function Inspector({
                     (media.length === 1 && media[0].is_deleted) && (
                         <div className="actions-section">
                             <div className="trash-actions">
-                                <button className="btn btn-primary btn-full btn-small" onClick={() => onRestore(media[0].id)}>元に戻す</button>
+                                <button className="btn btn-primary btn-full btn-small" onClick={() => onRestore(media[0].id)}>{tr('元に戻す', 'Restore')}</button>
                                 <button
                                     className="btn btn-danger btn-full btn-small"
                                     onClick={() => {
-                                        if (confirm('ファイルをデバイスから完全に削除しますか？\nこの操作は取り消せません。')) {
+                                        if (confirm(tr('ファイルをデバイスから完全に削除しますか？\nこの操作は取り消せません。', 'Delete this file permanently from the device?\nThis action cannot be undone.'))) {
                                             onDeletePermanently(media[0].id)
                                             onClose()
                                         }
                                     }}
                                 >
-                                    完全に削除
+                                    {tr('完全に削除', 'Delete permanently')}
                                 </button>
                             </div>
                         </div>
@@ -1412,17 +1474,17 @@ export function Inspector({
                     (media.length > 1 && media.every(m => m.is_deleted)) && (
                         <div className="actions-section">
                             <div className="trash-actions">
-                                <button className="btn btn-primary btn-full btn-small" onClick={() => onRestoreFiles(media.map(m => m.id))}>すべて元に戻す</button>
+                                <button className="btn btn-primary btn-full btn-small" onClick={() => onRestoreFiles(media.map(m => m.id))}>{i18nT(language, 'inspector.restoreAll')}</button>
                                 <button
                                     className="btn btn-danger btn-full btn-small"
                                     onClick={() => {
-                                        if (confirm(`${media.length} 個のファイルをデバイスから完全に削除しますか？\nこの操作は取り消せません。`)) {
+                                        if (confirm(tr(`${media.length} 個のファイルをデバイスから完全に削除しますか？\nこの操作は取り消せません。`, `Delete ${media.length} files permanently from the device?\nThis action cannot be undone.`))) {
                                             onDeleteFilesPermanently(media.map(m => m.id))
                                             onClose()
                                         }
                                     }}
                                 >
-                                    すべて完全に削除
+                                    {i18nT(language, 'inspector.deleteAllPermanent')}
                                 </button>
                             </div>
                         </div>
@@ -1430,6 +1492,7 @@ export function Inspector({
                 }
                 {showRelationPicker && relationPickerPos && createPortal(
                     <MediaPicker
+                        language={language}
                         style={relationPickerPos}
                         onClose={() => setShowRelationPicker(false)}
                         onSearch={onSearchMedia || (async () => []) as any}
@@ -1453,7 +1516,7 @@ export function Inspector({
                     <div className="app-modal-overlay">
                         <div className="app-modal custom-prompt-modal">
                             <div className="app-modal-header">
-                                <h3>URLの入力</h3>
+                                <h3>{i18nT(language, 'inspector.promptUrlInput')}</h3>
                             </div>
                             <div className="app-modal-body">
                                 <p>{promptData.message}</p>

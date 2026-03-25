@@ -88,30 +88,17 @@ const ListThumbnail: React.FC<{ media: MediaFile, thumbnailMode: 'speed' | 'qual
         if (cached) {
             setSrc(cached)
             setIsLoaded(true)
-        } else {
-            setSrc(null);
-            setIsLoaded(false);
-        }
-        if (!media.thumbnail_path) return;
-
-        let timeoutId: NodeJS.Timeout | null = null;
-        const update = () => {
-            const url = toMediaUrl(media.thumbnail_path!)
-            const separator = url.includes('?') ? '&' : '?'
-            const resolved = thumbnailMode === 'speed' ? `${url}${separator}width=48` : url
-            listThumbnailUrlCache.set(cacheKey, resolved)
-            setSrc(resolved);
-        };
-
-        if (thumbnailMode === 'speed') {
-            timeoutId = setTimeout(update, cached ? 0 : 30);
-        } else {
-            update();
+            return
         }
 
-        return () => {
-            if (timeoutId) clearTimeout(timeoutId);
-        };
+        setSrc(null)
+        setIsLoaded(false)
+        if (!media.thumbnail_path) return
+
+        // Use pre-generated thumbnail directly. Avoid runtime resize query.
+        const resolved = toMediaUrl(media.thumbnail_path)
+        listThumbnailUrlCache.set(cacheKey, resolved)
+        setSrc(resolved)
     }, [media.id, media.thumbnail_path, thumbnailMode]);
 
     if (!media.thumbnail_path) return null;

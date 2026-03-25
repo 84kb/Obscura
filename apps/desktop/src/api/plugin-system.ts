@@ -30,6 +30,9 @@ export function initializePluginSystem() {
                 if (p.uiHooks.inspectorComments && !p.uiHooks.inspectorActions) {
                     p.uiHooks.inspectorActions = p.uiHooks.inspectorComments;
                 }
+                if (p.uiHooks.inspectorInfo && !p.uiHooks.inspectorInfoRows) {
+                    p.uiHooks.inspectorInfoRows = p.uiHooks.inspectorInfo;
+                }
             }
 
             plugins.push(plugin);

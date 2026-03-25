@@ -131,8 +131,8 @@ export class DesktopAdapter implements IMediaLibraryAPI {
         return this.api.updateLastPlayed(id);
     }
 
-    async importMedia(filePaths: string[]): Promise<MediaFile[]> {
-        return this.api.importMedia(filePaths);
+    async importMedia(filePaths: string[], options?: { deleteSource?: boolean; importSource?: string }): Promise<MediaFile[]> {
+        return this.api.importMedia(filePaths, options);
     }
 
     async checkImportDuplicates(filePaths: string[]): Promise<{ newFile: any; existing: any }[]> {
@@ -173,6 +173,10 @@ export class DesktopAdapter implements IMediaLibraryAPI {
 
     async setCapturedThumbnail(mediaId: number, dataUrl: string): Promise<string | null> {
         return this.api.setCapturedThumbnail(mediaId, dataUrl);
+    }
+
+    async captureFrameDataUrl(filePath: string, timeSeconds: number): Promise<string | null> {
+        return this.api.captureFrameDataUrl(filePath, timeSeconds);
     }
 
     async addComment(mediaId: number, text: string, time: number): Promise<MediaComment> {
