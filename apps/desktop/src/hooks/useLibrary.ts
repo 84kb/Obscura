@@ -249,7 +249,10 @@ export function useLibrary() {
         const loadConfig = async () => {
             try {
                 const config = await api.getClientConfig()
-                const token = config?.myUserToken || ''
+                const savedToken = String(config?.myUserToken || '').trim()
+                const token = /^[a-f0-9]{64}$/i.test(savedToken)
+                    ? savedToken
+                    : await api.generateUserToken().catch(() => savedToken)
                 console.log('[useLibrary] Loaded user token:', token ? '***' : '(empty)')
                 setMyUserToken(token)
             } catch (e) {

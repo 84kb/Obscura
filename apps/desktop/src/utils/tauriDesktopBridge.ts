@@ -75,12 +75,22 @@ function getEnableGpuAccelerationFast(): boolean {
 }
 
 function createLocalUserToken(): string {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-        return `tauri-${crypto.randomUUID()}`
+    const hexChars = '0123456789abcdef'
+    const out: string[] = []
+    if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+        const bytes = new Uint8Array(32)
+        crypto.getRandomValues(bytes)
+        for (const b of bytes) out.push(hexChars[(b >> 4) & 0x0f], hexChars[b & 0x0f])
+        return out.join('')
     }
+    for (let i = 0; i < 64; i += 1) {
+        out.push(hexChars[Math.floor(Math.random() * 16)])
+    }
+    return out.join('')
+}
 
-    const random = Math.random().toString(36).slice(2, 12)
-    return `tauri-${Date.now().toString(36)}-${random}`
+function isValidUserToken(token: unknown): boolean {
+    return typeof token === 'string' && /^[a-f0-9]{64}$/i.test(token.trim())
 }
 
 function normalizeConnectionMessage(message: unknown): string {
@@ -1372,10 +1382,16 @@ export function initTauriDesktopBridge(): void {
             }
         },
         quitAndInstall: async () => {
-            await invoke('sidecar_request', {
+            const launched = await invoke<any>('sidecar_request', {
                 method: 'quit_and_install',
                 params: { path: pendingDownloadedUpdatePath },
             })
+            if (!launched) {
+                throw new Error('Failed to launch update installer')
+            }
+            // Allow installer bootstrap first, then close app so file lock does not block update.
+            await new Promise((resolve) => setTimeout(resolve, 350))
+            await invoke('window_close')
         },
         onUpdateStatus: (callback: (data: { status: string; info?: any }) => void) =>
             subscribeBridgeEvent<any>(TAURI_EVENTS.UPDATE_STATUS, (event) => {
@@ -1606,8 +1622,8 @@ export function initTauriDesktopBridge(): void {
         },
         generateUserToken: async () => {
             const current = await getStoredClientConfig()
-            if (typeof current?.myUserToken === 'string' && current.myUserToken.trim()) {
-                return current.myUserToken
+            if (isValidUserToken(current?.myUserToken)) {
+                return String(current.myUserToken).trim()
             }
 
             let token = ''
@@ -1616,14 +1632,14 @@ export function initTauriDesktopBridge(): void {
                     method: 'generate_user_token',
                     params: null,
                 })
-                if (typeof generated === 'string' && generated.trim()) {
-                    token = generated
+                if (isValidUserToken(generated)) {
+                    token = String(generated).trim()
                 }
             } catch {
                 // Fallback below.
             }
 
-            if (!token) {
+            if (!isValidUserToken(token)) {
                 token = createLocalUserToken()
             }
             await tauriDesktopApi.updateClientConfig({ myUserToken: token })

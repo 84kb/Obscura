@@ -1,6 +1,6 @@
 [package]
 name = "obscura-tauri"
-version = "0.8.3"
+version = "0.8.5"
 description = "Obscura Tauri host"
 authors = ["84kb"]
 license = "MIT"

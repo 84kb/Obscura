@@ -287,6 +287,10 @@ function generateUserTokenFromHardwareId(hardwareId) {
     .digest('hex')
 }
 
+function generateAccessToken() {
+  return crypto.randomBytes(24).toString('hex')
+}
+
 function isWindows() {
   return process.platform === 'win32'
 }
@@ -2425,10 +2429,11 @@ function handleRequest(req) {
       const user = params?.user && typeof params.user === 'object' ? params.user : {}
       const users = loadSharedUsers()
       const now = new Date().toISOString()
+      const providedAccessToken = String(user.accessToken || '').trim()
       const newUser = {
         id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
         userToken: String(user.userToken || ''),
-        accessToken: String(user.accessToken || ''),
+        accessToken: providedAccessToken || generateAccessToken(),
         nickname: String(user.nickname || ''),
         hardwareId: String(user.hardwareId || ''),
         permissions: asArray(user.permissions),

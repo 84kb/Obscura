@@ -99,9 +99,15 @@ fn sidecar_node_binary(app: &AppHandle) -> String {
         } else {
             "node"
         };
-        let bundled = resource_dir.join("bin").join(node_name);
-        if bundled.exists() {
-            return bundled.to_string_lossy().to_string();
+        // Keep compatibility with both legacy and current bundle layouts.
+        let bundled_candidates = [
+            resource_dir.join("bin").join(node_name),
+            resource_dir.join("build").join("bin").join(node_name),
+        ];
+        for bundled in bundled_candidates {
+            if bundled.exists() {
+                return bundled.to_string_lossy().to_string();
+            }
         }
     }
     "node".to_string()

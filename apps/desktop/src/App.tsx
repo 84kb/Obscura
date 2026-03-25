@@ -378,11 +378,18 @@ function AppContent() {
 
 
     // Socket.io 接続 (リモートライブラリ選択時のみ)
+    const socketAuth = useMemo(() => {
+        if (!activeRemoteLibrary) {
+            return { userToken: '', accessToken: '' }
+        }
+        return getAuthQuery(activeRemoteLibrary.token, myUserToken)
+    }, [activeRemoteLibrary, myUserToken])
+
     const { isConnected: isSocketConnected, subscribe } = useSocket({
         enabled: !!activeRemoteLibrary,
         url: activeRemoteLibrary?.url,
-        userToken: myUserToken,
-        accessToken: activeRemoteLibrary?.token
+        userToken: socketAuth.userToken,
+        accessToken: socketAuth.accessToken
     })
 
     // Perf marker for random tab switch diagnostics.
@@ -2237,7 +2244,6 @@ function AppContent() {
         </div>
     )
 }
-
 
 
 
