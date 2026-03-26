@@ -12,7 +12,7 @@ import { ContextMenu } from './components/ContextMenu'
 import { ConfirmModal } from './components/ConfirmModal'
 import { SubfolderGrid } from './components/SubfolderGrid'
 import { useLibrary } from './hooks/useLibrary'
-import { MediaFile, AppSettings, ViewSettings, defaultViewSettings, ClientConfig, SharedUser } from '@obscura/core'
+import { MediaFile, AppSettings, ViewSettings, defaultViewSettings, ClientConfig, SharedUser, FilterOptions } from '@obscura/core'
 import { MainHeader } from './components/MainHeader'
 import { useSocket } from './hooks/useSocket'
 import { useTheme } from './hooks/useTheme'
@@ -305,9 +305,41 @@ function AppContent() {
         checkEntryDuplicates,
         loading,
         loadingProgress,
+        startupLoading,
         loadMore,
         hasMore
     } = useLibrary()
+
+    const getSearchScopeKey = useCallback((options: Pick<FilterOptions, 'filterType' | 'selectedFolders'>) => {
+        const selectedFolders = Array.isArray(options.selectedFolders) ? options.selectedFolders : []
+        if (selectedFolders.length > 0) {
+            return `folder:${selectedFolders.map(Number).filter(Number.isFinite).sort((a, b) => a - b).join(',')}`
+        }
+        return `type:${String(options.filterType || 'all')}`
+    }, [])
+
+    const searchQueryByScopeRef = useRef<Record<string, string>>({})
+    const updateFilterOptions = useCallback((nextValue: FilterOptions | ((prev: FilterOptions) => FilterOptions)) => {
+        setFilterOptions(prev => {
+            const next = typeof nextValue === 'function'
+                ? nextValue(prev)
+                : nextValue
+
+            const prevKey = getSearchScopeKey(prev)
+            const nextKey = getSearchScopeKey(next)
+            searchQueryByScopeRef.current[prevKey] = String(prev.searchQuery || '')
+
+            if (prevKey !== nextKey) {
+                return {
+                    ...next,
+                    searchQuery: searchQueryByScopeRef.current[nextKey] ?? ''
+                }
+            }
+
+            searchQueryByScopeRef.current[nextKey] = String(next.searchQuery || '')
+            return next
+        })
+    }, [getSearchScopeKey, setFilterOptions])
 
     // テーマシステムの初期化
     const { updateClientConfig, clientConfig } = useSettings()
@@ -1876,7 +1908,7 @@ function AppContent() {
                     <MainHeader
                         title={getHeaderTitle()}
                         filterOptions={filterOptions}
-                        onFilterChange={setFilterOptions}
+                        onFilterChange={updateFilterOptions}
                         gridSize={gridSize}
                         onGridSizeChange={setGridSize}
                         viewMode={viewMode}
@@ -1895,7 +1927,7 @@ function AppContent() {
                         <SubfolderGrid
                             subfolders={folders.filter(f => f.parentId === filterOptions.selectedFolders[0])}
                             onSelectFolder={(folderId) => {
-                                setFilterOptions(prev => ({ ...prev, selectedFolders: [folderId] }))
+                                updateFilterOptions(prev => ({ ...prev, selectedFolders: [folderId] }))
                             }}
                             getMediaCount={(folderId) => {
                                 // TODO: 実際のメディアカウントを計算
@@ -1905,7 +1937,7 @@ function AppContent() {
                     )}
 
                     {/* Loading Overlay */}
-                    <LoadingOverlay isVisible={loading} message={i18nT(uiLanguage, 'app.loadingData')} progress={loadingProgress} />
+                    <LoadingOverlay isVisible={startupLoading} message={i18nT(uiLanguage, 'app.loadingData')} progress={loadingProgress} />
 
                     {/* モーダル群 */}
                     {filterOptions.selectedFolders.length > 0 && folders.filter(f => f.parentId === filterOptions.selectedFolders[0]).length > 0 && (
@@ -1964,7 +1996,7 @@ function AppContent() {
                             viewSettings={viewSettings}
                             updateViewSettings={handleUpdateViewSettings}
                             filterOptions={filterOptions}
-                            onFilterChange={setFilterOptions}
+                            onFilterChange={updateFilterOptions}
                             onLoadMore={loadMore}
                             hasMore={hasMore}
                         />
@@ -2000,7 +2032,7 @@ function AppContent() {
                 filterOptions={filterOptions}
                 onFilterChange={(options) => {
                     setPlayingMedia(null)
-                    setFilterOptions(options)
+                    updateFilterOptions(options)
                 }}
                 folders={folders}
                 libraries={libraries}
@@ -2212,9 +2244,7 @@ function AppContent() {
                     isDestructive={true}
                     onConfirm={async () => {
                         if (filterOptions.filterType === 'trash') {
-                            if (confirm(tr(`Delete ${deleteConfirmIds.length} files permanently from this device?\nThis action cannot be undone.`, `Delete ${deleteConfirmIds.length} files permanently from this device?\nThis action cannot be undone.`))) {
-                                await deleteFilesPermanently(deleteConfirmIds)
-                            }
+                            await deleteFilesPermanently(deleteConfirmIds)
                         } else {
                             await moveFilesToTrash(deleteConfirmIds)
                         }
@@ -2252,7 +2282,4 @@ function AppContent() {
         </div>
     )
 }
-
-
-
 

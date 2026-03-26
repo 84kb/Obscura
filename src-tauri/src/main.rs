@@ -114,22 +114,25 @@ fn sidecar_plugin_dir(app: &AppHandle) -> PathBuf {
 }
 
 fn sidecar_node_binary(app: &AppHandle) -> String {
-    let node_name = if cfg!(target_os = "windows") {
-        "node.exe"
+    let node_names: Vec<&str> = if cfg!(target_os = "windows") {
+        vec!["obscura-node.exe", "node.exe"]
     } else {
-        "node"
+        vec!["node"]
     };
 
     for root in sidecar_search_roots(app) {
-        let bundled_candidates = [
-            root.join("bin").join(node_name),
-            root.join("build").join("bin").join(node_name),
-            root.join("_up_").join("build").join("bin").join(node_name),
-            root.join("_up_").join("bin").join(node_name),
-        ];
-        for bundled in bundled_candidates {
-            if bundled.exists() {
-                return bundled.to_string_lossy().to_string();
+        for node_name in &node_names {
+            let bundled_candidates = [
+                root.join("bin").join(node_name),
+                root.join("build").join("bin").join(node_name),
+                root.join("_up_").join("build").join("bin").join(node_name),
+                root.join("_up_").join("bin").join(node_name),
+                root.join("resources").join(node_name),
+            ];
+            for bundled in bundled_candidates {
+                if bundled.exists() {
+                    return bundled.to_string_lossy().to_string();
+                }
             }
         }
     }

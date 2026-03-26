@@ -4,6 +4,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const crypto = require('node:crypto')
 const os = require('node:os')
+const http = require('node:http')
 const { spawn, spawnSync } = require('node:child_process')
 
 let machineIdSync = null
@@ -34,6 +35,9 @@ let discordRpcModule = null
 let discordClient = null
 let discordReady = false
 let ffmpegHwaccelAvailable = true
+let networkServer = null
+let networkServerPort = null
+let networkServerHost = null
 
 const DISCORD_CLIENT_ID = '1462710290322952234'
 
@@ -141,6 +145,7 @@ function getDefaultServerConfig() {
 
 function loadServerConfig() {
   const configFile = serverConfigPath()
+  ensureDir(path.dirname(configFile))
   const hasFile = fs.existsSync(configFile)
   const fallback = getDefaultServerConfig()
   const raw = readJsonIfExists(configFile, {})
@@ -162,6 +167,7 @@ function loadServerConfig() {
 }
 
 function saveServerConfig(nextConfig) {
+  ensureDir(path.dirname(serverConfigPath()))
   const normalized = {
     ...getDefaultServerConfig(),
     ...(nextConfig && typeof nextConfig === 'object' ? nextConfig : {}),
@@ -181,6 +187,7 @@ function loadServerState() {
 }
 
 function saveServerState(next) {
+  ensureDir(path.dirname(serverStatePath()))
   const normalized = { running: Boolean(next?.running) }
   fs.writeFileSync(serverStatePath(), JSON.stringify(normalized, null, 2), 'utf8')
   return normalized
@@ -191,7 +198,445 @@ function loadSharedUsers() {
 }
 
 function saveSharedUsers(users) {
+  ensureDir(path.dirname(sharedUsersPath()))
   fs.writeFileSync(sharedUsersPath(), JSON.stringify(asArray(users), null, 2), 'utf8')
+}
+
+function parseRequestUrl(req) {
+  try {
+    return new URL(String(req?.url || '/'), 'http://localhost')
+  } catch {
+    return new URL('http://localhost/')
+  }
+}
+
+function writeJson(res, status, payload) {
+  try {
+    res.writeHead(Number(status) || 200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+    })
+    res.end(JSON.stringify(payload ?? {}))
+  } catch {
+    try { res.end() } catch {}
+  }
+}
+
+function resolvePublishedLibraryPath() {
+  const cfg = loadServerConfig()
+  const configured = String(cfg?.publishLibraryPath || '').trim()
+  if (configured) return configured
+  return String(activeLibraryPath || '').trim()
+}
+
+function getServerLibraryName() {
+  const published = resolvePublishedLibraryPath()
+  if (!published) return 'Obscura Library'
+  return path.basename(published) || 'Obscura Library'
+}
+
+function getAuthFromRequest(req, urlObj) {
+  const headers = req?.headers || {}
+  const authHeader = String(headers.authorization || '')
+  const bearer = authHeader.toLowerCase().startsWith('bearer ')
+    ? authHeader.slice(7).trim()
+    : ''
+  const userTokenHeader = String(headers['x-user-token'] || '').trim()
+  const accessTokenQuery = String(urlObj?.searchParams?.get('accessToken') || '').trim()
+  const userTokenQuery = String(urlObj?.searchParams?.get('userToken') || '').trim()
+  return {
+    accessToken: bearer || accessTokenQuery,
+    userToken: userTokenHeader || userTokenQuery,
+  }
+}
+
+function isAuthorizedRequest(req, urlObj) {
+  const config = loadServerConfig()
+  const { accessToken, userToken } = getAuthFromRequest(req, urlObj)
+  if (!accessToken) return false
+
+  // Host secret can be used for local diagnostics/administrative access.
+  if (String(config?.hostSecret || '').trim() && accessToken === String(config.hostSecret).trim()) {
+    return true
+  }
+
+  const users = loadSharedUsers()
+  return users.some((u) =>
+    Boolean(u?.isActive ?? true) &&
+    String(u?.accessToken || '').trim() === accessToken &&
+    String(u?.userToken || '').trim() === userToken,
+  )
+}
+
+function buildSyncDumpForPublishedLibrary() {
+  const libraryPath = resolvePublishedLibraryPath()
+  const mediaFiles = libraryPath ? readLibraryMediaIndex(libraryPath) : []
+  const meta = loadLocalMetaForLibrary(libraryPath || activeLibraryPath)
+  const { tags, folders } = getResolvedTagsAndFolders(meta, libraryPath || activeLibraryPath)
+  const tagGroups = asArray(meta?.tagGroups)
+  const auditLogs = [
+    ...asArray(readJsonIfExists(libraryPath ? path.join(libraryPath, 'audit_logs.json') : null, [])),
+    ...asArray(meta?.auditLogs),
+  ]
+
+  const nextMediaId = mediaFiles.reduce((acc, m) => Math.max(acc, Number(m?.id) || 0), 0) + 1
+  const nextTagId = tags.reduce((acc, t) => Math.max(acc, Number(t?.id) || 0), 0) + 1
+  const nextTagGroupId = tagGroups.reduce((acc, g) => Math.max(acc, Number(g?.id) || 0), 0) + 1
+  const nextFolderId = folders.reduce((acc, f) => Math.max(acc, Number(f?.id) || 0), 0) + 1
+  const nextCommentId = Number(meta?.nextCommentId || 1)
+
+  return {
+    nextMediaId,
+    nextTagId,
+    nextTagGroupId,
+    nextFolderId,
+    nextCommentId,
+    mediaFiles,
+    tags,
+    tagGroups,
+    folders,
+    auditLogs,
+  }
+}
+
+function buildMergedMediaForLibrary(libraryPath) {
+  const normalized = String(libraryPath || '').trim()
+  if (!normalized) return []
+
+  const mediaList = asArray(readLibraryMediaIndex(normalized))
+  const meta = loadLocalMetaForLibrary(normalized)
+  const byFilePath = meta?.byFilePath && typeof meta.byFilePath === 'object' ? meta.byFilePath : {}
+  const hasByFilePath = Object.keys(byFilePath).length > 0
+  const manualMedia = asArray(meta?.manualMedia)
+  const { tags, folders } = getResolvedTagsAndFolders(meta, normalized)
+  const tagById = new Map(asArray(tags).map((t) => [Number(t?.id), t]))
+  const tagByName = new Map(
+    asArray(tags)
+      .filter((t) => typeof t?.name === 'string' && t.name.trim())
+      .map((t) => [String(t.name).trim().toLowerCase(), t]),
+  )
+  const folderById = new Map(asArray(folders).map((f) => [Number(f?.id), f]))
+  const folderByName = new Map(
+    asArray(folders)
+      .filter((f) => typeof f?.name === 'string' && f.name.trim())
+      .map((f) => [String(f.name).trim().toLowerCase(), f]),
+  )
+  if (!hasByFilePath && manualMedia.length === 0) {
+    return mediaList
+      .map((m) => ({
+        ...m,
+        tags: normalizeNamedEntities(m?.tags, tagById, tagByName, 'tag'),
+        folders: normalizeNamedEntities(m?.folders, folderById, folderByName, 'folder'),
+      }))
+      .filter((m) => !m?.permanently_deleted && !m?.is_deleted)
+  }
+
+  const merged = mediaList.map((m) => {
+    const filePath = String(m?.file_path || '')
+    const overlay = byFilePath[filePath] || {}
+    const tagIds = asArray(overlay?.tag_ids).map((v) => Number(v)).filter(Number.isFinite)
+    const folderIds = asArray(overlay?.folder_ids).map((v) => Number(v)).filter(Number.isFinite)
+    return {
+      ...m,
+      ...overlay,
+      tags: mergeNamedEntities(
+        tagIds.length > 0 ? tagIds.map((id) => tagById.get(id)).filter(Boolean) : [],
+        normalizeNamedEntities(m?.tags, tagById, tagByName, 'tag'),
+      ),
+      folders: mergeNamedEntities(
+        folderIds.length > 0 ? folderIds.map((id) => folderById.get(id)).filter(Boolean) : [],
+        normalizeNamedEntities(m?.folders, folderById, folderByName, 'folder'),
+      ),
+    }
+  })
+
+  const indexed = new Map()
+  for (const item of merged) {
+    indexed.set(String(item?.file_path || ''), item)
+  }
+  for (const manual of manualMedia) {
+    const fp = String(manual?.file_path || '')
+    if (!fp || indexed.has(fp)) continue
+    indexed.set(fp, {
+      ...manual,
+      tags: normalizeNamedEntities(manual?.tags, tagById, tagByName, 'tag'),
+      folders: normalizeNamedEntities(manual?.folders, folderById, folderByName, 'folder'),
+    })
+  }
+
+  return [...indexed.values()].filter((m) => !m?.permanently_deleted && !m?.is_deleted)
+}
+
+function getMediaByIdForLibrary(libraryPath, mediaId) {
+  const idNum = Number(mediaId)
+  if (!Number.isFinite(idNum)) return null
+  return buildMergedMediaForLibrary(libraryPath).find((m) => Number(m?.id) === idNum) || null
+}
+
+function sendFileResponse(res, filePath) {
+  const target = String(filePath || '').trim()
+  if (!target || !fs.existsSync(target)) {
+    writeJson(res, 404, { error: 'File not found' })
+    return
+  }
+  try {
+    const ext = String(path.extname(target) || '').toLowerCase()
+    const mimeMap = {
+      '.mp4': 'video/mp4',
+      '.mkv': 'video/x-matroska',
+      '.webm': 'video/webm',
+      '.mov': 'video/quicktime',
+      '.avi': 'video/x-msvideo',
+      '.mp3': 'audio/mpeg',
+      '.wav': 'audio/wav',
+      '.flac': 'audio/flac',
+      '.m4a': 'audio/mp4',
+      '.ogg': 'audio/ogg',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.webp': 'image/webp',
+    }
+    const contentType = mimeMap[ext] || 'application/octet-stream'
+    const stat = fs.statSync(target)
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      'Content-Length': stat.size,
+      'Cache-Control': 'no-store',
+    })
+    fs.createReadStream(target).pipe(res)
+  } catch (err) {
+    writeJson(res, 500, { error: err?.message || String(err) })
+  }
+}
+
+function handleNetworkRequest(req, res) {
+  const method = String(req?.method || 'GET').toUpperCase()
+  const urlObj = parseRequestUrl(req)
+  const route = urlObj.pathname || '/'
+  const libraryPath = resolvePublishedLibraryPath()
+
+  if (method === 'GET' && route === '/api/health') {
+    writeJson(res, 200, {
+      ok: true,
+      libraryName: getServerLibraryName(),
+      version: 'obscura-sidecar',
+    })
+    return
+  }
+
+  if (method === 'GET' && route === '/api/profile') {
+    if (!isAuthorizedRequest(req, urlObj)) {
+      writeJson(res, 401, { error: 'Unauthorized' })
+      return
+    }
+    writeJson(res, 200, {
+      nickname: 'Local User',
+      iconUrl: '',
+    })
+    return
+  }
+
+  if (method === 'GET' && route === '/api/users') {
+    if (!isAuthorizedRequest(req, urlObj)) {
+      writeJson(res, 401, { error: 'Unauthorized' })
+      return
+    }
+    writeJson(res, 200, loadSharedUsers())
+    return
+  }
+
+  if (method === 'GET' && route === '/api/sync/dump') {
+    if (!isAuthorizedRequest(req, urlObj)) {
+      writeJson(res, 401, { error: 'Unauthorized' })
+      return
+    }
+    writeJson(res, 200, buildSyncDumpForPublishedLibrary())
+    return
+  }
+
+  if (!isAuthorizedRequest(req, urlObj)) {
+    writeJson(res, 401, { error: 'Unauthorized' })
+    return
+  }
+
+  if (method === 'GET' && route === '/api/tags') {
+    const meta = loadLocalMetaForLibrary(libraryPath)
+    const { tags } = getResolvedTagsAndFolders(meta, libraryPath)
+    writeJson(res, 200, tags)
+    return
+  }
+
+  if (method === 'GET' && route === '/api/tag-groups') {
+    const meta = loadLocalMetaForLibrary(libraryPath)
+    writeJson(res, 200, asArray(meta?.tagGroups))
+    return
+  }
+
+  if (method === 'GET' && route === '/api/folders') {
+    const meta = loadLocalMetaForLibrary(libraryPath)
+    const { folders } = getResolvedTagsAndFolders(meta, libraryPath)
+    writeJson(res, 200, folders)
+    return
+  }
+
+  if (method === 'GET' && route === '/api/media') {
+    const all = buildMergedMediaForLibrary(libraryPath)
+    const limit = Math.max(1, Number(urlObj.searchParams.get('limit')) || all.length || 100)
+    const offset = Math.max(0, Number(urlObj.searchParams.get('offset')) || 0)
+    const pageSlice = all.slice(offset, offset + limit)
+    writeJson(res, 200, { media: pageSlice, total: all.length })
+    return
+  }
+
+  if (method === 'GET' && route.startsWith('/api/search/media')) {
+    const query = String(urlObj.searchParams.get('query') || '').toLowerCase().trim()
+    const all = buildMergedMediaForLibrary(libraryPath)
+    const results = all
+      .filter((m) => {
+        if (!query) return true
+        const hay = `${String(m?.file_name || '')} ${String(m?.title || '')}`.toLowerCase()
+        return hay.includes(query)
+      })
+      .slice(0, 300)
+      .map((m) => ({
+        id: Number(m?.id),
+        file_name: String(m?.file_name || ''),
+        title: String(m?.title || ''),
+        thumbnail_path: String(m?.thumbnail_path || ''),
+      }))
+    writeJson(res, 200, { results })
+    return
+  }
+
+  if (method === 'GET' && route.startsWith('/api/stream/')) {
+    const id = Number(route.split('/').pop())
+    const media = getMediaByIdForLibrary(libraryPath, id)
+    sendFileResponse(res, media?.file_path)
+    return
+  }
+
+  if (method === 'GET' && route.startsWith('/api/thumbnails/')) {
+    const id = Number(route.split('/').pop())
+    const media = getMediaByIdForLibrary(libraryPath, id)
+    sendFileResponse(res, media?.thumbnail_path)
+    return
+  }
+
+  writeJson(res, 404, { error: 'Not found' })
+}
+
+function startNetworkServer() {
+  if (networkServer && networkServer.listening) {
+    return Promise.resolve({ success: true })
+  }
+
+  const config = loadServerConfig()
+  const port = Number(config?.port || 53913)
+  const listenPort = Number.isFinite(port) && port > 0 ? port : 53913
+
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      try {
+        handleNetworkRequest(req, res)
+      } catch (err) {
+        writeJson(res, 500, { error: err?.message || String(err) })
+      }
+    })
+    server.on('error', () => {
+      if (networkServer === server) {
+        networkServer = null
+        networkServerPort = null
+        networkServerHost = null
+        saveServerState({ running: false })
+      }
+    })
+
+    const onFailure = (err) => {
+      networkServer = null
+      networkServerPort = null
+      networkServerHost = null
+      saveServerState({ running: false })
+      resolve({ success: false, error: err?.message || String(err) })
+    }
+
+    const onSuccess = (host) => {
+      networkServer = server
+      networkServerPort = listenPort
+      networkServerHost = host
+      saveServerState({ running: true })
+      resolve({ success: true })
+    }
+
+    const tryListen = (host, options) =>
+      new Promise((listenResolve, listenReject) => {
+        const onError = (err) => {
+          server.off('listening', onListening)
+          listenReject(err)
+        }
+        const onListening = () => {
+          server.off('error', onError)
+          listenResolve()
+        }
+        server.once('error', onError)
+        server.once('listening', onListening)
+        if (options) {
+          server.listen(options)
+        } else {
+          server.listen(listenPort, host)
+        }
+      })
+
+    ; (async () => {
+      try {
+        await tryListen('::', { port: listenPort, host: '::', ipv6Only: false })
+        onSuccess('::')
+      } catch (ipv6Err) {
+        const code = String(ipv6Err?.code || '')
+        if (code !== 'EAFNOSUPPORT' && code !== 'EADDRNOTAVAIL' && code !== 'EINVAL') {
+          onFailure(ipv6Err)
+          return
+        }
+        try {
+          await tryListen('0.0.0.0')
+          onSuccess('0.0.0.0')
+        } catch (ipv4Err) {
+          onFailure(ipv4Err)
+        }
+      }
+    })
+  })
+}
+
+function stopNetworkServer() {
+  if (!networkServer) {
+    saveServerState({ running: false })
+    networkServerPort = null
+    networkServerHost = null
+    return Promise.resolve({ success: true })
+  }
+
+  return new Promise((resolve) => {
+    try {
+      networkServer.close((err) => {
+        networkServer = null
+        networkServerPort = null
+        networkServerHost = null
+        saveServerState({ running: false })
+        if (err) {
+          resolve({ success: false, error: err?.message || String(err) })
+          return
+        }
+        resolve({ success: true })
+      })
+    } catch (err) {
+      networkServer = null
+      networkServerPort = null
+      networkServerHost = null
+      saveServerState({ running: false })
+      resolve({ success: false, error: err?.message || String(err) })
+    }
+  })
 }
 
 async function ensureDiscordClient() {
@@ -302,6 +747,53 @@ function spawnDetached(command, args) {
     windowsHide: true,
   })
   child.unref()
+}
+
+function toPowerShellLiteral(value) {
+  return `'${String(value || '').replace(/'/g, "''")}'`
+}
+
+function runPowerShell(command) {
+  const proc = spawnSync('powershell.exe', ['-NoProfile', '-Command', command], {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 10000,
+  })
+  if (proc.error) {
+    throw proc.error
+  }
+  if (proc.status !== 0) {
+    throw new Error(String(proc.stderr || proc.stdout || `PowerShell exited with ${proc.status}`))
+  }
+}
+
+function openPathWithDefaultFileManager(targetPath) {
+  const target = String(targetPath || '').trim()
+  if (!target) throw new Error('file manager target is empty')
+  const child = spawn('cmd.exe', ['/c', 'start', '', target], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  })
+  child.unref()
+}
+
+function getExistingParentDir(inputPath) {
+  let current = String(inputPath || '').trim()
+  while (current) {
+    try {
+      if (fs.existsSync(current)) {
+        const stat = fs.statSync(current)
+        return stat.isDirectory() ? current : path.dirname(current)
+      }
+    } catch {
+      // Keep walking upward.
+    }
+    const parent = path.dirname(current)
+    if (!parent || parent === current) break
+    current = parent
+  }
+  return ''
 }
 
 async function copyFileToClipboard(filePath) {
@@ -487,19 +979,80 @@ function findSiblingThumbnailPath(filePath) {
 function extractThumbnailWithFfmpeg(filePath, outputPath) {
   const ffmpegPath = getFfmpegExecutablePath()
   ensureDir(path.dirname(outputPath))
-  const proc = spawnSync(ffmpegPath, [
-    '-y',
-    '-ss', '00:00:01.000',
-    '-i', filePath,
-    '-frames:v', '1',
-    '-vf', 'scale=320:-1',
-    outputPath,
-  ], {
-    encoding: 'utf8',
-    windowsHide: true,
-    timeout: 120000,
-  })
-  return proc.status === 0 && fs.existsSync(outputPath)
+  try {
+    if (fs.existsSync(outputPath)) {
+      fs.unlinkSync(outputPath)
+    }
+  } catch {
+    // Ignore stale thumbnail cleanup failures.
+  }
+
+  const runExtract = (args) => {
+    const proc = spawnSync(ffmpegPath, args, {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 120000,
+    })
+    return proc.status === 0 && fs.existsSync(outputPath)
+  }
+
+  const embeddedStreamSpecifier = getEmbeddedArtworkStreamSpecifier(filePath)
+  if (embeddedStreamSpecifier) {
+    const ok = runExtract([
+      '-y',
+      '-i', filePath,
+      '-map', embeddedStreamSpecifier,
+      '-frames:v', '1',
+      '-vf', 'scale=320:-1:flags=lanczos',
+      outputPath,
+    ])
+    if (ok) return true
+  }
+
+  const seekPoints = ['1.000', '0.100', '0.000', '3.000']
+  for (const seek of seekPoints) {
+    const ok = runExtract([
+      '-y',
+      '-ss', seek,
+      '-i', filePath,
+      '-frames:v', '1',
+      '-vf', 'scale=320:-1:flags=lanczos',
+      outputPath,
+    ])
+    if (ok) return true
+  }
+  return false
+}
+
+function getEmbeddedArtworkStreamSpecifier(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return ''
+  const ffprobePath = getFfprobeExecutablePath()
+  try {
+    const proc = spawnSync(ffprobePath, [
+      '-v', 'error',
+      '-show_streams',
+      '-print_format', 'json',
+      filePath,
+    ], {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 15000,
+    })
+    if (proc.error || proc.status !== 0) return ''
+    const data = JSON.parse(String(proc.stdout || '{}'))
+    const streams = asArray(data?.streams)
+    const artwork = streams.find((stream) => {
+      if (!stream || String(stream.codec_type) !== 'video') return false
+      if (Number(stream?.disposition?.attached_pic) === 1) return true
+      const comment = String(stream?.tags?.comment || '').toLowerCase()
+      const title = String(stream?.tags?.title || '').toLowerCase()
+      return comment.includes('cover') || title.includes('cover')
+    })
+    const index = Number(artwork?.index)
+    return Number.isFinite(index) ? `0:${index}` : ''
+  } catch {
+    return ''
+  }
 }
 
 function captureFrameDataUrlWithFfmpeg(filePath, timeSeconds) {
@@ -1734,8 +2287,26 @@ function getResolvedTagsAndFolders(meta, libraryPath) {
   const deletedFolderIds = new Set(asArray(meta?.deletedFolderIds).map((v) => Number(v)).filter(Number.isFinite))
   const baseFolders = asArray(readJsonIfExists(resolvedLibraryPath ? path.join(resolvedLibraryPath, 'folders.json') : null, []))
     .filter((f) => !deletedFolderIds.has(Number(f?.id)))
-  const tags = [...baseTags, ...asArray(meta?.tags).filter((t) => !deletedTagIds.has(Number(t?.id)))]
-  const folders = [...baseFolders, ...asArray(meta?.folders).filter((f) => !deletedFolderIds.has(Number(f?.id)))]
+  const libraryMedia =
+    resolvedLibraryPath && cachedLibraryPath === resolvedLibraryPath
+      ? asArray(cachedScannedMedia)
+      : asArray(readLibraryMediaIndex(resolvedLibraryPath))
+  const discoveredTags = collectNamedEntitiesFromMedia(libraryMedia, 'tag')
+  const discoveredFolders = collectNamedEntitiesFromMedia(libraryMedia, 'folder')
+  const fallbackTags = collectNamedEntitiesFromLibraryMetadata(resolvedLibraryPath, 'tag')
+  const fallbackFolders = collectNamedEntitiesFromLibraryMetadata(resolvedLibraryPath, 'folder')
+  const tags = [
+    ...baseTags,
+    ...asArray(meta?.tags).filter((t) => !deletedTagIds.has(Number(t?.id))),
+    ...discoveredTags.filter((t) => !deletedTagIds.has(Number(t?.id))),
+    ...fallbackTags.filter((t) => !deletedTagIds.has(Number(t?.id))),
+  ]
+  const folders = [
+    ...baseFolders,
+    ...asArray(meta?.folders).filter((f) => !deletedFolderIds.has(Number(f?.id))),
+    ...discoveredFolders.filter((f) => !deletedFolderIds.has(Number(f?.id))),
+    ...fallbackFolders.filter((f) => !deletedFolderIds.has(Number(f?.id))),
+  ]
 
   const uniqueById = (arr) => {
     const map = new Map()
@@ -1776,17 +2347,169 @@ function getResolvedTagsAndFolders(meta, libraryPath) {
   return result
 }
 
-function mergeMediaWithMeta(mediaList) {
-  const meta = loadLocalMeta()
+function toSyntheticNamedId(kind, name) {
+  const hex = hashPath(`${String(kind || 'item')}::${String(name || '').toLowerCase()}`).slice(0, 10)
+  return -Math.abs(parseInt(hex || '1', 16))
+}
+
+function collectNamedEntitiesFromMedia(mediaList, kind) {
+  const sourceKey = kind === 'folder' ? 'folders' : 'tags'
+  const out = []
+  const seen = new Set()
+
+  for (const media of asArray(mediaList)) {
+    for (const value of asArray(media?.[sourceKey])) {
+      const rawName =
+        typeof value === 'string'
+          ? value
+          : (value && typeof value === 'object' && typeof value.name === 'string' ? value.name : '')
+      const name = String(rawName || '').trim()
+      if (!name) continue
+      const normalized = name.toLowerCase()
+      if (seen.has(normalized)) continue
+      seen.add(normalized)
+
+      const explicitId = Number(value?.id)
+      if (Number.isFinite(explicitId)) {
+        out.push({ ...value, id: explicitId, name })
+        continue
+      }
+
+      if (kind === 'folder') {
+        out.push({ id: toSyntheticNamedId(kind, name), name, parent_id: null, order_index: 0 })
+      } else {
+        out.push({ id: toSyntheticNamedId(kind, name), name })
+      }
+    }
+  }
+
+  return out
+}
+
+function collectNamedEntitiesFromLibraryMetadata(libraryPath, kind) {
+  const normalizedLibraryPath = String(libraryPath || '').trim()
+  if (!normalizedLibraryPath) return []
+
+  const imagesRoot = path.join(normalizedLibraryPath, 'images')
+  if (!fs.existsSync(imagesRoot)) return []
+
+  const out = []
+  const seen = new Set()
+  let dirs = []
+  try {
+    dirs = fs.readdirSync(imagesRoot, { withFileTypes: true })
+  } catch {
+    return []
+  }
+
+  const sourceKey = kind === 'folder' ? 'folders' : 'tags'
+  for (const dir of dirs) {
+    if (!dir?.isDirectory?.()) continue
+    const metadataPath = path.join(imagesRoot, dir.name, 'metadata.json')
+    const raw = readJsonIfExists(metadataPath, null)
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+
+    for (const value of asArray(raw?.[sourceKey])) {
+      const rawName =
+        typeof value === 'string'
+          ? value
+          : (value && typeof value === 'object' && typeof value.name === 'string' ? value.name : '')
+      const name = String(rawName || '').trim()
+      if (!name) continue
+      const normalizedName = name.toLowerCase()
+      if (seen.has(normalizedName)) continue
+      seen.add(normalizedName)
+
+      const explicitId = Number(value?.id)
+      if (Number.isFinite(explicitId)) {
+        out.push({ ...value, id: explicitId, name })
+      } else if (kind === 'folder') {
+        out.push({ id: toSyntheticNamedId(kind, name), name, parent_id: null, order_index: 0 })
+      } else {
+        out.push({ id: toSyntheticNamedId(kind, name), name })
+      }
+    }
+  }
+
+  return out
+}
+
+function normalizeNamedEntities(values, byId, byName, kind) {
+  const out = []
+  const seen = new Set()
+
+  for (const value of asArray(values)) {
+    let resolved = null
+    const idNum = Number(value?.id)
+    if (Number.isFinite(idNum)) {
+      resolved = byId.get(idNum) || value
+    }
+
+    if (!resolved) {
+      const rawName =
+        typeof value === 'string'
+          ? value
+          : (value && typeof value === 'object' && typeof value.name === 'string' ? value.name : '')
+      const name = String(rawName || '').trim()
+      if (!name) continue
+      resolved = byName.get(name.toLowerCase()) || { id: toSyntheticNamedId(kind, name), name }
+    }
+
+    const resolvedId = Number(resolved?.id)
+    const resolvedName = String(resolved?.name || '').trim()
+    const dedupeKey = Number.isFinite(resolvedId) ? `id:${resolvedId}` : `name:${resolvedName.toLowerCase()}`
+    if (!resolvedName && !Number.isFinite(resolvedId)) continue
+    if (seen.has(dedupeKey)) continue
+    seen.add(dedupeKey)
+    out.push(resolved)
+  }
+
+  return out
+}
+
+function mergeNamedEntities(primary, secondary) {
+  const out = []
+  const seen = new Set()
+  for (const item of [...asArray(primary), ...asArray(secondary)]) {
+    const idNum = Number(item?.id)
+    const name = String(item?.name || '').trim()
+    const key = Number.isFinite(idNum) ? `id:${idNum}` : `name:${name.toLowerCase()}`
+    if (!name && !Number.isFinite(idNum)) continue
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(item)
+  }
+  return out
+}
+
+function mergeMediaWithMeta(mediaList, libraryPath) {
+  const resolvedLibraryPath = String(libraryPath || activeLibraryPath || '').trim()
+  const meta = resolvedLibraryPath ? loadLocalMetaForLibrary(resolvedLibraryPath) : loadLocalMeta()
   const byFilePath = meta.byFilePath || {}
   const hasByFilePath = byFilePath && typeof byFilePath === 'object' && Object.keys(byFilePath).length > 0
   const manualMedia = asArray(meta.manualMedia)
-  if (!hasByFilePath && manualMedia.length === 0) {
-    return asArray(mediaList).filter((m) => !m?.permanently_deleted)
-  }
-  const { tags, folders } = getResolvedTagsAndFolders(meta)
+  const { tags, folders } = getResolvedTagsAndFolders(meta, resolvedLibraryPath)
   const tagById = new Map(tags.map((t) => [Number(t.id), t]))
+  const tagByName = new Map(
+    tags
+      .filter((t) => typeof t?.name === 'string' && t.name.trim())
+      .map((t) => [String(t.name).trim().toLowerCase(), t]),
+  )
   const folderById = new Map(folders.map((f) => [Number(f.id), f]))
+  const folderByName = new Map(
+    folders
+      .filter((f) => typeof f?.name === 'string' && f.name.trim())
+      .map((f) => [String(f.name).trim().toLowerCase(), f]),
+  )
+  if (!hasByFilePath && manualMedia.length === 0) {
+    return asArray(mediaList)
+      .map((m) => ({
+        ...m,
+        tags: normalizeNamedEntities(m?.tags, tagById, tagByName, 'tag'),
+        folders: normalizeNamedEntities(m?.folders, folderById, folderByName, 'folder'),
+      }))
+      .filter((m) => !m?.permanently_deleted)
+  }
 
   const scannedOrCached = asArray(mediaList)
     .map((m) => {
@@ -1794,13 +2517,19 @@ function mergeMediaWithMeta(mediaList) {
       const overlay = byFilePath[filePath] || {}
       const tagIds = asArray(overlay.tag_ids).map((v) => Number(v)).filter(Number.isFinite)
       const folderIds = asArray(overlay.folder_ids).map((v) => Number(v)).filter(Number.isFinite)
-      const resolvedTags = tagIds.map((id) => tagById.get(id)).filter(Boolean)
-      const resolvedFolders = folderIds.map((id) => folderById.get(id)).filter(Boolean)
+      const resolvedTags = mergeNamedEntities(
+        tagIds.length > 0 ? tagIds.map((id) => tagById.get(id)).filter(Boolean) : [],
+        normalizeNamedEntities(m?.tags, tagById, tagByName, 'tag'),
+      )
+      const resolvedFolders = mergeNamedEntities(
+        folderIds.length > 0 ? folderIds.map((id) => folderById.get(id)).filter(Boolean) : [],
+        normalizeNamedEntities(m?.folders, folderById, folderByName, 'folder'),
+      )
       const merged = {
         ...m,
         ...overlay,
-        tags: resolvedTags.length > 0 ? resolvedTags : asArray(m?.tags),
-        folders: resolvedFolders.length > 0 ? resolvedFolders : asArray(m?.folders),
+        tags: resolvedTags,
+        folders: resolvedFolders,
       }
       return merged
     })
@@ -1817,8 +2546,8 @@ function mergeMediaWithMeta(mediaList) {
     indexed.set(fp, {
       ...manual,
       ...overlay,
-      tags: asArray(manual?.tags),
-      folders: asArray(manual?.folders),
+      tags: normalizeNamedEntities(manual?.tags, tagById, tagByName, 'tag'),
+      folders: normalizeNamedEntities(manual?.folders, folderById, folderByName, 'folder'),
     })
   }
 
@@ -1835,7 +2564,7 @@ function getAllMediaForActiveLibrary() {
   }
 
   if (activeLibraryPath && cachedLibraryPath === activeLibraryPath) {
-    const merged = mergeMediaWithMeta(cachedScannedMedia)
+    const merged = mergeMediaWithMeta(cachedScannedMedia, activeLibraryPath)
     cachedMergedLibraryPath = activeLibraryPath
     cachedMergedRevision = mediaDataRevision
     cachedMergedMedia = merged
@@ -1858,7 +2587,7 @@ function getAllMediaForActiveLibrary() {
   if (activeLibraryPath) {
     setCachedScannedMedia(activeLibraryPath, allMedia)
   }
-  const merged = mergeMediaWithMeta(allMedia)
+  const merged = mergeMediaWithMeta(allMedia, activeLibraryPath)
   cachedMergedLibraryPath = activeLibraryPath
   cachedMergedRevision = mediaDataRevision
   cachedMergedMedia = merged
@@ -2000,6 +2729,160 @@ function buildTransferredOverlay(media, settings, targetMeta, targetLibraryPath)
   }
 
   return overlay
+}
+
+function refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache) {
+  const source = media && typeof media === 'object' ? media : {}
+  const filePath = String(source?.file_path || '').trim()
+  if (!filePath || !fs.existsSync(filePath)) return null
+
+  let stat = null
+  try {
+    stat = fs.statSync(filePath)
+  } catch {
+    stat = null
+  }
+  if (!stat || !stat.isFile()) return null
+
+  const ext = path.extname(filePath).toLowerCase()
+  if (!MEDIA_EXTENSIONS.has(ext)) return null
+
+  const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(ext)
+  const isAudio = ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a'].includes(ext)
+  const fileType = isImage ? 'image' : isAudio ? 'audio' : 'video'
+  const fileName = String(source?.file_name || path.basename(filePath)).replace(/[\\/:*?"<>|]/g, '_')
+  const fileDir = path.dirname(filePath)
+  const fileBaseName = path.basename(fileName, path.extname(fileName))
+
+  let thumbnailPath = ''
+  const siblingThumb = findSiblingThumbnailPath(filePath)
+  if (isImage) {
+    thumbnailPath = filePath
+  } else if (fileType === 'video') {
+    const generatedThumbPath = siblingThumb && fs.existsSync(siblingThumb)
+      ? siblingThumb
+      : path.join(fileDir, `${fileBaseName}_thumbnail.png`)
+    try {
+      if (extractThumbnailWithFfmpeg(filePath, generatedThumbPath)) {
+        thumbnailPath = generatedThumbPath
+      }
+    } catch {
+      // Keep metadata refresh working even if thumbnail extraction fails.
+    }
+    if (!thumbnailPath && siblingThumb && fs.existsSync(siblingThumb)) {
+      thumbnailPath = siblingThumb
+    }
+  }
+
+  const probed = probeMediaMetadata(filePath)
+  const item = {
+    ...source,
+    id: Number.isFinite(Number(source?.id)) ? Number(source.id) : toMediaId(filePath),
+    uniqueId: source?.uniqueId ?? path.basename(fileDir),
+    file_name: fileName,
+    title: String(source?.title || path.basename(fileName, path.extname(fileName))),
+    file_type: fileType,
+    file_path: filePath,
+    thumbnail_path: thumbnailPath,
+    file_size: stat.size || 0,
+    created_date: stat.birthtime ? new Date(stat.birthtime).toISOString() : String(source?.created_date || ''),
+    created_at: stat.ctime ? new Date(stat.ctime).toISOString() : String(source?.created_at || ''),
+    modified_date: stat.mtime ? new Date(stat.mtime).toISOString() : String(source?.modified_date || ''),
+    rating: Number.isFinite(Number(source?.rating)) ? Number(source.rating) : 0,
+    duration: Number.isFinite(Number(probed?.duration)) ? Number(probed.duration) : null,
+    width: Number.isFinite(Number(probed?.width)) ? Number(probed.width) : undefined,
+    height: Number.isFinite(Number(probed?.height)) ? Number(probed.height) : undefined,
+    framerate: Number.isFinite(Number(probed?.framerate)) ? Number(probed.framerate) : undefined,
+    audio_bitrate: Number.isFinite(Number(probed?.audio_bitrate)) ? Number(probed.audio_bitrate) : undefined,
+    video_bitrate: Number.isFinite(Number(probed?.video_bitrate)) ? Number(probed.video_bitrate) : undefined,
+    format_name: typeof probed?.format_name === 'string' ? probed.format_name : undefined,
+    codec_id: typeof probed?.codec_id === 'string' ? probed.codec_id : undefined,
+    audio_codec: typeof probed?.audio_codec === 'string' ? probed.audio_codec : undefined,
+    video_codec: typeof probed?.video_codec === 'string' ? probed.video_codec : undefined,
+    artist: typeof probed?.artist === 'string' ? probed.artist : source?.artist,
+    description: typeof probed?.description === 'string' ? probed.description : source?.description,
+    url: typeof probed?.url === 'string' ? probed.url : source?.url,
+    is_deleted: Boolean(source?.is_deleted),
+    last_played_at: source?.last_played_at ?? null,
+    tags: Array.isArray(source?.tags) ? source.tags : [],
+    folders: Array.isArray(source?.folders) ? source.folders : [],
+    comments: Array.isArray(source?.comments) ? source.comments : [],
+    import_source_path: source?.import_source_path || filePath,
+  }
+
+  const overlay = meta.byFilePath[filePath] && typeof meta.byFilePath[filePath] === 'object'
+    ? { ...meta.byFilePath[filePath] }
+    : {}
+  if (thumbnailPath) overlay.thumbnail_path = thumbnailPath
+  if (Number.isFinite(Number(probed?.duration))) overlay.duration = Number(probed.duration)
+  if (Number.isFinite(Number(probed?.width))) overlay.width = Number(probed.width)
+  if (Number.isFinite(Number(probed?.height))) overlay.height = Number(probed.height)
+  if (Number.isFinite(Number(probed?.framerate))) overlay.framerate = Number(probed.framerate)
+  if (Number.isFinite(Number(probed?.audio_bitrate))) overlay.audio_bitrate = Number(probed.audio_bitrate)
+  if (Number.isFinite(Number(probed?.video_bitrate))) overlay.video_bitrate = Number(probed.video_bitrate)
+  if (typeof probed?.format_name === 'string' && probed.format_name.trim()) overlay.format_name = probed.format_name.trim()
+  if (typeof probed?.codec_id === 'string' && probed.codec_id.trim()) overlay.codec_id = probed.codec_id.trim()
+  if (typeof probed?.audio_codec === 'string' && probed.audio_codec.trim()) overlay.audio_codec = probed.audio_codec.trim()
+  if (typeof probed?.video_codec === 'string' && probed.video_codec.trim()) overlay.video_codec = probed.video_codec.trim()
+  if (typeof probed?.artist === 'string' && probed.artist.trim()) overlay.artist = probed.artist.trim()
+  if (typeof probed?.description === 'string' && probed.description.trim()) overlay.description = probed.description.trim()
+  if (typeof probed?.url === 'string' && probed.url.trim()) overlay.url = probed.url.trim()
+
+  const metadataEntry = resolveMetadataEntryForFile(filePath, metadataJsonCache)
+  if (metadataEntry) {
+    applyMetadataOverlayFromEntry(item, overlay, metadataEntry)
+    if (Array.isArray(metadataEntry.tags)) {
+      item.tags = metadataEntry.tags
+    }
+    if (Array.isArray(metadataEntry.folders)) {
+      item.folders = metadataEntry.folders
+    }
+    if (Array.isArray(metadataEntry.comments)) {
+      item.comments = metadataEntry.comments
+    }
+    if (typeof metadataEntry.last_played_at === 'string') {
+      item.last_played_at = metadataEntry.last_played_at
+    }
+    if (typeof metadataEntry.is_deleted === 'boolean') {
+      item.is_deleted = metadataEntry.is_deleted
+    }
+  }
+  if (probed) {
+    if (typeof probed.format_name === 'string' && probed.format_name.trim()) {
+      item.format_name = probed.format_name.trim()
+      overlay.format_name = probed.format_name.trim()
+    }
+    if (typeof probed.codec_id === 'string' && probed.codec_id.trim()) {
+      item.codec_id = probed.codec_id.trim()
+      overlay.codec_id = probed.codec_id.trim()
+    }
+    if (typeof probed.audio_codec === 'string' && probed.audio_codec.trim()) {
+      item.audio_codec = probed.audio_codec.trim()
+      overlay.audio_codec = probed.audio_codec.trim()
+    }
+    if (typeof probed.video_codec === 'string' && probed.video_codec.trim()) {
+      item.video_codec = probed.video_codec.trim()
+      overlay.video_codec = probed.video_codec.trim()
+    }
+  }
+
+  const resolvedTagIds = ensureTagIdsByName(meta, activeLibraryPath, item.tags)
+  if (resolvedTagIds.length > 0) {
+    overlay.tag_ids = resolvedTagIds
+  }
+  const resolvedFolderIds = ensureFolderIdsByName(meta, activeLibraryPath, item.folders)
+  if (resolvedFolderIds.length > 0) {
+    overlay.folder_ids = resolvedFolderIds
+  }
+
+  meta.byFilePath[filePath] = overlay
+  try {
+    fs.writeFileSync(path.join(fileDir, 'metadata.json'), JSON.stringify(item, null, 2), 'utf8')
+  } catch {
+    // metadata.json write errors should not abort refresh
+  }
+
+  return { item, overlay }
 }
 
 function probeMediaMetadata(filePath) {
@@ -2197,6 +3080,61 @@ function probeMediaMetadata(filePath) {
   }
 }
 
+function getMetadataJsonPathForFile(filePath) {
+  const normalized = String(filePath || '').trim()
+  if (!normalized) return null
+  return path.join(path.dirname(normalized), 'metadata.json')
+}
+
+function syncMetadataJsonForMedia(media, overlay, meta) {
+  try {
+    const filePath = String(media?.file_path || '').trim()
+    const metadataPath = getMetadataJsonPathForFile(filePath)
+    if (!metadataPath) return
+
+    const baseRaw = readJsonIfExists(metadataPath, null)
+    const base = baseRaw && typeof baseRaw === 'object' && !Array.isArray(baseRaw) ? { ...baseRaw } : {}
+    const merged = { ...media, ...overlay }
+    const { tags, folders } = getResolvedTagsAndFolders(meta)
+    const tagById = new Map(asArray(tags).map((t) => [Number(t?.id), t]))
+    const tagByName = new Map(
+      asArray(tags)
+        .filter((t) => typeof t?.name === 'string' && t.name.trim())
+        .map((t) => [String(t.name).trim().toLowerCase(), t]),
+    )
+    const folderById = new Map(asArray(folders).map((f) => [Number(f?.id), f]))
+    const folderByName = new Map(
+      asArray(folders)
+        .filter((f) => typeof f?.name === 'string' && f.name.trim())
+        .map((f) => [String(f.name).trim().toLowerCase(), f]),
+    )
+
+    const tagIds = asArray(overlay?.tag_ids).map((v) => Number(v)).filter(Number.isFinite)
+    const folderIds = asArray(overlay?.folder_ids).map((v) => Number(v)).filter(Number.isFinite)
+    const resolvedTags = tagIds.length > 0
+      ? tagIds.map((id) => tagById.get(id)).filter(Boolean)
+      : normalizeNamedEntities(merged?.tags, tagById, tagByName, 'tag')
+    const resolvedFolders = folderIds.length > 0
+      ? folderIds.map((id) => folderById.get(id)).filter(Boolean)
+      : normalizeNamedEntities(merged?.folders, folderById, folderByName, 'folder')
+
+    const payload = {
+      ...base,
+      ...merged,
+      file_path: filePath,
+      file_name: String(merged?.file_name || path.basename(filePath)),
+      tags: resolvedTags,
+      folders: resolvedFolders,
+    }
+    delete payload.tag_ids
+    delete payload.folder_ids
+
+    fs.writeFileSync(metadataPath, JSON.stringify(payload, null, 2), 'utf8')
+  } catch {
+    // metadata.json sync failures should not break in-app updates.
+  }
+}
+
 function updateMediaMetaById(mediaId, updater) {
   const idNum = Number(mediaId)
   if (!Number.isFinite(idNum)) return null
@@ -2215,6 +3153,7 @@ function updateMediaMetaById(mediaId, updater) {
   saveLocalMeta(meta)
 
   const merged = { ...media, ...next }
+  syncMetadataJsonForMedia(merged, next, meta)
   mediaIndexById.set(idNum, merged)
   return merged
 }
@@ -2359,14 +3298,23 @@ function handleRequest(req) {
   }
 
   if (method === 'update_server_config') {
-    try {
-      const current = loadServerConfig()
-      const updates = params?.updates && typeof params.updates === 'object' ? params.updates : {}
-      const next = saveServerConfig({ ...current, ...updates })
-      send({ id, ok: true, result: next })
-    } catch (err) {
-      send({ id, ok: false, error: `update_server_config failed: ${err?.message || String(err)}` })
-    }
+    ; (async () => {
+      try {
+        const current = loadServerConfig()
+        const updates = params?.updates && typeof params.updates === 'object' ? params.updates : {}
+        const prevPort = Number(current?.port || 53913)
+        const next = saveServerConfig({ ...current, ...updates })
+        const nextPort = Number(next?.port || 53913)
+        const running = Boolean(networkServer && networkServer.listening)
+        if (running && prevPort !== nextPort) {
+          await stopNetworkServer()
+          await startNetworkServer()
+        }
+        send({ id, ok: true, result: next })
+      } catch (err) {
+        send({ id, ok: false, error: `update_server_config failed: ${err?.message || String(err)}` })
+      }
+    })()
     return
   }
 
@@ -2382,33 +3330,40 @@ function handleRequest(req) {
   }
 
   if (method === 'start_server') {
-    try {
-      const current = loadServerConfig()
-      saveServerConfig({ ...current, isEnabled: true })
-      saveServerState({ running: true })
-      send({ id, ok: true, result: { success: true } })
-    } catch (err) {
-      send({ id, ok: true, result: { success: false, error: err?.message || String(err) } })
-    }
+    ; (async () => {
+      try {
+        const current = loadServerConfig()
+        saveServerConfig({ ...current, isEnabled: true })
+        const result = await startNetworkServer()
+        send({ id, ok: true, result })
+      } catch (err) {
+        send({ id, ok: true, result: { success: false, error: err?.message || String(err) } })
+      }
+    })()
     return
   }
 
   if (method === 'stop_server') {
-    try {
-      const current = loadServerConfig()
-      saveServerConfig({ ...current, isEnabled: false })
-      saveServerState({ running: false })
-      send({ id, ok: true, result: { success: true } })
-    } catch (err) {
-      send({ id, ok: true, result: { success: false, error: err?.message || String(err) } })
-    }
+    ; (async () => {
+      try {
+        const current = loadServerConfig()
+        saveServerConfig({ ...current, isEnabled: false })
+        const result = await stopNetworkServer()
+        send({ id, ok: true, result })
+      } catch (err) {
+        send({ id, ok: true, result: { success: false, error: err?.message || String(err) } })
+      }
+    })()
     return
   }
 
   if (method === 'get_server_status') {
     try {
-      const state = loadServerState()
-      send({ id, ok: true, result: Boolean(state.running) })
+      const running = Boolean(networkServer && networkServer.listening)
+      if (!running) {
+        saveServerState({ running: false })
+      }
+      send({ id, ok: true, result: running })
     } catch (err) {
       send({ id, ok: true, result: false })
     }
@@ -2662,16 +3617,33 @@ function handleRequest(req) {
         if (activeLibraryPath) {
           const imagesRoot = path.join(activeLibraryPath, 'images')
           const scanRoot = fs.existsSync(imagesRoot) ? imagesRoot : activeLibraryPath
-          send({ id: null, ok: true, event: 'refresh-progress', payload: { current: 5, total: 100 } })
           const scannedRaw = await scanLocalMediaFilesAsync(scanRoot, DEFAULT_SCAN_LIMIT, (pulse) => {
-            // 5%..85% during scan
-            const progress = Math.min(85, 5 + Math.floor((Number(pulse?.processed || 0) / 25000) * 80))
+            const progress = Math.min(30, Math.floor((Number(pulse?.processed || 0) / 25000) * 30))
             send({ id: null, ok: true, event: 'refresh-progress', payload: { current: progress, total: 100 } })
           })
-          send({ id: null, ok: true, event: 'refresh-progress', payload: { current: 90, total: 100 } })
+          send({ id: null, ok: true, event: 'refresh-progress', payload: { current: 30, total: 100 } })
           writeLibraryMediaIndex(activeLibraryPath, scannedRaw)
-          setCachedScannedMedia(activeLibraryPath, scannedRaw)
-          const scanned = mergeMediaWithMeta(scannedRaw)
+
+          const meta = loadLocalMeta()
+          const metadataJsonCache = new Map()
+          if (!meta.byFilePath || typeof meta.byFilePath !== 'object') {
+            meta.byFilePath = {}
+          }
+          const refreshed = []
+          const total = Math.max(scannedRaw.length, 1)
+
+          for (let i = 0; i < scannedRaw.length; i += 1) {
+            const media = scannedRaw[i]
+            const rebuilt = refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache)
+            refreshed.push(rebuilt?.item || media)
+            const progress = 30 + Math.floor(((i + 1) / total) * 70)
+            send({ id: null, ok: true, event: 'refresh-progress', payload: { current: Math.min(progress, 100), total: 100 } })
+          }
+
+          saveLocalMeta(meta)
+          writeLibraryMediaIndex(activeLibraryPath, refreshed)
+          setCachedScannedMedia(activeLibraryPath, refreshed)
+          const scanned = mergeMediaWithMeta(refreshed, activeLibraryPath)
           mediaIndexById = new Map(asArray(scanned).map((m) => [Number(m?.id), m]))
           send({ id: null, ok: true, event: 'refresh-progress', payload: { current: 100, total: 100 } })
         } else {
@@ -2800,8 +3772,8 @@ function handleRequest(req) {
 
   if (method === 'get_tags') {
     try {
-      const meta = loadLocalMeta()
-      const { tags } = getResolvedTagsAndFolders(meta)
+      const meta = loadLocalMetaForLibrary(activeLibraryPath)
+      const { tags } = getResolvedTagsAndFolders(meta, activeLibraryPath)
       send({ id, ok: true, result: tags })
     } catch (err) {
       send({ id, ok: false, error: `get_tags failed: ${err?.message || String(err)}` })
@@ -3094,8 +4066,8 @@ function handleRequest(req) {
 
   if (method === 'get_folders') {
     try {
-      const meta = loadLocalMeta()
-      const { folders } = getResolvedTagsAndFolders(meta)
+      const meta = loadLocalMetaForLibrary(activeLibraryPath)
+      const { folders } = getResolvedTagsAndFolders(meta, activeLibraryPath)
       send({ id, ok: true, result: folders })
     } catch (err) {
       send({ id, ok: false, error: `get_folders failed: ${err?.message || String(err)}` })
@@ -3567,7 +4539,7 @@ function handleRequest(req) {
       if (isWindows()) {
         const resolved = path.resolve(filePath)
         if (fs.existsSync(resolved)) {
-          spawnDetached('explorer.exe', [resolved])
+          openPathWithDefaultFileManager(resolved)
         } else {
           spawnDetached('cmd', ['/c', 'start', '', resolved])
         }
@@ -3601,14 +4573,13 @@ function handleRequest(req) {
           targetDir = stat.isDirectory() ? resolved : path.dirname(resolved)
           appendDebugLog(`file_show_item_in_folder stat.isDirectory=${stat.isDirectory()} targetDir=${targetDir}`)
         } else {
-          targetDir = path.dirname(resolved)
+          targetDir = getExistingParentDir(resolved) || path.dirname(resolved)
           appendDebugLog(`file_show_item_in_folder fallback targetDir=${targetDir} exists=${fs.existsSync(targetDir)}`)
         }
-        appendDebugLog(`file_show_item_in_folder shell_open=${targetDir}`)
-        // Open via Windows shell so the default file manager handles the folder.
-        spawnDetached('cmd', ['/c', 'start', '', targetDir])
+        appendDebugLog(`file_show_item_in_folder shell_open_default_manager=${targetDir}`)
+        openPathWithDefaultFileManager(targetDir)
       } else {
-        const dirPath = path.dirname(filePath)
+        const dirPath = getExistingParentDir(filePath) || path.dirname(filePath)
         appendDebugLog(`file_show_item_in_folder xdg_open=${dirPath}`)
         spawnDetached('xdg-open', [dirPath])
       }
@@ -4701,78 +5672,31 @@ function handleRequest(req) {
       }
 
       let processed = 0
+      const refreshedById = new Map()
       const targets = targetIds.size > 0
         ? allMedia.filter((m) => targetIds.has(Number(m?.id)))
         : allMedia
 
       for (const media of targets) {
-        const filePath = String(media?.file_path || '').trim()
-        if (!filePath || filePath.startsWith('http') || !fs.existsSync(filePath)) continue
-        const ext = path.extname(filePath).toLowerCase()
-        const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(ext)
-        const isAudio = ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a'].includes(ext)
-        const fileType = isImage ? 'image' : isAudio ? 'audio' : 'video'
-
-        const overlay = meta.byFilePath[filePath] && typeof meta.byFilePath[filePath] === 'object'
-          ? { ...meta.byFilePath[filePath] }
-          : {}
-
-        const siblingThumb = findSiblingThumbnailPath(filePath)
-        if (siblingThumb) {
-          overlay.thumbnail_path = siblingThumb
-        } else if (fileType === 'video') {
-          const thumbRoot = activeLibraryPath
-            ? path.join(activeLibraryPath, '.obscura-thumbnails')
-            : path.join(getDataRoot(), 'thumbnails')
-          ensureDir(thumbRoot)
-          const thumbPath = path.join(thumbRoot, `${Number(media?.id) || hashPath(filePath).slice(0, 16)}.jpg`)
-          if (!fs.existsSync(thumbPath)) {
-            try {
-              extractThumbnailWithFfmpeg(filePath, thumbPath)
-            } catch {
-              // Ignore thumbnail generation failure.
-            }
-          }
-          if (fs.existsSync(thumbPath)) {
-            overlay.thumbnail_path = thumbPath
-          }
-        } else if (fileType === 'image') {
-          overlay.thumbnail_path = filePath
+        const rebuilt = refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache)
+        if (rebuilt) {
+          processed += 1
+          refreshedById.set(Number(rebuilt.item?.id), rebuilt.item)
         }
-
-        const probed = probeMediaMetadata(filePath)
-        if (probed) {
-          if (Number.isFinite(Number(probed.duration))) overlay.duration = Number(probed.duration)
-          if (Number.isFinite(Number(probed.width))) overlay.width = Number(probed.width)
-          if (Number.isFinite(Number(probed.height))) overlay.height = Number(probed.height)
-          if (Number.isFinite(Number(probed.framerate))) overlay.framerate = Number(probed.framerate)
-          if (Number.isFinite(Number(probed.audio_bitrate))) overlay.audio_bitrate = Number(probed.audio_bitrate)
-          if (Number.isFinite(Number(probed.video_bitrate))) overlay.video_bitrate = Number(probed.video_bitrate)
-          if (typeof probed.format_name === 'string' && probed.format_name.trim()) overlay.format_name = probed.format_name.trim()
-          if (typeof probed.codec_id === 'string' && probed.codec_id.trim()) overlay.codec_id = probed.codec_id.trim()
-          if (typeof probed.audio_codec === 'string' && probed.audio_codec.trim()) overlay.audio_codec = probed.audio_codec.trim()
-          if (typeof probed.video_codec === 'string' && probed.video_codec.trim()) overlay.video_codec = probed.video_codec.trim()
-          if (typeof probed.artist === 'string' && probed.artist.trim()) overlay.artist = probed.artist.trim()
-          if (typeof probed.description === 'string' && probed.description.trim()) overlay.description = probed.description.trim()
-          if (typeof probed.url === 'string' && probed.url.trim()) overlay.url = probed.url.trim()
-        }
-        const metadataEntry = resolveMetadataEntryForFile(filePath, metadataJsonCache)
-        if (metadataEntry) {
-          const shadow = {}
-          applyMetadataOverlayFromEntry(shadow, overlay, metadataEntry)
-        }
-        if (probed) {
-          if (typeof probed.format_name === 'string' && probed.format_name.trim()) overlay.format_name = probed.format_name.trim()
-          if (typeof probed.codec_id === 'string' && probed.codec_id.trim()) overlay.codec_id = probed.codec_id.trim()
-          if (typeof probed.audio_codec === 'string' && probed.audio_codec.trim()) overlay.audio_codec = probed.audio_codec.trim()
-          if (typeof probed.video_codec === 'string' && probed.video_codec.trim()) overlay.video_codec = probed.video_codec.trim()
-        }
-
-        meta.byFilePath[filePath] = overlay
-        processed += 1
       }
 
       saveLocalMeta(meta)
+      if (activeLibraryPath) {
+        const currentMedia = readLibraryMediaIndex(activeLibraryPath)
+        const refreshedItems = currentMedia.map((item) => (
+          refreshedById.has(Number(item?.id))
+            ? (refreshedById.get(Number(item?.id)) || item)
+            : item
+        ))
+        writeLibraryMediaIndex(activeLibraryPath, refreshedItems)
+        setCachedScannedMedia(activeLibraryPath, refreshedItems)
+        mediaIndexById = new Map(asArray(mergeMediaWithMeta(refreshedItems, activeLibraryPath)).map((m) => [Number(m?.id), m]))
+      }
       send({ id, ok: true, result: processed })
     } catch (err) {
       send({ id, ok: false, error: `refresh_media_metadata failed: ${err?.message || String(err)}` })
@@ -5197,20 +6121,35 @@ process.stdin.on('data', (chunk) => {
 process.stdin.on('end', () => {
   if (shuttingDown) return
   shuttingDown = true
-  destroyDiscordClient().finally(() => process.exit(0))
+  stopNetworkServer().finally(() => {
+    destroyDiscordClient().finally(() => process.exit(0))
+  })
 })
 
 process.on('SIGTERM', () => {
   if (shuttingDown) return
   shuttingDown = true
-  destroyDiscordClient().finally(() => process.exit(0))
+  stopNetworkServer().finally(() => {
+    destroyDiscordClient().finally(() => process.exit(0))
+  })
 })
 
 process.on('SIGINT', () => {
   if (shuttingDown) return
   shuttingDown = true
-  destroyDiscordClient().finally(() => process.exit(0))
+  stopNetworkServer().finally(() => {
+    destroyDiscordClient().finally(() => process.exit(0))
+  })
 })
+
+try {
+  const initialServerConfig = loadServerConfig()
+  if (initialServerConfig?.isEnabled) {
+    void startNetworkServer()
+  }
+} catch {
+  // ignore startup server bootstrap errors
+}
 
 send({ id: null, ok: true, event: 'ready', pid: process.pid })
 

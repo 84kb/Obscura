@@ -1,6 +1,6 @@
 {
     "name": "obscura",
-    "version": "0.8.12",
+    "version": "0.8.13",
     "description": "ライブラリ型メディアプレイヤー",
     "main": "dist-tauri/index.html",
     "workspaces": [
@@ -18,7 +18,7 @@
         "build:tauri:web": "vite build --config vite.tauri.config.ts",
         "pretauri:dev": "node scripts/kill-obscura-dev.cjs",
         "prepare:tauri:node": "node scripts/prepare-tauri-node.cjs",
-        "tauri:dev": "tauri dev",
+        "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
         "tauri:build": "npm run bump && npm run prepare:tauri:node && tauri build && node scripts/generate-latest-yml.cjs",
         "build:mobile": "npm run bump && vite build --config vite.mobile.config.ts && move dist-mobile\\mobile.html dist-mobile\\index.html && npx cap sync android"
     },

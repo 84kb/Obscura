@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Tag, TagGroup, MediaFile } from '@obscura/core'
 import { api } from '../api'
+import { ConfirmModal } from './ConfirmModal'
 import SelectionBox from './SelectionBox'
 import './TagManager.css'
 
@@ -28,6 +29,11 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; group: TagGroup } | null>(null)
     const [tagContextMenu, setTagContextMenu] = useState<{ x: number; y: number; tagId: number } | null>(null)
     const [editingGroupId, setEditingGroupId] = useState<number | null>(null)
+    const [confirmState, setConfirmState] = useState<null | {
+        title: string
+        message: string
+        onConfirm: () => void | Promise<void>
+    }>(null)
 
     const [editingGroupName, setEditingGroupName] = useState('')
 
@@ -634,6 +640,13 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
                         className="danger"
                         onClick={(e) => {
                             e.stopPropagation()
+                            setConfirmState({
+                                title: 'グループを削除',
+                                message: `グループ "${contextMenu.group.name}" を削除しますか？\n中のタグは「未分類」に移動されます。`,
+                                onConfirm: () => handleDeleteGroup(contextMenu.group.id),
+                            })
+                            closeContextMenu()
+                            return
                             if (confirm(`グループ "${contextMenu.group.name}" を削除しますか？\n中のタグは「未分類」に移動されます。`)) {
                                 handleDeleteGroup(contextMenu.group.id)
                             }
@@ -658,6 +671,15 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
                 >
                     <div className="menu-item delete" onClick={() => {
                         const tag = tags.find(t => t.id === tagContextMenu.tagId)
+                        if (tag) {
+                            setConfirmState({
+                                title: 'タグを削除',
+                                message: `タグ "${tag.name}" を削除しますか？`,
+                                onConfirm: () => onDeleteTag(tag.id),
+                            })
+                            closeContextMenu()
+                            return
+                        }
                         if (tag && confirm(`タグ "${tag.name}" を削除しますか？`)) {
                             onDeleteTag(tag.id)
                             closeContextMenu()
@@ -670,6 +692,21 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
                         削除
                     </div>
                 </div>
+            )}
+            {confirmState && (
+                <ConfirmModal
+                    title={confirmState.title}
+                    message={confirmState.message}
+                    confirmLabel="削除"
+                    cancelLabel="キャンセル"
+                    isDestructive={true}
+                    onConfirm={async () => {
+                        const action = confirmState.onConfirm
+                        setConfirmState(null)
+                        await action()
+                    }}
+                    onCancel={() => setConfirmState(null)}
+                />
             )}
         </div>
     )

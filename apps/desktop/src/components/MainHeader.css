@@ -403,12 +403,13 @@ body.dragging-file .app-drag-overlay {
     transform: translateX(-50%);
     width: 60%;
     max-width: 600px;
-    background-color: rgba(30, 30, 30, 0.95);
+    background:
+        linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 92%, transparent), color-mix(in srgb, var(--bg-card) 98%, var(--primary) 2%));
     backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid color-mix(in srgb, var(--border) 85%, var(--primary) 15%);
     border-radius: 12px;
     padding: 12px 20px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 18px 48px color-mix(in srgb, var(--shadow) 55%, transparent);
     z-index: 1000;
     animation: slideUp 0.3s ease-out;
 }
@@ -431,7 +432,7 @@ body.dragging-file .app-drag-overlay {
     align-items: center;
     margin-bottom: 8px;
     font-size: 13px;
-    color: #eee;
+    color: var(--text-main);
 }
 
 .scanning-text {
@@ -440,19 +441,19 @@ body.dragging-file .app-drag-overlay {
 
 .progress-count {
     font-family: monospace;
-    color: #aaa;
+    color: var(--text-muted);
 }
 
 .bottom-progress-track {
     height: 6px;
-    background-color: rgba(255, 255, 255, 0.1);
+    background-color: color-mix(in srgb, var(--bg-tertiary) 82%, transparent);
     border-radius: 3px;
     overflow: hidden;
 }
 
 .bottom-progress-fill {
     height: 100%;
-    background: linear-gradient(90deg, #3498db, #2980b9);
+    background: linear-gradient(90deg, var(--primary), color-mix(in srgb, var(--primary) 70%, var(--accent) 30%));
     border-radius: 3px;
     transition: width 0.2s ease-out;
 }

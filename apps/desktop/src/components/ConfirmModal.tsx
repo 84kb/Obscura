@@ -14,11 +14,11 @@ interface ConfirmModalProps {
 export function ConfirmModal({
     title,
     message,
-    confirmLabel = '確認',
+    confirmLabel = 'OK',
     cancelLabel = 'キャンセル',
     onConfirm,
     onCancel,
-    isDestructive = false
+    isDestructive = false,
 }: ConfirmModalProps) {
     return createPortal(
         <div className="confirm-modal-overlay" onClick={onCancel}>
@@ -47,6 +47,6 @@ export function ConfirmModal({
                 </div>
             </div>
         </div>,
-        document.body
+        document.body,
     )
 }

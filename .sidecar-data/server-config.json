@@ -1,0 +1,14 @@
+{
+  "isEnabled": true,
+  "port": 53913,
+  "hostSecret": "db7f7a7e41755bda9a037af3d0576925",
+  "allowedIPs": [],
+  "maxConnections": 10,
+  "maxUploadSize": 100,
+  "maxUploadRate": 10,
+  "enableAuditLog": true,
+  "requireHttps": false,
+  "sslCertPath": "",
+  "sslKeyPath": "",
+  "publishLibraryPath": ""
+}

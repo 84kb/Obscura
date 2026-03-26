@@ -4,6 +4,7 @@ import { AppSettings, Library, ClientConfig, AutoImportPath, Theme, ThemeColors 
 import { ShortcutContext, ShortcutAction } from '../contexts/ShortcutContext'
 import { useTheme } from '../hooks/useTheme'
 import { defaultDarkTheme, parseThemeCss, THEME_TEMPLATES } from '../utils/themeManager'
+import { ConfirmModal } from './ConfirmModal'
 import './SettingsModal.css'
 
 interface SettingsModalProps {
@@ -117,6 +118,13 @@ const DEFAULT_INSPECTOR_INFO_VISIBILITY = {
 
 export function SettingsModal({ settings, onUpdateSettings, onClose, language = 'ja' }: SettingsModalProps) {
     const tr = (ja: string, en: string) => language === 'en' ? en : ja
+    const [confirmState, setConfirmState] = useState<null | {
+        title: string
+        message: string
+        confirmLabel?: string
+        isDestructive?: boolean
+        onConfirm: () => void | Promise<void>
+    }>(null)
     const [activeCategory, setActiveCategory] = useState<Category>('general')
     const [appVersion, setAppVersion] = useState<string>('Unknown')
     const [searchQuery, setSearchQuery] = useState('')
@@ -281,9 +289,13 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, language = 
     }
 
     const handleDeleteTheme = (id: string) => {
-        if (confirm(tr('このテーマを削除してもよろしいですか？', 'Delete this theme?'))) {
-            deleteTheme(id)
-        }
+        setConfirmState({
+            title: tr('テーマを削除', 'Delete theme'),
+            message: tr('このテーマを削除してもよろしいですか？', 'Delete this theme?'),
+            confirmLabel: tr('削除', 'Delete'),
+            isDestructive: true,
+            onConfirm: () => deleteTheme(id),
+        })
     }
 
     const startEditTheme = (theme: Theme) => {
@@ -905,10 +917,16 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, language = 
     const handleToggleServer = async () => {
         try {
             if (isServerRunning) {
-                await api.stopServer()
+                const result = await api.stopServer()
+                if (!(result as any)?.success) {
+                    throw new Error((result as any)?.error || tr('サーバー停止に失敗しました', 'Failed to stop server'))
+                }
                 setIsServerRunning(false)
             } else {
-                await api.startServer()
+                const result = await api.startServer()
+                if (!(result as any)?.success) {
+                    throw new Error((result as any)?.error || tr('サーバー起動に失敗しました', 'Failed to start server'))
+                }
                 setIsServerRunning(true)
             }
             // 設定更新
@@ -916,6 +934,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, language = 
             setServerConfig(config)
         } catch (e) {
             console.error('Failed to toggle server:', e)
+            alert(tr(`サーバー状態の切り替えに失敗しました: ${(e as any)?.message || e}`, `Failed to toggle server state: ${(e as any)?.message || e}`))
         }
     }
 
@@ -990,13 +1009,20 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, language = 
     }
 
     const handleDeleteUser = async (userId: string) => {
-        if (!confirm(tr('このユーザーを削除しますか？', 'Delete this user?'))) return
-        try {
-            await api.deleteSharedUser(userId)
-            setSharedUsers(sharedUsers.filter(u => u.id !== userId))
-        } catch (e) {
-            console.error('Failed to delete user:', e)
-        }
+        setConfirmState({
+            title: tr('ユーザーを削除', 'Delete user'),
+            message: tr('このユーザーを削除しますか？', 'Delete this user?'),
+            confirmLabel: tr('削除', 'Delete'),
+            isDestructive: true,
+            onConfirm: async () => {
+                try {
+                    await api.deleteSharedUser(userId)
+                    setSharedUsers(sharedUsers.filter(u => u.id !== userId))
+                } catch (e) {
+                    console.error('Failed to delete user:', e)
+                }
+            },
+        })
     }
 
     const handleTogglePermission = async (userId: string, permission: any) => {
@@ -1300,17 +1326,22 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, language = 
     }
 
     const handleDeleteRemoteLibrary = async (lib: any) => {
-        if (!confirm(tr(`リモートライブラリ "${lib.name || lib.url}" を削除しますか？`, `Delete remote library "${lib.name || lib.url}"?`))) return
-        try {
-            // updateClientConfig でリストから除外して保存
-            const currentLibs = clientConfig?.remoteLibraries || []
-            const newLibs = currentLibs.filter((l: any) => l.id !== lib.id)
-            await api.updateClientConfig({ remoteLibraries: newLibs })
-            // local state update
-            setClientConfig({ ...clientConfig, remoteLibraries: newLibs })
-        } catch (e) {
-            console.error('Failed to delete remote lib:', e)
-        }
+        setConfirmState({
+            title: tr('リモートライブラリを削除', 'Delete remote library'),
+            message: tr(`リモートライブラリ "${lib.name || lib.url}" を削除しますか？`, `Delete remote library "${lib.name || lib.url}"?`),
+            confirmLabel: tr('削除', 'Delete'),
+            isDestructive: true,
+            onConfirm: async () => {
+                try {
+                    const currentLibs = clientConfig?.remoteLibraries || []
+                    const newLibs = currentLibs.filter((l: any) => l.id !== lib.id)
+                    await api.updateClientConfig({ remoteLibraries: newLibs })
+                    setClientConfig({ ...clientConfig, remoteLibraries: newLibs })
+                } catch (e) {
+                    console.error('Failed to delete remote lib:', e)
+                }
+            },
+        })
     }
 
     const renderNetworkSettings = () => {
@@ -2941,6 +2972,21 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, language = 
                     </div>
                 )}
             </div>
+            {confirmState && (
+                <ConfirmModal
+                    title={confirmState.title}
+                    message={confirmState.message}
+                    confirmLabel={confirmState.confirmLabel || tr('OK', 'OK')}
+                    cancelLabel={tr('キャンセル', 'Cancel')}
+                    isDestructive={Boolean(confirmState.isDestructive)}
+                    onConfirm={async () => {
+                        const action = confirmState.onConfirm
+                        setConfirmState(null)
+                        await action()
+                    }}
+                    onCancel={() => setConfirmState(null)}
+                />
+            )}
         </div>
     )
 }

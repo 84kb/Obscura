@@ -13,6 +13,7 @@ export function useLibrary() {
     const [loading, setLoading] = useState(false)
     const [loadingProgress, setLoadingProgress] = useState(0)
     const isInitialLoadDone = useRef(false)
+    const [startupLoading, setStartupLoading] = useState(true)
     const [activeLibrary, setActiveLibrary] = useState<Library | null>(null)
     const [activeRemoteLibrary, setActiveRemoteLibrary] = useState<RemoteLibrary | null>(null)
     const [myUserToken, setMyUserToken] = useState<string>('')
@@ -320,7 +321,7 @@ export function useLibrary() {
             }
 
             const targetPage = 1
-            const result = await api.getMediaFiles(targetPage, FULL_FETCH_LIMIT, filterOptions)
+            const result = await api.getMediaFiles(targetPage, FULL_FETCH_LIMIT, null)
             if (requestSeq !== loadRequestSeq.current) return
 
             let newFiles = Array.isArray(result) ? result : (result.media || [])
@@ -354,7 +355,7 @@ export function useLibrary() {
                 }
             }
         }
-    }, [activeRemoteLibrary, activeLibrary, transformRemoteMedia, myUserToken, isUserTokenLoaded, addNotification, filterOptions])
+    }, [activeRemoteLibrary, activeLibrary, transformRemoteMedia, myUserToken, isUserTokenLoaded, addNotification])
 
     const loadMore = useCallback(() => {
         // no-op in full-fetch compatibility mode
@@ -1467,6 +1468,7 @@ export function useLibrary() {
                     setTimeout(() => {
                         setLoading(false)
                         setLoadingProgress(0)
+                        setStartupLoading(false)
                     }, 120)
                     void Promise.all([loadTags(), loadTagGroups(), loadFolders()]).catch((e) => {
                         console.error('Failed to load metadata in background:', e)
@@ -1477,6 +1479,7 @@ export function useLibrary() {
             } finally {
                 if (isFirstLoad) {
                     // Already finalized during first-load fast path.
+                    setStartupLoading(false)
                 }
             }
         }
@@ -1520,6 +1523,7 @@ export function useLibrary() {
         libraries,
         loading,
         loadingProgress,
+        startupLoading,
         activeLibrary,
         hasActiveLibrary: activeLibrary !== null,
         filterOptions,
