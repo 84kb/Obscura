@@ -46,16 +46,22 @@ export function InspectorSection({
                 className="section-header"
                 {...attributes}
                 {...listeners}
-                onClick={() => onToggle()}
             >
-                <h3>{title}</h3>
+                <button
+                    type="button"
+                    className="section-title-toggle"
+                    onClick={() => onToggle()}
+                >
+                    <h3>{title}</h3>
+                </button>
                 {extraHeaderContent}
                 <svg
+                    className="section-toggle-icon"
                     width="12"
                     height="12"
                     viewBox="0 0 24 24"
                     fill="currentColor"
-                    style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.2s', marginLeft: 'auto', opacity: 0.6 }}
+                    style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.2s', marginLeft: 'auto' }}
                 >
                     <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z" />
                 </svg>

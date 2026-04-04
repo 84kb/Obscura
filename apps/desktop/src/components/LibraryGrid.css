@@ -12,6 +12,36 @@
     /* Ensure it doesn't spill out */
 }
 
+#library-vgrid-container.library-grid-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+}
+
+.library-grid:hover #library-vgrid-container.library-grid-scroll {
+    scrollbar-color: color-mix(in srgb, var(--border) 82%, var(--text-muted) 18%) transparent;
+}
+
+#library-vgrid-container.library-grid-scroll::-webkit-scrollbar {
+    width: 10px;
+}
+
+#library-vgrid-container.library-grid-scroll::-webkit-scrollbar-track {
+    background: transparent;
+    margin: 16px 0;
+}
+
+#library-vgrid-container.library-grid-scroll::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+
+.library-grid:hover #library-vgrid-container.library-grid-scroll::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--border) 82%, var(--text-muted) 18%);
+    background-clip: padding-box;
+}
+
 /* Empty State Styles */
 .library-empty {
     width: 100%;

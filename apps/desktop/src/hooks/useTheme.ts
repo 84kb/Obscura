@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Theme, ThemeColors, ClientConfig } from '@obscura/core';
-import { defaultDarkTheme, defaultLightTheme, defaultGrayTheme, nordTheme, tokyoNightTheme, rosePineMoonTheme, catppuccinMacchiatoTheme, catppuccinFrappeTheme, everforestTheme, applyTheme } from '../utils/themeManager';
+import { defaultDarkTheme, defaultLightTheme, defaultGrayTheme, nordTheme, tokyoNightTheme, rosePineMoonTheme, catppuccinMacchiatoTheme, catppuccinFrappeTheme, everforestTheme, applyTheme, createCssVariablesObject } from '../utils/themeManager';
 
 export const useTheme = (config: ClientConfig, updateConfig: (updates: Partial<ClientConfig>) => void, options: { applyOnMount?: boolean } = { applyOnMount: true }) => {
     const [themes, setThemes] = useState<Theme[]>(() => {
@@ -66,14 +66,7 @@ export const useTheme = (config: ClientConfig, updateConfig: (updates: Partial<C
 
     const saveThemeColorsToLocalStorage = useCallback((theme: Theme) => {
         if (!theme.isSystem) {
-            const cssVars: Record<string, string> = {
-                '--bg-dark': theme.colors.bgDark, '--bg-card': theme.colors.bgCard,
-                '--bg-sidebar': theme.colors.bgSidebar, '--bg-hover': theme.colors.bgHover,
-                '--primary': theme.colors.primary, '--primary-hover': theme.colors.primaryHover,
-                '--primary-light': theme.colors.primaryLight, '--accent': theme.colors.accent,
-                '--text-main': theme.colors.textMain, '--text-muted': theme.colors.textMuted,
-                '--border': theme.colors.border
-            };
+            const cssVars = createCssVariablesObject(theme.colors);
             localStorage.setItem('active_theme_colors', JSON.stringify(cssVars));
 
             // 高速適用のためCSS文字列を直接保存

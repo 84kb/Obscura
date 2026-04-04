@@ -1,14 +1,13 @@
 .main-header {
-    height: 60px;
+    min-height: calc(var(--window-chrome-height) + 16px);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 20px;
-    background-color: var(--bg-dark);
-    border-bottom: 1px solid var(--border);
+    padding: 8px 12px;
+    background-color: var(--layout-main-bg);
     position: sticky;
     top: 0;
-    z-index: 100;
+    z-index: 120;
     -webkit-app-region: drag;
 }
 
@@ -21,13 +20,14 @@ body.dragging-file .main-header {
 .header-right {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 10px;
     -webkit-app-region: no-drag;
+    min-height: 24px;
 }
 
 .history-buttons {
     display: flex;
-    gap: 8px;
+    gap: 4px;
 }
 
 .icon-btn {
@@ -35,7 +35,7 @@ body.dragging-file .main-header {
     border: none;
     color: var(--text-muted);
     cursor: pointer;
-    padding: 6px;
+    padding: 4px;
     border-radius: 4px;
     display: flex;
     align-items: center;
@@ -54,9 +54,7 @@ body.dragging-file .main-header {
 }
 
 .current-title {
-    font-size: 16px;
-    font-weight: 600;
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--text-main);
     white-space: nowrap;
@@ -67,32 +65,32 @@ body.dragging-file .main-header {
 .size-slider-container {
     display: flex;
     align-items: center;
-    gap: 12px;
-    background: rgba(255, 255, 255, 0.03);
-    padding: 4px 16px;
+    gap: 8px;
+    background: transparent;
+    padding: 2px 10px;
     border-radius: 50px;
     border: 1px solid var(--border);
 }
 
 .slider-icon {
-    font-size: 18px;
+    font-size: 14px;
     color: var(--text-muted);
     user-select: none;
 }
 
 .size-slider {
-    width: 120px;
+    width: 90px;
     appearance: none;
     background: var(--border);
-    height: 4px;
+    height: 3px;
     border-radius: 2px;
     outline: none;
 }
 
 .size-slider::-webkit-slider-thumb {
     appearance: none;
-    width: 14px;
-    height: 14px;
+    width: 10px;
+    height: 10px;
     background: var(--text-main);
     border-radius: 50%;
     cursor: pointer;
@@ -101,14 +99,14 @@ body.dragging-file .main-header {
 
 .divider {
     width: 1px;
-    height: 24px;
+    height: 18px;
     background: var(--border);
 }
 
 .filter-sort-actions {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
 }
 
 .sort-group {
@@ -116,16 +114,16 @@ body.dragging-file .main-header {
     align-items: center;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding-left: 8px;
+    border-radius: 5px;
+    padding-left: 6px;
 }
 
 .sort-select {
     background: transparent;
     border: none;
     color: var(--text-main);
-    font-size: 13px;
-    padding: 6px 8px;
+    font-size: 11px;
+    padding: 4px 6px;
     outline: none;
     cursor: pointer;
     min-width: 80px;
@@ -139,25 +137,25 @@ body.dragging-file .main-header {
 
 .sort-dir {
     font-weight: bold;
-    font-size: 14px;
+    font-size: 12px;
 }
 
 .header-search {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 6px;
-    padding: 0 12px;
-    width: 220px;
+    padding: 0 10px;
+    width: 180px;
     transition: all 0.3s;
     position: relative;
 }
 
 .header-search:focus-within {
     border-color: var(--primary);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary), transparent 90%);
+    box-shadow: none;
 }
 
 .header-search svg {
@@ -168,8 +166,8 @@ body.dragging-file .main-header {
     background: transparent;
     border: none;
     color: var(--text-main);
-    font-size: 13px;
-    padding: 8px 0;
+    font-size: 11px;
+    padding: 6px 0;
     width: auto;
     flex: 1;
     outline: none;
@@ -180,17 +178,18 @@ body.dragging-file .main-header {
 .main-header-container {
     position: sticky;
     top: 0;
-    z-index: 100;
+    z-index: 120;
+    background: var(--layout-main-bg);
+    isolation: isolate;
 }
 
 /* フィルターバー */
 .filter-bar {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 20px;
-    background-color: var(--bg-dark);
-    border-bottom: 1px solid var(--border);
+    gap: 6px;
+    padding: 6px 12px;
+    background-color: var(--layout-main-bg);
     justify-content: space-between;
     flex-wrap: wrap;
 }
@@ -198,7 +197,7 @@ body.dragging-file .main-header {
 .filter-bar-filters {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 4px;
     flex-wrap: wrap;
 }
 
@@ -211,12 +210,12 @@ body.dragging-file .main-header {
 .filter-bar-btn {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
+    gap: 4px;
+    padding: 4px 8px;
     background: transparent;
     border: none;
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: 11px;
     cursor: pointer;
     border-radius: 4px;
     transition: all 0.2s;
@@ -239,7 +238,7 @@ body.dragging-file .main-header {
 .filter-bar-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 4px;
     margin-left: auto;
 }
 
@@ -248,18 +247,31 @@ body.dragging-file .main-header {
 }
 
 .filter-action-btn {
-    width: 34px;
-    height: 34px;
+    width: 28px;
+    height: 28px;
     justify-content: center;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
+    background: transparent;
+    border: none;
     border-radius: 6px;
     color: var(--text-main);
     padding: 0;
 }
 
+.filter-action-btn:hover,
+.filter-action-btn.active,
+.filter-reset-btn:hover,
+.filter-reset-btn.active {
+    background: transparent;
+    color: var(--text-main);
+}
+
+.filter-action-btn.active {
+    color: var(--primary);
+}
+
 .filter-reset-btn {
-    width: 34px;
+    width: 28px;
+    height: 28px;
 }
 
 .filter-preset-menu {
@@ -272,14 +284,14 @@ body.dragging-file .main-header {
     border-radius: 8px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     z-index: 1100;
-    overflow: hidden;
+    overflow: visible;
 }
 
 .filter-preset-search {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 10px 12px;
+    gap: 6px;
+    padding: 8px 10px;
     border-bottom: 1px solid var(--border);
     color: var(--text-muted);
 }
@@ -290,12 +302,12 @@ body.dragging-file .main-header {
     border: none;
     color: var(--text-main);
     outline: none;
-    font-size: 13px;
+    font-size: 11px;
 }
 
 .filter-preset-menu-header {
-    padding: 10px 12px;
-    font-size: 12px;
+    padding: 8px 10px;
+    font-size: 10px;
     font-weight: 600;
     color: var(--text-main);
     border-bottom: 1px solid var(--border);
@@ -304,12 +316,13 @@ body.dragging-file .main-header {
 .filter-preset-list {
     max-height: 220px;
     overflow-y: auto;
+    overflow-x: visible;
     padding: 6px;
 }
 
 .filter-preset-empty {
     padding: 10px;
-    font-size: 12px;
+    font-size: 10px;
     color: var(--text-muted);
 }
 
@@ -318,7 +331,7 @@ body.dragging-file .main-header {
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 8px 10px;
+    padding: 6px 8px;
     background: transparent;
     border: none;
     border-radius: 6px;
@@ -331,7 +344,7 @@ body.dragging-file .main-header {
     position: relative;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     border-radius: 6px;
 }
 
@@ -372,8 +385,9 @@ body.dragging-file .main-header {
 
 .filter-preset-row-menu {
     position: absolute;
-    top: calc(100% + 4px);
-    right: 0;
+    top: -4px;
+    left: calc(100% + 6px);
+    right: auto;
     min-width: 120px;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
@@ -389,10 +403,10 @@ body.dragging-file .main-header {
     border: none;
     color: var(--text-main);
     text-align: left;
-    padding: 8px 10px;
+    padding: 6px 8px;
     border-radius: 6px;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 10px;
 }
 
 .filter-preset-row-action:hover {
@@ -414,13 +428,13 @@ body.dragging-file .main-header {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 10px 12px;
+    padding: 8px 10px;
     background: transparent;
     border: 1px solid var(--border);
     border-radius: 6px;
     color: var(--text-main);
     cursor: pointer;
-    font-size: 13px;
+    font-size: 11px;
 }
 
 .filter-preset-save-btn:hover {
@@ -449,16 +463,16 @@ body.dragging-file .main-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 16px;
+    padding: 6px 12px;
     gap: 12px;
 }
 
 .dropdown-row.toggle-row {
-    padding: 6px 16px;
+    padding: 5px 12px;
 }
 
 .dropdown-label {
-    font-size: 13px;
+    font-size: 11px;
     color: var(--text-main);
     white-space: nowrap;
 }
@@ -474,7 +488,7 @@ body.dragging-file .main-header {
     border: 1px solid var(--border);
     border-radius: 4px;
     color: var(--text-main);
-    font-size: 12px;
+    font-size: 10px;
     padding: 4px 8px;
     outline: none;
     cursor: pointer;
@@ -482,7 +496,7 @@ body.dragging-file .main-header {
 
 .dropdown-select.small {
     padding: 2px 6px;
-    font-size: 11px;
+    font-size: 10px;
 }
 
 .dropdown-select option {
@@ -508,8 +522,8 @@ body.dragging-file .main-header {
     background: transparent;
     border: none;
     color: var(--text-muted);
-    font-size: 12px;
-    padding: 4px 10px;
+    font-size: 10px;
+    padding: 3px 8px;
     cursor: pointer;
     transition: all 0.2s;
 }
@@ -551,8 +565,8 @@ body.dragging-file .main-header {
 .switch {
     position: relative;
     display: inline-block;
-    width: 36px;
-    height: 20px;
+    width: 32px;
+    height: 18px;
     flex-shrink: 0;
 }
 
@@ -577,8 +591,8 @@ body.dragging-file .main-header {
 .switch .slider:before {
     position: absolute;
     content: "";
-    height: 14px;
-    width: 14px;
+    height: 12px;
+    width: 12px;
     left: 3px;
     bottom: 3px;
     background-color: white;
@@ -591,7 +605,7 @@ body.dragging-file .main-header {
 }
 
 .switch input:checked+.slider:before {
-    transform: translateX(16px);
+    transform: translateX(14px);
 }
 
 /* Bottom Progress Bar */
@@ -630,7 +644,7 @@ body.dragging-file .main-header {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 8px;
-    font-size: 13px;
+    font-size: 11px;
     color: var(--text-main);
 }
 
@@ -692,7 +706,7 @@ body.dragging-file .main-header {
 
 .search-options-header {
     padding: 4px 16px 8px;
-    font-size: 11px;
+    font-size: 10px;
     color: var(--text-muted);
     font-weight: 600;
     text-transform: uppercase;
@@ -704,11 +718,11 @@ body.dragging-file .main-header {
 .search-option-row {
     display: flex;
     align-items: center;
-    padding: 8px 16px;
-    gap: 12px;
+    padding: 6px 12px;
+    gap: 8px;
     cursor: pointer;
     transition: background 0.1s;
-    font-size: 13px;
+    font-size: 11px;
     color: var(--text-main);
 }
 

@@ -2,12 +2,12 @@
 .player-header-bar {
     position: relative;
     width: 100%;
-    height: 60px;
-    background: rgba(0, 0, 0, 0.4);
+    min-height: calc(var(--window-chrome-height) + 16px);
+    background: var(--layout-main-bg);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 24px;
+    padding: 8px 24px;
     z-index: 10;
     opacity: 1;
     flex-shrink: 0;
@@ -18,12 +18,13 @@
 .header-right {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 10px;
+    min-height: 24px;
 }
 
 .header-title {
     color: white;
-    font-size: 16px;
+    font-size: 13px;
     font-weight: 500;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
     /* 2陦御ｻ･荳翫↓縺ｪ縺｣縺溘ｉ...縺ｫ縺吶ｋ */
@@ -40,15 +41,21 @@
     background: transparent;
     border: none;
     color: white;
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     transition: all 0.2s ease;
     -webkit-app-region: no-drag;
+}
+
+.header-back-button svg,
+.nav-btn svg {
+    width: 18px;
+    height: 18px;
 }
 
 .header-back-button:hover {
@@ -59,16 +66,16 @@
 /* 繝翫ン繧ｲ繝ｼ繧ｷ繝ｧ繝ｳ繝懊ち繝ｳ */
 .nav-buttons {
     display: flex;
-    gap: 8px;
+    gap: 4px;
 }
 
 .nav-btn {
     background: transparent;
     border: none;
     color: white;
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -94,7 +101,7 @@
     width: 100%;
     height: 100%;
     /* 閭梧勹騾城℃�医い繝励Μ縺ｮ閭梧勹繧定｡ｨ遉ｺ�� */
-    background: transparent;
+    background: var(--layout-main-bg);
     position: relative;
     overflow: hidden;
     display: flex;
@@ -150,7 +157,7 @@
 .player-controls-bar {
     height: 48px;
     /* 80px -> 48px */
-    background: var(--bg-card);
+    background: var(--player-controls-bg);
     border-top: 1px solid var(--border);
     padding: 0 12px;
     display: flex;

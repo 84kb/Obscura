@@ -1,11 +1,11 @@
 .sidebar {
     width: var(--sidebar-width);
-    background: var(--bg-sidebar);
+    background: var(--layout-panel-bg);
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
     height: 100%;
-    padding: var(--spacing-lg);
+    padding: 0 16px 16px;
     gap: 0;
     /* ギャップを削除して個別に制御 */
     position: relative;
@@ -15,11 +15,63 @@
 .sidebar-header {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-md);
+    gap: 3px;
     flex-shrink: 0;
-    padding-bottom: var(--spacing-md);
+    padding-top: calc(8px + var(--window-chrome-height) + 2px);
+    padding-bottom: 5px;
     border-bottom: 1px solid var(--border);
-    margin-bottom: var(--spacing-md);
+    margin-bottom: 6px;
+    -webkit-app-region: drag;
+    position: relative;
+}
+
+.sidebar-topbar {
+    position: absolute;
+    top: 8px;
+    left: 0;
+    right: 0;
+    height: var(--window-chrome-height);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0;
+    flex-shrink: 0;
+    padding: 0;
+}
+
+.sidebar-topbar-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    -webkit-app-region: no-drag;
+}
+
+.sidebar-topbar-group:first-child {
+    justify-content: flex-start;
+}
+
+.sidebar-topbar-group:last-child {
+    justify-content: flex-end;
+    margin-left: auto;
+}
+
+.sidebar-topbar-btn {
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease;
+}
+
+.sidebar-topbar-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-main);
 }
 
 .sidebar-section-header {
@@ -30,13 +82,10 @@
 }
 
 .sidebar-title {
-    font-size: 16px;
-    font-weight: 800;
-    background: linear-gradient(135deg, #3b82f6, #8b5cf6);
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
-    letter-spacing: 1px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-main);
+    letter-spacing: 0;
 }
 
 .sidebar-create-library-btn {
@@ -45,7 +94,7 @@
     color: white;
     border: none;
     border-radius: var(--radius-md);
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
     cursor: pointer;
     display: flex;
@@ -110,28 +159,30 @@
 .library-menu-container {
     position: relative;
     width: 100%;
-    margin-bottom: 8px;
+    margin-bottom: 2px;
+    -webkit-app-region: no-drag;
 }
 
 /* 現在のライブラリボタン */
 .current-library-btn {
     width: 100%;
-    padding: 12px 16px;
-    background: var(--bg-card);
-    border: 1.5px solid var(--border);
+    min-height: 26px;
+    padding: 4px 8px;
+    background: transparent;
+    border: 1px solid var(--border);
     border-radius: var(--radius-md);
     color: var(--text-main);
-    font-weight: 600;
+    font-weight: 500;
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 6px;
     transition: all 0.2s ease;
 }
 
 .current-library-btn:hover {
     background: var(--bg-hover);
-    border-color: var(--primary);
+    border-color: color-mix(in srgb, var(--text-muted), transparent 30%);
 }
 
 .current-library-btn .library-icon {
@@ -146,7 +197,7 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 14px;
+    font-size: 12px;
 }
 
 .current-library-btn .chevron {
@@ -161,16 +212,16 @@
 /* ドロップダウンメニュー */
 .library-dropdown-menu {
     position: absolute;
-    top: calc(100% + 8px);
+    top: calc(100% + 4px);
     left: 0;
     width: 100%;
     min-width: 260px;
     background: var(--bg-card);
-    border: 1.5px solid var(--border);
+    border: 1px solid var(--border);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-lg);
     z-index: 1000;
-    padding: 8px;
+    padding: 6px;
     animation: fadeIn 0.2s ease;
 }
 
@@ -190,10 +241,10 @@
 .library-search-container {
     display: flex;
     align-items: center;
-    padding: 8px 12px;
+    padding: 6px 8px;
     background: var(--bg-hover);
     border-radius: var(--radius-sm);
-    margin-bottom: 8px;
+    margin-bottom: 6px;
 }
 
 .library-search-container svg {
@@ -206,7 +257,7 @@
     border: none;
     color: var(--text-main);
     width: 100%;
-    font-size: 13px;
+    font-size: 12px;
     outline: none;
 }
 
@@ -230,23 +281,23 @@
 .library-menu-divider {
     height: 1px;
     background: var(--border);
-    margin: 8px 0;
+    margin: 6px 0;
     opacity: 0.5;
 }
 
 /* メニューアイテム */
 .library-menu-item {
     width: 100%;
-    padding: 10px 12px;
+    padding: 7px 8px;
     background: transparent;
     border: none;
     border-radius: var(--radius-sm);
     color: var(--text-main);
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 13px;
     transition: all 0.1s ease;
     text-align: left;
 }
@@ -265,9 +316,9 @@
 }
 
 .library-menu-item-header {
-    font-size: 11px;
+    font-size: 10px;
     color: var(--text-muted);
-    padding: 8px 12px 4px;
+    padding: 6px 8px 3px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -302,71 +353,71 @@
 .sidebar-section {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-sm);
+    gap: 4px;
 }
 
 .sidebar-section-title {
-    color: var(--text-muted);
-    font-size: 12px;
+    color: color-mix(in srgb, var(--text-muted), transparent 18%);
+    font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    padding: 0 var(--spacing-sm);
+    padding: 0 6px 1px;
 }
 
 .sidebar-search {
     width: 100%;
-    padding: 10px 14px;
-    background-color: var(--bg-card);
-    border: 1.5px solid var(--border);
+    padding: 7px 9px;
+    background-color: transparent;
+    border: 1px solid var(--border);
     border-radius: var(--radius-md);
     color: var(--text-main);
-    font-size: 14px;
+    font-size: 13px;
     outline: none;
     transition: all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
 }
 
 .sidebar-search:focus {
     border-color: var(--primary);
-    background-color: var(--bg-hover);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary), transparent 90%);
+    background-color: var(--bg-card);
+    box-shadow: none;
 }
 
 .sidebar-nav {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 1px;
 }
 
 .sidebar-nav-item {
-    padding: 10px 14px;
-    background: var(--bg-card);
-    border: 1.5px solid transparent;
-    border-radius: var(--radius-md);
+    padding: 3px 8px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: var(--spacing-sm);
+    gap: 4px;
     color: var(--text-main);
     transition: all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1), border 0.1s linear;
     font-weight: 500;
-    font-size: 14px;
-    box-shadow: var(--shadow-sm);
+    font-size: 13px;
+    box-shadow: none;
 }
 
 .sidebar-nav-item:hover {
     background: var(--bg-hover);
-    border-color: var(--primary);
-    transform: translateX(4px);
-    box-shadow: var(--shadow-md);
+    border-color: transparent;
+    transform: none;
+    box-shadow: none;
 }
 
 .sidebar-nav-item.active {
-    background: color-mix(in srgb, var(--primary), transparent 85%);
-    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary), transparent 88%);
+    border-color: transparent;
     color: var(--primary);
     font-weight: 600;
-    box-shadow: var(--shadow-md);
+    box-shadow: none;
 }
 
 
@@ -420,9 +471,9 @@
 .sidebar-nav-item.active.external-drop-target {
     background: color-mix(in srgb, var(--primary) 18%, var(--bg-hover));
     border-color: color-mix(in srgb, var(--primary) 92%, white 8%);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 36%, transparent), var(--shadow-md);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 36%, transparent);
     color: var(--text-main);
-    transform: translateX(4px);
+    transform: none;
 }
 
 .sidebar-nav-item.external-drop-target .folder-icon,
@@ -434,7 +485,7 @@
 .sidebar-genre-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 1px;
 }
 
 .sidebar-sub-folders {
@@ -444,19 +495,20 @@
     /* 線を繋げるためgapはなし */
     margin-top: 0;
     position: relative;
-    padding-left: 20px;
+    padding-left: 16px;
     /* インデント量 */
 }
 
 .folder-tree-container {
     position: relative;
+    padding-left: 0;
 }
 
 /* 縦線（兄弟間） - サブフォルダー内のみ */
 .sidebar-sub-folders>.folder-tree-container::before {
     content: '';
     position: absolute;
-    left: -11px;
+    left: -8px;
     /* 位置調整 */
     top: 0;
     bottom: 0;
@@ -467,7 +519,7 @@
 
 /* 最後の要素は線を中心で止める（L字） */
 .sidebar-sub-folders>.folder-tree-container:last-child::before {
-    height: 22px;
+    height: 15px;
     /* folder-tree-nodeの中心（高さ約44pxの半分） */
     bottom: auto;
 }
@@ -476,7 +528,8 @@
     position: relative;
     display: flex;
     align-items: center;
-    margin-bottom: 2px;
+    margin-bottom: 0;
+    min-height: 20px;
     /* gapの代わり */
 }
 
@@ -484,10 +537,10 @@
 .sidebar-sub-folders>.folder-tree-container>.folder-tree-node::after {
     content: '';
     position: absolute;
-    left: -11px;
+    left: -8px;
     /* 縦線から開始 */
     top: 50%;
-    width: 11px;
+    width: 8px;
     /* 縦線からアイコンまで */
     height: 1px;
     background-color: var(--border);
@@ -497,7 +550,7 @@
 
 .folder-icon {
     color: var(--text-muted);
-    margin-right: 6px;
+    margin-right: 3px;
     display: flex;
     align-items: center;
 }
@@ -508,8 +561,18 @@
 
 .folder-toggle-btn {
     /* CRITICAL: Must be visible and above items but below footer */
+    position: absolute;
+    left: -10px;
+    top: 50%;
+    transform: translateY(-50%);
     opacity: 1;
     /* 常に表示 */
+    width: 10px;
+    height: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: color-mix(in srgb, var(--text-muted), transparent 10%);
     transition: color 0.2s;
     z-index: 5;
     /* アイテムより手前、フッターより奥 */
@@ -520,14 +583,19 @@
     color: var(--primary);
 }
 
+.sidebar-nav-item.folder-tree-node {
+    padding-top: 2px;
+    padding-bottom: 2px;
+}
+
 /* アクションボタン（フォルダ作成など） */
 .sidebar-action-btn {
     background: transparent;
     border: none;
     color: var(--text-muted);
-    font-size: 16px;
+    font-size: 14px;
     cursor: pointer;
-    padding: 2px 6px;
+    padding: 1px 4px;
     border-radius: var(--radius-sm);
     transition: all 0.15s;
     line-height: 1;
@@ -546,40 +614,40 @@
 }
 
 .btn-icon-tiny {
-    background: var(--bg-hover);
-    border: 1.5px solid var(--border);
+    background: transparent;
+    border: 1px solid var(--border);
     color: var(--text-muted);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 6px;
+    padding: 4px;
     border-radius: var(--radius-sm);
     transition: all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
 }
 
 .btn-icon-tiny:hover {
-    background: var(--primary);
-    border-color: var(--primary);
-    color: white;
-    transform: scale(1.1);
+    background: var(--bg-hover);
+    border-color: var(--border);
+    color: var(--text-main);
+    transform: none;
 }
 
 .sidebar-input-tiny {
     width: 100%;
-    padding: 8px 12px;
+    padding: 6px 8px;
     background: var(--bg-card);
-    border: 1.5px solid var(--border);
+    border: 1px solid var(--border);
     border-radius: var(--radius-md);
     color: var(--text-main);
-    font-size: 13px;
+    font-size: 11px;
     outline: none;
     transition: all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
 }
 
 .sidebar-input-tiny:focus {
     border-color: var(--primary-light);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary), transparent 80%);
+    box-shadow: none;
 }
 
 .sidebar-create-form {
@@ -615,20 +683,20 @@
     overflow-x: hidden;
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-lg);
+    gap: 8px;
     min-height: 0;
 
     /* スクロールバーの分を調整 (右) */
-    margin-right: -8px;
-    padding-right: 8px;
+    margin-right: -6px;
+    padding-right: 6px;
 
     /* トグルボタンのクリッピングを防ぐため左側を拡張 */
     /* CRITICAL: Do not remove// (Applying multiple chunks in one go via multi_replace if possible, but replace_file_content is single block)
 // I will use multi_replace for Sidebar.tsx as it needs changes in Props definition and multiple rendering locations.
 // Waiting for next step to use multi_replace.
  */
-    margin-left: calc(var(--spacing-lg) * -1);
-    padding-left: var(--spacing-lg);
+    margin-left: -10px;
+    padding-left: 10px;
 }
 
 /* サイドバーフッター */
@@ -636,32 +704,35 @@
     flex-shrink: 0;
     margin-top: 0;
     /* flexで制御するためauto解除 */
-    padding-top: var(--spacing-sm);
+    padding-top: 8px;
     border-top: 1px solid var(--border);
-    background: var(--bg-sidebar);
+    background: var(--layout-panel-bg);
     /* 背景を追加して透過を防ぐ */
     z-index: 10;
 
     /* 親のpaddingを打ち消して全幅にする */
-    margin-left: calc(var(--spacing-lg) * -1);
-    margin-right: calc(var(--spacing-lg) * -1);
-    padding-left: var(--spacing-lg);
-    padding-right: var(--spacing-lg);
+    margin-left: -10px;
+    margin-right: -10px;
+    padding-left: 10px;
+    padding-right: 10px;
 }
 
 .sidebar-settings-btn {
     width: 100%;
-    padding: 10px 14px;
-    background: transparent;
-    border: 1.5px solid transparent;
+    min-height: 30px;
+    padding: 6px 8px;
+    background: var(--layout-panel-bg);
+    border: 1px solid transparent;
     border-radius: var(--radius-md);
     color: var(--text-muted);
     display: flex;
     align-items: center;
+    justify-content: flex-start;
     gap: var(--spacing-sm);
     cursor: pointer;
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 500;
+    line-height: 1;
     transition: all 0.2s ease;
 }
 
@@ -674,10 +745,13 @@
 .sidebar-settings-btn span {
     flex: 1;
     text-align: left;
+    display: flex;
+    align-items: center;
 }
 
 .sidebar-settings-btn svg {
     flex-shrink: 0;
+    display: block;
 }
 
 .sidebar-input-tiny {
@@ -686,11 +760,11 @@
     border-radius: 4px;
     color: var(--text-main);
     padding: 0 6px;
-    font-size: 13px;
+    font-size: 11px;
     font-family: inherit;
     outline: none;
     width: 100%;
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary), transparent 80%);
+    box-shadow: none;
 }
 
 
@@ -698,11 +772,11 @@
 /* Sidebar Item Counts */
 .sidebar-count {
     font-family: 'SF Mono', 'Consolas', monospace;
-    font-size: 12px;
-    color: #888;
+    font-size: 11px;
+    color: color-mix(in srgb, var(--text-main), transparent 28%);
     margin-left: auto;
-    padding-left: 8px;
-    font-weight: normal;
+    padding-left: 6px;
+    font-weight: 500;
 }
 
 .sidebar-nav-item.active .sidebar-count {

@@ -929,8 +929,12 @@ function AppContent() {
     }, [])
 
     const handleResetFilters = useCallback(() => {
-        updateFilterOptions(createDefaultFilterOptions())
-    }, [updateFilterOptions])
+        updateFilterOptions({
+            ...createDefaultFilterOptions(),
+            sortOrder: filterOptions.sortOrder,
+            sortDirection: filterOptions.sortDirection
+        })
+    }, [filterOptions.sortDirection, filterOptions.sortOrder, updateFilterOptions])
 
     // イベントリスナー内で最新の状態を参照するための Ref
     const isDraggingRef = useRef(isDragging)
@@ -2478,12 +2482,11 @@ function AppContent() {
             )
         }
 
-        return (
-            <>
-                {mainContent}
-                {playerOverlay}
-            </>
-        )
+        if (playerOverlay) {
+            return playerOverlay
+        }
+
+        return mainContent
     }
 
 

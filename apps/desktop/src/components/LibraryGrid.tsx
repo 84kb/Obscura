@@ -116,13 +116,30 @@ export function LibraryGrid({
 
 
     // Grid layout constants (match CSS)
-    const GAP = 24;
-    const PADDING = 24;
+    const BASE_GAP = 8;
+    const PADDING_LEFT = 16;
+    const PADDING_RIGHT = 16;
+    const PADDING_Y = 16;
     const ASPECT_RATIO = 16 / 9;
-    const INFO_HEIGHT = 80; // media-card-info padding + title + duration approximate
-    const SCROLLBAR_WIDTH = 18;
+
+    const getInfoHeight = () => {
+        const showName = viewSettings?.showName ?? true;
+        const showItemInfo = viewSettings?.showItemInfo ?? true;
+
+        if (!showName && !showItemInfo) return 0;
+        if (showName && showItemInfo) return 58;
+        if (showName) return 46;
+        return 26;
+    };
+
+    const getGap = () => {
+        const infoHeight = getInfoHeight();
+        return infoHeight === 0 ? 6 : BASE_GAP;
+    };
 
     const getLayoutInfo = () => {
+        const GAP = getGap();
+        const infoHeight = getInfoHeight();
         // Fallback width used if container is 0 (initial render)
         const isInspectorVisible = viewSettings?.showInspector ?? true;
         const chromeWidth = 280 + (isInspectorVisible ? 320 : 0); // 280 (Left) + 320 (Right approx)
@@ -132,7 +149,7 @@ export function LibraryGrid({
         const width = containerSize.width > 0 ? containerSize.width : fallbackWidth;
 
         // Effective available width for items, subtracting Scrollbar and Padding
-        const availableWidth = Math.max(0, width - SCROLLBAR_WIDTH - (PADDING * 2) + GAP);
+        const availableWidth = Math.max(0, width - PADDING_LEFT - PADDING_RIGHT + GAP);
 
         // Define Min/Max item widths to determine valid column range
         const MIN_ITEM_WIDTH = 100;
@@ -165,7 +182,7 @@ export function LibraryGrid({
         // Calculate dimensions based on chosen column count
         const stride = availableWidth / columnCount;
         const itemWidth = Math.floor(stride - GAP);
-        const itemHeight = Math.floor((itemWidth / ASPECT_RATIO) + INFO_HEIGHT);
+        const itemHeight = Math.floor((itemWidth / ASPECT_RATIO) + infoHeight);
         const finalCellWidth = stride > 0 ? stride : 200;
 
         return { columnCount, itemWidth, itemHeight, cellWidth: finalCellWidth };
@@ -178,15 +195,16 @@ export function LibraryGrid({
     // When the layout changes (re-mount due to key change), we recalculate the pixel position so that the same item index remains visible.
     const { columnCount: currentColumnCount, itemHeight: currentItemHeight } = getLayoutInfo();
     useLayoutEffect(() => {
+        const GAP = getGap();
         if (gridRef.current && scrollPosRef.current > 0) {
             // Recalculate scrollTop based on the stored item index and new layout parameters
             // Formula: NewScrollTop = PADDING + (RowIndex * (ItemHeight + GAP))
             const rowIndex = Math.floor(scrollPosRef.current / currentColumnCount);
-            const newScrollTop = PADDING + rowIndex * (currentItemHeight + GAP);
+            const newScrollTop = PADDING_Y + rowIndex * (currentItemHeight + GAP);
 
             gridRef.current.scrollTo(newScrollTop);
         }
-    }, [containerSize.width, currentColumnCount, gridSize, currentItemHeight])
+    }, [containerSize.width, currentColumnCount, gridSize, currentItemHeight, viewSettings?.showName, viewSettings?.showItemInfo])
 
     const handleNavigation = useCallback((direction: 'up' | 'down' | 'left' | 'right') => {
         if (mediaFiles.length === 0) return;
@@ -238,11 +256,12 @@ export function LibraryGrid({
 
             // Smart scroll: calculation based
             const { itemHeight, columnCount } = getLayoutInfo();
+            const GAP = getGap();
             // GAP and PADDING are available in scope
             const rowHeight = itemHeight + GAP;
 
             const rowIndex = Math.floor(nextIndex / columnCount);
-            const rowTop = PADDING + rowIndex * rowHeight;
+            const rowTop = PADDING_Y + rowIndex * rowHeight;
             const rowBottom = rowTop + itemHeight; // visual bottom of item
 
             const container = document.getElementById('library-vgrid-container');
@@ -257,7 +276,7 @@ export function LibraryGrid({
                 }
             }
         }
-    }, [mediaFiles, selectedMediaIds, onSelectionChange, gridSize, containerSize]); // Added dependencies
+    }, [mediaFiles, selectedMediaIds, onSelectionChange, gridSize, containerSize, viewSettings?.showName, viewSettings?.showItemInfo]); // Added dependencies
 
     // Register shortcuts with 'library' scope
     useShortcut('NAV_UP', () => handleNavigation('up'), { scope: 'library' });
@@ -313,15 +332,16 @@ export function LibraryGrid({
         const selectionBottom = Math.max(dragStart.y, y);
 
         const { columnCount, itemWidth, itemHeight } = getLayoutInfo();
+        const GAP = getGap();
 
         const newSelectedIds: number[] = [];
 
         // Only check items that could potentially be in the selection area
         // Translate selection coords to grid indices
-        const startCol = Math.max(0, Math.floor((selectionLeft - PADDING) / (itemWidth + GAP)));
-        const endCol = Math.min(columnCount - 1, Math.floor((selectionRight - PADDING) / (itemWidth + GAP)));
-        const startRow = Math.max(0, Math.floor((selectionTop - PADDING) / (itemHeight + GAP)));
-        const endRow = Math.floor((selectionBottom - PADDING) / (itemHeight + GAP));
+        const startCol = Math.max(0, Math.floor((selectionLeft - PADDING_LEFT) / (itemWidth + GAP)));
+        const endCol = Math.min(columnCount - 1, Math.floor((selectionRight - PADDING_LEFT) / (itemWidth + GAP)));
+        const startRow = Math.max(0, Math.floor((selectionTop - PADDING_Y) / (itemHeight + GAP)));
+        const endRow = Math.floor((selectionBottom - PADDING_Y) / (itemHeight + GAP));
 
         for (let row = startRow; row <= endRow; row++) {
             for (let col = startCol; col <= endCol; col++) {
@@ -330,8 +350,8 @@ export function LibraryGrid({
                     const item = mediaFiles[index];
 
                     // Precise check (incorporating gaps)
-                    const itemLeft = PADDING + col * (itemWidth + GAP);
-                    const itemTop = PADDING + row * (itemHeight + GAP);
+                    const itemLeft = PADDING_LEFT + col * (itemWidth + GAP);
+                    const itemTop = PADDING_Y + row * (itemHeight + GAP);
                     const itemRight = itemLeft + itemWidth;
                     const itemBottom = itemTop + itemHeight;
 
@@ -397,6 +417,7 @@ export function LibraryGrid({
     }, [dragStart]);
 
     const { itemWidth, itemHeight, cellWidth, columnCount } = getLayoutInfo();
+    const GAP = getGap();
 
     if (mediaFiles.length === 0) {
         return (
@@ -468,13 +489,14 @@ export function LibraryGrid({
             <VGrid
                 ref={gridRef}
                 id="library-vgrid-container"
-                key={`${gridSize}-${columnCount}-${containerSize.width}-${mediaFiles.length}`}
+                key={`${gridSize}-${columnCount}-${containerSize.width}-${mediaFiles.length}-${viewSettings?.showName ?? true}-${viewSettings?.showItemInfo ?? true}`}
+                className="library-grid-scroll"
                 onScroll={(scrollTop: number) => {
                     // Calculate and store the index of the item at the top of the viewport
-                    // scrollTop = PADDING + rowIndex * (itemHeight + GAP)
-                    // rowIndex = (scrollTop - PADDING) / (itemHeight + GAP)
+                    // scrollTop = PADDING_Y + rowIndex * (itemHeight + GAP)
+                    // rowIndex = (scrollTop - PADDING_Y) / (itemHeight + GAP)
                     // index = rowIndex * columnCount
-                    const rowIndex = Math.max(0, Math.floor((scrollTop - PADDING) / (itemHeight + GAP)));
+                    const rowIndex = Math.max(0, Math.floor((scrollTop - PADDING_Y) / (itemHeight + GAP)));
                     scrollPosRef.current = rowIndex * columnCount;
 
                     // Lazy Loading Trigger
@@ -497,7 +519,7 @@ export function LibraryGrid({
                     height: '100%',
                     width: '100%',
                     overflowX: 'hidden',
-                    padding: `${PADDING}px`,
+                    padding: `${PADDING_Y}px ${PADDING_RIGHT}px ${PADDING_Y}px ${PADDING_LEFT}px`,
                     boxSizing: 'border-box'
                 }}
             >

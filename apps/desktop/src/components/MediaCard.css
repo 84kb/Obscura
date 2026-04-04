@@ -1,6 +1,6 @@
 /* メディアカード全体 */
 .media-card {
-    background: var(--bg-card);
+    background: color-mix(in srgb, var(--bg-card) 84%, var(--layout-panel-bg) 16%);
     border-radius: var(--radius-md);
     overflow: hidden;
     transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
@@ -10,14 +10,13 @@
     flex-direction: column;
     width: 100%;
     height: 100%;
-    /* Transition base for outline */
-    outline: 2px solid transparent;
-    outline-offset: 2px;
+    outline: 1px solid transparent;
+    outline-offset: 0;
 }
 
 .media-card:hover {
-    transform: scale(1.02);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    transform: none;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .media-card.selected {
@@ -45,13 +44,13 @@
 /* ファイルタイプバッジ（左上・コンパクト・ダーク） */
 .media-card-badge {
     position: absolute;
-    top: 8px;
-    left: 8px;
+    top: 6px;
+    left: 6px;
     background: rgba(0, 0, 0, 0.6);
     color: rgba(255, 255, 255, 0.9);
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 700;
-    padding: 2px 6px;
+    padding: 1px 5px;
     border-radius: 4px;
     z-index: 2;
     text-transform: uppercase;
@@ -67,10 +66,10 @@
 
 /* ファイル情報エリア */
 .media-card-info {
-    padding: 10px 12px;
+    padding: 7px 8px 8px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
     background: transparent;
     /* 背景色はカード全体に従う */
     align-items: center;
@@ -81,11 +80,11 @@
 
 /* ファイル名（最大2行表示） */
 .media-card-title {
-    font-size: 13px;
-    font-weight: 700;
+    font-size: 11px;
+    font-weight: 600;
     color: var(--text-main);
     margin: 0;
-    line-height: 1.4;
+    line-height: 1.3;
     width: 100%;
     /* 2行まで表示 */
     display: -webkit-box;
@@ -96,19 +95,19 @@
     text-overflow: ellipsis;
     white-space: normal;
     word-break: break-word;
-    min-height: 38px;
+    min-height: 30px;
     /* 常に2行分の高さを確保 */
 }
 
 /* 再生時間 */
 .media-card-duration {
-    font-size: 12px;
+    font-size: 10px;
     color: #888;
     font-family: 'SF Mono', 'Consolas', monospace;
 }
 
 /* ファイルサイズ（オプション） */
 .media-card-size {
-    font-size: 11px;
+    font-size: 10px;
     color: #666;
 }

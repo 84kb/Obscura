@@ -86,7 +86,7 @@ export function MainHeader({
     const [selectedFilterPresetId, setSelectedFilterPresetId] = useState('')
     const [isPresetMenuOpen, setIsPresetMenuOpen] = useState(false)
     const [presetSearchQuery, setPresetSearchQuery] = useState('')
-    const [activePresetActionId, setActivePresetActionId] = useState<string | null>(null)
+    const [activePresetActionMenu, setActivePresetActionMenu] = useState<{ id: string; top: number } | null>(null)
 
     const shouldRenderFolderFilter = useDelayUnmount(isFolderFilterOpen, 150)
     const shouldRenderTagFilter = useDelayUnmount(isTagFilterOpen, 150)
@@ -154,7 +154,7 @@ export function MainHeader({
             }
             if (presetMenuRef.current && !presetMenuRef.current.contains(event.target as Node)) {
                 setIsPresetMenuOpen(false)
-                setActivePresetActionId(null)
+                setActivePresetActionMenu(null)
             }
         }
         document.addEventListener('mousedown', handleClickOutside)
@@ -340,6 +340,20 @@ export function MainHeader({
         const nextName = window.prompt('新しいプリセット名を入力してください', currentName)
         if (!nextName) return
         onRenameFilterPreset(presetId, nextName)
+    }
+
+    const handleTogglePresetActionMenu = (presetId: string, event: React.MouseEvent<HTMLButtonElement>) => {
+        const buttonRect = event.currentTarget.getBoundingClientRect()
+        const menuRect = presetMenuRef.current?.getBoundingClientRect()
+        const relativeTop = menuRect
+            ? Math.max(8, Math.min(buttonRect.top - menuRect.top - 2, menuRect.height - 80))
+            : 8
+
+        setActivePresetActionMenu((current) => (
+            current?.id === presetId
+                ? null
+                : { id: presetId, top: relativeTop }
+        ))
     }
 
     const filteredPresets = useMemo(() => {
@@ -915,7 +929,7 @@ export function MainHeader({
                                                     <div className="filter-preset-actions">
                                                         <button
                                                             className="filter-preset-more-btn"
-                                                            onClick={() => setActivePresetActionId((current) => current === preset.id ? null : preset.id)}
+                                                            onClick={(event) => handleTogglePresetActionMenu(preset.id, event)}
                                                             title="操作"
                                                         >
                                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -924,13 +938,13 @@ export function MainHeader({
                                                                 <circle cx="12" cy="19" r="1.8"></circle>
                                                             </svg>
                                                         </button>
-                                                        {activePresetActionId === preset.id && (
-                                                            <div className="filter-preset-row-menu">
+                                                        {activePresetActionMenu?.id === preset.id && (
+                                                            <div className="filter-preset-row-menu" style={{ top: activePresetActionMenu?.top ?? -4 }}>
                                                                 <button
                                                                     className="filter-preset-row-action"
                                                                     onClick={() => {
                                                                         handleRenamePreset(preset.id, preset.name)
-                                                                        setActivePresetActionId(null)
+                                                                        setActivePresetActionMenu(null)
                                                                     }}
                                                                 >
                                                                     名前を変更
@@ -940,7 +954,7 @@ export function MainHeader({
                                                                     onClick={() => {
                                                                         onDeleteFilterPreset(preset.id)
                                                                         if (selectedFilterPresetId === preset.id) setSelectedFilterPresetId('')
-                                                                        setActivePresetActionId(null)
+                                                                        setActivePresetActionMenu(null)
                                                                     }}
                                                                 >
                                                                     削除

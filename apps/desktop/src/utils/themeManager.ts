@@ -1,5 +1,75 @@
 import { Theme, ThemeColors } from '@obscura/core';
 
+const parseColorToRgb = (color: string): { r: number; g: number; b: number } | null => {
+    const value = String(color).trim();
+
+    const hex = value.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    if (hex) {
+        const raw = hex[1];
+        const normalized = raw.length === 3
+            ? raw.split('').map((c) => c + c).join('')
+            : raw;
+        return {
+            r: parseInt(normalized.slice(0, 2), 16),
+            g: parseInt(normalized.slice(2, 4), 16),
+            b: parseInt(normalized.slice(4, 6), 16)
+        };
+    }
+
+    const rgb = value.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/i);
+    if (rgb) {
+        return {
+            r: Number(rgb[1]),
+            g: Number(rgb[2]),
+            b: Number(rgb[3])
+        };
+    }
+
+    return null;
+};
+
+const getRelativeLuminance = (color: string): number => {
+    const rgb = parseColorToRgb(color);
+    if (!rgb) return 0;
+
+    const toLinear = (channel: number) => {
+        const value = channel / 255;
+        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    };
+
+    const r = toLinear(rgb.r);
+    const g = toLinear(rgb.g);
+    const b = toLinear(rgb.b);
+
+    return (0.2126 * r) + (0.7152 * g) + (0.0722 * b);
+};
+
+const getLayoutSurfaceColors = (colors: ThemeColors) => {
+    const darkLum = getRelativeLuminance(colors.bgDark);
+    const sidebarLum = getRelativeLuminance(colors.bgSidebar);
+
+    if (darkLum <= sidebarLum) {
+        return {
+            layoutMainBg: colors.bgDark,
+            layoutPanelBg: colors.bgSidebar
+        };
+    }
+
+    return {
+        layoutMainBg: colors.bgSidebar,
+        layoutPanelBg: colors.bgDark
+    };
+};
+
+const getPlayerControlsBg = (layoutMainBg: string) => {
+    const mainLum = getRelativeLuminance(layoutMainBg);
+    if (mainLum < 0.35) {
+        return `color-mix(in srgb, ${layoutMainBg} 82%, black 18%)`;
+    }
+
+    return layoutMainBg;
+};
+
 export const defaultDarkTheme: Theme = {
     id: 'default-dark',
     name: 'Default Dark',
@@ -174,6 +244,8 @@ export const everforestTheme: Theme = {
 export const applyTheme = (theme: Theme) => {
     const root = document.documentElement;
     const colors = theme.colors;
+    const layoutSurfaces = getLayoutSurfaceColors(colors);
+    const playerControlsBg = getPlayerControlsBg(layoutSurfaces.layoutMainBg);
 
     root.style.setProperty('--bg-dark', colors.bgDark);
     root.style.setProperty('--bg-card', colors.bgCard);
@@ -186,9 +258,14 @@ export const applyTheme = (theme: Theme) => {
     root.style.setProperty('--text-main', colors.textMain);
     root.style.setProperty('--text-muted', colors.textMuted);
     root.style.setProperty('--border', colors.border);
+    root.style.setProperty('--layout-main-bg', layoutSurfaces.layoutMainBg);
+    root.style.setProperty('--layout-panel-bg', layoutSurfaces.layoutPanelBg);
+    root.style.setProperty('--player-controls-bg', playerControlsBg);
 };
 
 export const createCssVariablesObject = (colors: ThemeColors) => {
+    const layoutSurfaces = getLayoutSurfaceColors(colors);
+    const playerControlsBg = getPlayerControlsBg(layoutSurfaces.layoutMainBg);
     return {
         '--bg-dark': colors.bgDark,
         '--bg-card': colors.bgCard,
@@ -200,7 +277,10 @@ export const createCssVariablesObject = (colors: ThemeColors) => {
         '--accent': colors.accent,
         '--text-main': colors.textMain,
         '--text-muted': colors.textMuted,
-        '--border': colors.border
+        '--border': colors.border,
+        '--layout-main-bg': layoutSurfaces.layoutMainBg,
+        '--layout-panel-bg': layoutSurfaces.layoutPanelBg,
+        '--player-controls-bg': playerControlsBg
     };
 };
 

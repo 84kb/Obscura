@@ -8,7 +8,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-xl);
-    padding: 16px;
+    padding: 12px;
     z-index: 1000;
     animation: fadeIn 0.15s ease-out;
 }
@@ -16,28 +16,28 @@
 .duration-filter-row {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 8px;
+    gap: 8px;
+    margin-bottom: 6px;
 }
 
 .duration-input-group {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     flex: 1;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 4px 8px;
+    border-radius: 6px;
+    padding: 3px 6px;
 }
 
 .duration-input {
     width: 60px;
-    padding: 6px;
+    padding: 5px;
     border: none;
     background: transparent;
     color: var(--text-main);
-    font-size: 13px;
+    font-size: 12px;
     text-align: center;
     outline: none;
 }
@@ -60,16 +60,16 @@
 .unit-select-container {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 6px;
     padding: 2px;
 }
 
 .unit-select {
-    padding: 6px 12px;
+    padding: 5px 10px;
     border: none;
     background: transparent;
     color: var(--text-main);
-    font-size: 13px;
+    font-size: 12px;
     cursor: pointer;
     border-radius: 6px;
     outline: none;
@@ -87,8 +87,8 @@
 .duration-filter-footer {
     display: flex;
     justify-content: flex-end;
-    margin-top: 16px;
-    padding-top: 12px;
+    margin-top: 10px;
+    padding-top: 8px;
     border-top: 1px solid var(--border);
 }
 
@@ -96,16 +96,16 @@
     background: none;
     border: none;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: 11px;
     cursor: pointer;
-    padding: 6px 12px;
+    padding: 4px 10px;
     border-radius: 4px;
     transition: color 0.15s;
 }
 
 .clear-btn:hover {
     color: var(--text-main);
-    background-color: var(--bg-hover);
+    background-color: transparent;
     text-decoration: none;
 }
 
