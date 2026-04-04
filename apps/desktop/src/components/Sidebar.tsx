@@ -27,9 +27,10 @@ interface SidebarProps {
     onOpenSettings: () => void
     hasActiveLibrary: boolean
     onRefreshFolders?: () => void
-    onDropFileOnFolder?: (folderId: number, files: FileList) => void
-    onInternalDragStart?: () => void
+    onDropFileOnFolder?: (folderId: number, files?: FileList | null, mediaIds?: number[]) => void
+    onInternalDragStart?: (mediaIds?: number[]) => void
     onInternalDragEnd?: () => void
+    externalDropFolderId?: number | null
     itemCounts?: { [key: string]: number }
     language?: 'ja' | 'en'
 }
@@ -156,9 +157,26 @@ export function Sidebar({
     onDropFileOnFolder,
     onInternalDragStart,
     onInternalDragEnd,
+    externalDropFolderId = null,
     itemCounts,
     language = 'ja'
 }: SidebarProps) {
+    const parseDraggedMediaIds = (dataTransfer: DataTransfer): number[] => {
+        const customData = dataTransfer.getData('application/x-obscura-media-ids')
+        if (customData) {
+            try {
+                const parsed = JSON.parse(customData)
+                if (Array.isArray(parsed)) {
+                    return parsed.map((id) => Number(id)).filter(Number.isFinite)
+                }
+            } catch (err) {
+                console.error('Failed to parse media drag data', err)
+            }
+        }
+
+        return []
+    }
+
     const isEnglish = language === 'en'
     const t = {
         selectLibrary: isEnglish ? 'Select library...' : 'ライブラリを選択...',
@@ -377,15 +395,16 @@ export function Sidebar({
     const handleDragOver = (e: React.DragEvent, targetId: number) => {
         e.preventDefault()
         const isFileDrag = e.dataTransfer.types.includes('Files')
+        const isMediaDrag = e.dataTransfer.types.includes('application/x-obscura-media-ids')
 
-        if (!isFileDrag) {
+        if (!isFileDrag && !isMediaDrag) {
             e.stopPropagation()
         }
 
-        if (draggedFolderId === null && !isFileDrag) return
+        if (draggedFolderId === null && !isFileDrag && !isMediaDrag) return
         if (draggedFolderId === targetId) return
 
-        if (isFileDrag) {
+        if (isFileDrag || isMediaDrag) {
             setDropTarget({ id: targetId, position: 'middle' })
             e.dataTransfer.dropEffect = 'copy'
             return
@@ -436,6 +455,12 @@ export function Sidebar({
         }
 
         if (effectiveDraggedId === null) {
+            const mediaIds = parseDraggedMediaIds(e.dataTransfer)
+            if (mediaIds.length > 0 && onDropFileOnFolder) {
+                onDropFileOnFolder(targetId, null, mediaIds)
+                setExpandedFolders(prev => new Set(prev).add(targetId))
+                return
+            }
             if (e.dataTransfer.types.includes('Files') && onDropFileOnFolder) {
                 onDropFileOnFolder(targetId, e.dataTransfer.files)
                 setExpandedFolders(prev => new Set(prev).add(targetId))
@@ -527,17 +552,47 @@ export function Sidebar({
         setDropTarget(null)
     }
 
+    useEffect(() => {
+        document
+            .querySelectorAll('.sidebar-nav-item.external-drop-target-live')
+            .forEach((element) => {
+                element.classList.remove('external-drop-target-live')
+                const htmlElement = element as HTMLElement
+                htmlElement.style.removeProperty('background')
+                htmlElement.style.removeProperty('border-color')
+                htmlElement.style.removeProperty('box-shadow')
+                htmlElement.style.removeProperty('transform')
+                htmlElement.style.removeProperty('color')
+            })
+
+        if (!Number.isFinite(externalDropFolderId as number)) return
+
+        document
+            .querySelectorAll(`.sidebar-nav-item[data-folder-id="${externalDropFolderId}"]`)
+            .forEach((element) => {
+                const target = element as HTMLElement
+                target.classList.add('external-drop-target-live')
+                target.style.setProperty('background', 'color-mix(in srgb, var(--primary) 18%, var(--bg-hover))', 'important')
+                target.style.setProperty('border-color', 'color-mix(in srgb, var(--primary) 92%, white 8%)', 'important')
+                target.style.setProperty('box-shadow', 'inset 0 0 0 1px color-mix(in srgb, var(--primary) 36%, transparent), var(--shadow-md)', 'important')
+                target.style.setProperty('transform', 'translateX(4px)', 'important')
+                target.style.setProperty('color', 'var(--text-main)', 'important')
+            })
+    }, [externalDropFolderId, folders])
+
     const renderFolderNode = (node: FolderWithChildren) => {
         const isSelected = filterOptions.selectedFolders.includes(node.id)
         const isExpanded = expandedFolders.has(node.id)
-        const isDropTarget = dropTarget?.id === node.id
+        const isExternalDropTarget = externalDropFolderId === node.id
         const isRenaming = renamingFolderId === node.id
 
         let dropClass = ''
-        if (isDropTarget && dropTarget) {
+        if (dropTarget?.id === node.id) {
             if (dropTarget.position === 'top') dropClass = 'drop-top'
             else if (dropTarget.position === 'bottom') dropClass = 'drop-bottom'
             else if (dropTarget.position === 'middle') dropClass = 'drop-middle'
+        } else if (externalDropFolderId === node.id) {
+            dropClass = 'drop-middle'
         }
 
         const hasChildren = node.children.length > 0
@@ -545,7 +600,8 @@ export function Sidebar({
         return (
             <div key={node.id} className="folder-tree-container">
                 <div
-                    className={`sidebar-nav-item folder-tree-node ${isSelected ? 'active' : ''} ${dropClass}`}
+                    className={`sidebar-nav-item folder-tree-node ${isSelected ? 'active' : ''} ${dropClass} ${isExternalDropTarget ? 'external-drop-target' : ''}`}
+                    data-folder-id={node.id}
                     onClick={() => {
                         if (!isRenaming) toggleFolderFilter(node.id)
                     }}

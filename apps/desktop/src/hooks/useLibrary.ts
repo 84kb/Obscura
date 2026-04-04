@@ -5,6 +5,7 @@ import { api } from '../api'
 import { getAuthQuery } from '../utils/auth'
 
 export function useLibrary() {
+    const MEDIA_LOAD_TIMEOUT_MS = 60000
     const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([])
     const [tags, setTags] = useState<Tag[]>([])
     const [tagGroups, setTagGroups] = useState<TagGroup[]>([])
@@ -13,7 +14,10 @@ export function useLibrary() {
     const [loading, setLoading] = useState(false)
     const [loadingProgress, setLoadingProgress] = useState(0)
     const isInitialLoadDone = useRef(false)
+    const previousLibraryLoadKey = useRef<string | null>(null)
+    const startupLoadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const [startupLoading, setStartupLoading] = useState(true)
+    const [initialLibraryResolved, setInitialLibraryResolved] = useState(false)
     const [activeLibrary, setActiveLibrary] = useState<Library | null>(null)
     const [activeRemoteLibrary, setActiveRemoteLibrary] = useState<RemoteLibrary | null>(null)
     const [myUserToken, setMyUserToken] = useState<string>('')
@@ -60,6 +64,11 @@ export function useLibrary() {
         selectedArtists: [],
         excludedArtists: []
     })
+    const foldersRef = useRef<Folder[]>([])
+
+    useEffect(() => {
+        foldersRef.current = folders
+    }, [folders])
 
     // ソート設定読み込み・保存のヘルパー
     const getLibraryIdForConfig = useCallback(() => {
@@ -284,7 +293,11 @@ export function useLibrary() {
     }, [myUserToken])
 
     // Media file loading
-    const loadMediaFiles = useCallback(async (reset = true, silent = false) => {
+    const loadMediaFiles = useCallback(async (
+        reset = true,
+        silent = false,
+        requestFilters: Record<string, any> | null = null,
+    ) => {
         if (loadingRef.current) return
 
         // In full-fetch compatibility mode, incremental paging is disabled.
@@ -321,7 +334,19 @@ export function useLibrary() {
             }
 
             const targetPage = 1
-            const result = await api.getMediaFiles(targetPage, FULL_FETCH_LIMIT, null)
+            const mergedFilters = requestFilters && typeof requestFilters === 'object'
+                ? { ...requestFilters }
+                : null
+            const result = activeRemoteLibrary
+                ? await Promise.race([
+                    api.getMediaFiles(targetPage, FULL_FETCH_LIMIT, mergedFilters),
+                    new Promise((_, reject) => {
+                        setTimeout(() => {
+                            reject(new Error(`getMediaFiles timed out after ${MEDIA_LOAD_TIMEOUT_MS}ms`))
+                        }, MEDIA_LOAD_TIMEOUT_MS)
+                    }),
+                ])
+                : await api.getMediaFiles(targetPage, FULL_FETCH_LIMIT, mergedFilters)
             if (requestSeq !== loadRequestSeq.current) return
 
             let newFiles = Array.isArray(result) ? result : (result.media || [])
@@ -360,6 +385,98 @@ export function useLibrary() {
     const loadMore = useCallback(() => {
         // no-op in full-fetch compatibility mode
     }, [])
+
+    const finalizeStartupLoading = useCallback(() => {
+        if (startupLoadingTimerRef.current) {
+            clearTimeout(startupLoadingTimerRef.current)
+        }
+        startupLoadingTimerRef.current = setTimeout(() => {
+            setLoading(false)
+            setLoadingProgress(0)
+            setStartupLoading(false)
+            startupLoadingTimerRef.current = null
+        }, 120)
+    }, [])
+
+    useEffect(() => {
+        if (!startupLoading || loading) return
+
+        const fallbackTimer = setTimeout(() => {
+            if (!loadingRef.current) {
+                setLoading(false)
+                setLoadingProgress(0)
+                setStartupLoading(false)
+            }
+        }, 500)
+
+        return () => clearTimeout(fallbackTimer)
+    }, [startupLoading, loading])
+
+    useEffect(() => {
+        const apiWithEvents = api as any
+        if (!apiWithEvents?.on) return
+
+        const unsubscribe = apiWithEvents.on('library-load-progress', (_event: any, payload: any) => {
+            const percentage = Number(payload?.percentage)
+            if (!Number.isFinite(percentage)) return
+            setLoading(true)
+            setLoadingProgress((prev) => {
+                const next = Math.max(0, Math.min(100, Math.round(percentage)))
+                return next >= prev ? next : prev
+            })
+        })
+
+        return () => {
+            if (typeof unsubscribe === 'function') {
+                unsubscribe()
+            }
+        }
+    }, [])
+
+    useEffect(() => {
+        if (!startupLoading) return
+        if (loadingProgress < 100) return
+
+        const timer = setTimeout(() => {
+            if (!loadingRef.current) {
+                finalizeStartupLoading()
+            }
+        }, 150)
+
+        return () => clearTimeout(timer)
+    }, [startupLoading, loadingProgress, finalizeStartupLoading])
+
+    useEffect(() => {
+        if (!startupLoading) return
+        if (loadingProgress < 100) return
+
+        const hardStopTimer = setTimeout(() => {
+            setLoading(false)
+            setLoadingProgress(0)
+            setStartupLoading(false)
+            loadingRef.current = false
+            if (startupLoadingTimerRef.current) {
+                clearTimeout(startupLoadingTimerRef.current)
+                startupLoadingTimerRef.current = null
+            }
+        }, 1200)
+
+        return () => clearTimeout(hardStopTimer)
+    }, [startupLoading, loadingProgress])
+
+    useEffect(() => {
+        if (!startupLoading) return
+        if (loading || loadingRef.current) return
+        if (!isInitialLoadDone.current) return
+
+        const timer = setTimeout(() => {
+            if (!loadingRef.current) {
+                finalizeStartupLoading()
+            }
+        }, 150)
+
+        return () => clearTimeout(timer)
+    }, [startupLoading, loading, mediaFiles, activeLibrary, activeRemoteLibrary, finalizeStartupLoading])
 
     // タグ読み込み
     const loadTags = useCallback(async () => {
@@ -550,23 +667,26 @@ export function useLibrary() {
     }, [loadMediaFiles, activeRemoteLibrary, addNotification, tags])
 
     // メディアにフォルダー追加
-    const addFolderToMedia = useCallback(async (mediaId: number, folderId: number) => {
+    const addFolderToMedia = useCallback(async (mediaId: number, folderId: number, folderOverride?: Folder | null) => {
         // Optimistic Update
-        const targetFolder = folders.find(f => f.id === folderId)
-        if (!targetFolder) return
+        const normalizedFolderId = Number(folderId)
+        const targetFolder =
+            folderOverride ||
+            foldersRef.current.find(f => Number(f.id) === normalizedFolderId) ||
+            folders.find(f => Number(f.id) === normalizedFolderId)
 
         setMediaFiles(prev => prev.map(m => {
             if (m.id === mediaId) {
                 // 既に持っている場合はスキップ
-                if (m.folders?.some(f => f.id === folderId)) return m
+                if (m.folders?.some(f => Number(f.id) === normalizedFolderId)) return m
+                if (!targetFolder) return m
                 return { ...m, folders: [...(m.folders || []), targetFolder] }
             }
             return m
         }))
 
         try {
-            await api.addFolderToMedia(mediaId, folderId)
-            await loadMediaFiles()
+            await api.addFolderToMedia(mediaId, normalizedFolderId)
         } catch (error) {
             console.error('Failed to add folder to media:', error)
             await loadMediaFiles()
@@ -1333,6 +1453,8 @@ export function useLibrary() {
             setActiveRemoteLibrary(null)
         } catch (error) {
             console.error('Failed to load active library:', error)
+        } finally {
+            setInitialLibraryResolved(true)
         }
     }, [])
 
@@ -1450,41 +1572,60 @@ export function useLibrary() {
 
     // データ読み込み (ライブラリ切り替え時などに再実行)
     useEffect(() => {
+        if (!initialLibraryResolved) return
+
         const initialLoad = async () => {
-            // 初回ロード時のみローディング表示
+            const currentLibraryLoadKey = activeRemoteLibrary
+                ? `remote:${activeRemoteLibrary.id}:${activeRemoteLibrary.url}`
+                : (activeLibrary ? `local:${activeLibrary.path}` : null)
             const isFirstLoad = !isInitialLoadDone.current
-            if (isFirstLoad) {
+            const isLibrarySwitchLoad = !isFirstLoad && currentLibraryLoadKey !== previousLibraryLoadKey.current
+            if (isFirstLoad || isLibrarySwitchLoad) {
+                setStartupLoading(true)
                 setLoading(true)
                 setLoadingProgress(10)
             }
 
             try {
-                if (isFirstLoad) setLoadingProgress(20)
-                await loadMediaFiles()
-                if (isFirstLoad) {
+                const metadataTask = Promise.all([loadTags(), loadTagGroups(), loadFolders()]).catch((e) => {
+                    console.error('Failed to load metadata in background:', e)
+                })
+
+                if (isFirstLoad || isLibrarySwitchLoad) setLoadingProgress(20)
+                const shouldUseFastPreview = !activeRemoteLibrary && (isFirstLoad || isLibrarySwitchLoad)
+                await loadMediaFiles(true, false, shouldUseFastPreview ? { __fastPreview: true } : null)
+                previousLibraryLoadKey.current = currentLibraryLoadKey
+                if (isFirstLoad || isLibrarySwitchLoad) {
                     setLoadingProgress(100)
-                    isInitialLoadDone.current = true
-                    // Prioritize first paint of media list; load metadata after UI is interactive.
-                    setTimeout(() => {
-                        setLoading(false)
-                        setLoadingProgress(0)
-                        setStartupLoading(false)
-                    }, 120)
-                    void Promise.all([loadTags(), loadTagGroups(), loadFolders()]).catch((e) => {
-                        console.error('Failed to load metadata in background:', e)
-                    })
+                    if (isFirstLoad) {
+                        isInitialLoadDone.current = true
+                    }
+                    void metadataTask
+                    if (shouldUseFastPreview) {
+                        void loadMediaFiles(true, true).catch((e) => {
+                            console.error('Failed to load full media list after preview:', e)
+                        })
+                    }
                 } else {
-                    await Promise.all([loadTags(), loadTagGroups(), loadFolders()])
+                    await metadataTask
                 }
             } finally {
-                if (isFirstLoad) {
-                    // Already finalized during first-load fast path.
-                    setStartupLoading(false)
+                if (isFirstLoad || isLibrarySwitchLoad) {
+                    finalizeStartupLoading()
                 }
             }
         }
         initialLoad()
-    }, [loadMediaFiles, loadTags, loadTagGroups, loadFolders])
+    }, [initialLibraryResolved, activeLibrary, activeRemoteLibrary, loadMediaFiles, loadTags, loadTagGroups, loadFolders, finalizeStartupLoading])
+
+    useEffect(() => {
+        return () => {
+            if (startupLoadingTimerRef.current) {
+                clearTimeout(startupLoadingTimerRef.current)
+                startupLoadingTimerRef.current = null
+            }
+        }
+    }, [])
 
     // 全データの一括更新
     const refreshAll = useCallback(async () => {

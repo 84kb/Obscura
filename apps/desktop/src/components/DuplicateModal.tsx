@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { MediaFile } from '@obscura/core'
+import { toMediaUrl } from '../utils/fileUrl'
 import './DuplicateModal.css'
 
 interface DuplicateModalProps {
@@ -25,14 +26,10 @@ export const DuplicateModal: React.FC<DuplicateModalProps> = ({ duplicate, onRes
     const { newMedia, existingMedia } = duplicate
 
     // 既存ファイルのサムネイルURL
-    const existingThumbUrl = existingMedia.thumbnail_path
-        ? `media://${existingMedia.thumbnail_path.replace(/\\/g, '/')}`
-        : ''
+    const existingThumbUrl = toMediaUrl(existingMedia.thumbnail_path)
 
     // 新規ファイルのサムネイルURL (すでにインポート済みなので thumbnail_path がある)
-    const newThumbUrl = newMedia.thumbnail_path
-        ? `media://${newMedia.thumbnail_path.replace(/\\/g, '/')}`
-        : ''
+    const newThumbUrl = toMediaUrl(newMedia.thumbnail_path)
 
     const handleConfirm = () => {
         if (selectedOption === 'existing') {

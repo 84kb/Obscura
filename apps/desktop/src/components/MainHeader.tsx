@@ -16,6 +16,12 @@ interface MainHeaderProps {
     title: string
     filterOptions: FilterOptions
     onFilterChange: (options: FilterOptions) => void
+    filterPresets: { id: string; name: string }[]
+    onApplyFilterPreset: (presetId: string) => void
+    onSaveFilterPreset: (name: string) => string | null
+    onDeleteFilterPreset: (presetId: string) => void
+    onRenameFilterPreset: (presetId: string, name: string) => void
+    onResetFilters: () => void
     gridSize: number
     onGridSizeChange: (size: number) => void
     viewMode: 'grid' | 'list'
@@ -38,6 +44,12 @@ export function MainHeader({
     title,
     filterOptions,
     onFilterChange,
+    filterPresets,
+    onApplyFilterPreset,
+    onSaveFilterPreset,
+    onDeleteFilterPreset,
+    onRenameFilterPreset,
+    onResetFilters,
     gridSize,
     onGridSizeChange,
     viewMode,
@@ -70,6 +82,11 @@ export function MainHeader({
     const durationFilterBtnRef = useRef<HTMLDivElement>(null)
     const [isDateFilterOpen, setIsDateFilterOpen] = useState(false)
     const dateFilterBtnRef = useRef<HTMLDivElement>(null)
+    const presetMenuRef = useRef<HTMLDivElement>(null)
+    const [selectedFilterPresetId, setSelectedFilterPresetId] = useState('')
+    const [isPresetMenuOpen, setIsPresetMenuOpen] = useState(false)
+    const [presetSearchQuery, setPresetSearchQuery] = useState('')
+    const [activePresetActionId, setActivePresetActionId] = useState<string | null>(null)
 
     const shouldRenderFolderFilter = useDelayUnmount(isFolderFilterOpen, 150)
     const shouldRenderTagFilter = useDelayUnmount(isTagFilterOpen, 150)
@@ -134,6 +151,10 @@ export function MainHeader({
             }
             if (dateFilterBtnRef.current && !dateFilterBtnRef.current.contains(event.target as Node)) {
                 setIsDateFilterOpen(false)
+            }
+            if (presetMenuRef.current && !presetMenuRef.current.contains(event.target as Node)) {
+                setIsPresetMenuOpen(false)
+                setActivePresetActionId(null)
             }
         }
         document.addEventListener('mousedown', handleClickOutside)
@@ -299,6 +320,33 @@ export function MainHeader({
     }
 
     const artistLabel = getSelectedArtistLabel()
+
+    const handleSaveCurrentFilterPreset = () => {
+        const nextName = window.prompt('プリセット名を入力してください', '')
+        if (!nextName) return
+        const presetId = onSaveFilterPreset(nextName)
+        if (presetId) {
+            setSelectedFilterPresetId(presetId)
+        }
+    }
+
+    const handleApplySelectedPreset = (presetId: string) => {
+        setSelectedFilterPresetId(presetId)
+        if (!presetId) return
+        onApplyFilterPreset(presetId)
+    }
+
+    const handleRenamePreset = (presetId: string, currentName: string) => {
+        const nextName = window.prompt('新しいプリセット名を入力してください', currentName)
+        if (!nextName) return
+        onRenameFilterPreset(presetId, nextName)
+    }
+
+    const filteredPresets = useMemo(() => {
+        const q = presetSearchQuery.trim().toLowerCase()
+        if (!q) return filterPresets
+        return filterPresets.filter((preset) => preset.name.toLowerCase().includes(q))
+    }, [filterPresets, presetSearchQuery])
 
     return (
         <div className="main-header-container">
@@ -658,6 +706,7 @@ export function MainHeader({
             {/* フィルターバー */}
             {isFilterBarOpen && (
                 <div className="filter-bar">
+                    <div className="filter-bar-filters">
                     {/* フォルダーフィルター */}
                     <div className="filter-bar-item" ref={folderFilterBtnRef}>
                         <button
@@ -818,6 +867,106 @@ export function MainHeader({
                             />
                         )}
                     </div>
+                    </div>
+
+                    <div className="filter-bar-actions">
+                        <div className="filter-bar-item filter-action-item" ref={presetMenuRef}>
+                            <button
+                                className={`filter-bar-btn filter-action-btn ${isPresetMenuOpen ? 'active' : ''}`}
+                                onClick={() => setIsPresetMenuOpen((prev) => !prev)}
+                                title="プリセット"
+                            >
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+                                </svg>
+                            </button>
+                            {isPresetMenuOpen && (
+                                <div className="filter-preset-menu">
+                                    <div className="filter-preset-search">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                            <circle cx="11" cy="11" r="8"></circle>
+                                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                        </svg>
+                                        <input
+                                            type="text"
+                                            value={presetSearchQuery}
+                                            onChange={(e) => setPresetSearchQuery(e.target.value)}
+                                            placeholder="プリセットを検索"
+                                            className="filter-preset-search-input"
+                                        />
+                                    </div>
+                                    <div className="filter-preset-list">
+                                        {filteredPresets.length === 0 ? (
+                                            <div className="filter-preset-empty">保存されたプリセットはありません</div>
+                                        ) : (
+                                            filteredPresets.map((preset) => (
+                                                <div key={preset.id} className={`filter-preset-row ${selectedFilterPresetId === preset.id ? 'active' : ''}`}>
+                                                    <button
+                                                        className="filter-preset-item"
+                                                        onClick={() => handleApplySelectedPreset(preset.id)}
+                                                    >
+                                                        <span>{preset.name}</span>
+                                                        {selectedFilterPresetId === preset.id && (
+                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                <polyline points="20 6 9 17 4 12"></polyline>
+                                                            </svg>
+                                                        )}
+                                                    </button>
+                                                    <div className="filter-preset-actions">
+                                                        <button
+                                                            className="filter-preset-more-btn"
+                                                            onClick={() => setActivePresetActionId((current) => current === preset.id ? null : preset.id)}
+                                                            title="操作"
+                                                        >
+                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                                                                <circle cx="12" cy="5" r="1.8"></circle>
+                                                                <circle cx="12" cy="12" r="1.8"></circle>
+                                                                <circle cx="12" cy="19" r="1.8"></circle>
+                                                            </svg>
+                                                        </button>
+                                                        {activePresetActionId === preset.id && (
+                                                            <div className="filter-preset-row-menu">
+                                                                <button
+                                                                    className="filter-preset-row-action"
+                                                                    onClick={() => {
+                                                                        handleRenamePreset(preset.id, preset.name)
+                                                                        setActivePresetActionId(null)
+                                                                    }}
+                                                                >
+                                                                    名前を変更
+                                                                </button>
+                                                                <button
+                                                                    className="filter-preset-row-action danger"
+                                                                    onClick={() => {
+                                                                        onDeleteFilterPreset(preset.id)
+                                                                        if (selectedFilterPresetId === preset.id) setSelectedFilterPresetId('')
+                                                                        setActivePresetActionId(null)
+                                                                    }}
+                                                                >
+                                                                    削除
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                    <div className="filter-preset-save">
+                                        <button className="filter-preset-save-btn" onClick={handleSaveCurrentFilterPreset}>
+                                            + このフィルターを保存する
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        <button className="filter-bar-btn filter-action-btn filter-reset-btn" onClick={onResetFilters} title="リセット">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M3 12a9 9 0 1 0 3-6.7"></path>
+                                <polyline points="3 3 3 9 9 9"></polyline>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -872,4 +1021,3 @@ export function MainHeader({
         </div>
     )
 }
-

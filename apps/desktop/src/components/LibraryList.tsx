@@ -22,6 +22,8 @@ interface LibraryListProps {
     onFilterChange: (options: FilterOptions) => void
     onLoadMore?: () => void
     hasMore?: boolean
+    onInternalDragStart?: (mediaIds?: number[]) => void
+    onInternalDragEnd?: () => void
 }
 
 interface LibraryListContext {
@@ -147,7 +149,9 @@ export const LibraryList: React.FC<LibraryListProps> = ({
     filterOptions,
     onFilterChange,
     onLoadMore,
-    hasMore
+    hasMore,
+    onInternalDragStart,
+    onInternalDragEnd
 }) => {
     const [headerMenu, setHeaderMenu] = useState<{ x: number, y: number } | null>(null)
     const listColumns = _viewSettings.listColumns || {
@@ -358,15 +362,26 @@ export const LibraryList: React.FC<LibraryListProps> = ({
                     onContextMenu={(e) => context.onContextMenu(media, e)}
                     draggable={true}
                     onDragStart={(e) => {
-                        e.preventDefault()
                         const dragIds = isSelected ? context.selectedIds : [media.id]
-                        const dragFiles = context.mediaFiles.filter(m => dragIds.includes(m.id)).map(m => m.file_path)
-                        api.startDrag(dragFiles)
+                        if (e.shiftKey) {
+                            e.stopPropagation()
+                            onInternalDragStart?.(dragIds)
+                            e.dataTransfer.effectAllowed = 'move'
+                            e.dataTransfer.dropEffect = 'move'
+                            e.dataTransfer.setData('application/x-obscura-media-ids', JSON.stringify(dragIds))
+                            return
+                        }
+                        e.preventDefault()
+                        onInternalDragStart?.(dragIds)
+                        api.startDrag([media.file_path])
+                    }}
+                    onDragEnd={() => {
+                        onInternalDragEnd?.()
                     }}
                 />
             )
         })
-    }), [])
+    }), [onInternalDragEnd, onInternalDragStart])
 
     const virtuosoContext = useMemo<LibraryListContext>(() => ({
         mediaFiles,

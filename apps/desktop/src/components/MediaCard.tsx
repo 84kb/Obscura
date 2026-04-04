@@ -17,7 +17,7 @@ interface MediaCardProps extends React.HTMLAttributes<HTMLDivElement> {
     itemInfoType?: ItemInfoType
     showExtension?: boolean
     showExtensionLabel?: boolean
-    onInternalDragStart?: () => void
+    onInternalDragStart?: (mediaIds?: number[]) => void
     onInternalDragEnd?: () => void
     isRenaming?: boolean
     onRenameSubmit?: (newName: string) => void
@@ -25,6 +25,7 @@ interface MediaCardProps extends React.HTMLAttributes<HTMLDivElement> {
     thumbnailMode?: 'speed' | 'quality'
     width?: number
     onDragGetPaths?: (id: string) => string[]
+    onDragGetMediaIds?: (id: string) => number[]
     priorityLoad?: boolean
 }
 
@@ -47,6 +48,7 @@ export function MediaCard({
     thumbnailMode = 'speed',
     width = 250,
     onDragGetPaths,
+    onDragGetMediaIds,
     priorityLoad = false,
     ...props
 }: MediaCardProps) {
@@ -187,14 +189,21 @@ export function MediaCard({
 
     // 繝阪う繝・ぅ繝悶ヵ繧｡繧､繝ｫ繝峨Λ繝・げ髢句ｧ・
     const handleDragStart = (e: React.DragEvent) => {
-        const dragPaths = onDragGetPaths ? onDragGetPaths(String(media.id)) : [media.file_path]
+        const dragPaths = [media.file_path]
+        const dragMediaIds = onDragGetMediaIds ? onDragGetMediaIds(String(media.id)) : [media.id]
         console.log('[MediaCard] Drag start triggered for:', dragPaths)
 
-        // 蜀・Κ繝峨Λ繝・げ髢句ｧ九ｒ騾夂衍
-        onInternalDragStart?.()
+        if (e.shiftKey) {
+            onInternalDragStart?.(dragMediaIds)
+            e.stopPropagation()
+            e.dataTransfer.effectAllowed = 'move'
+            e.dataTransfer.dropEffect = 'move'
+            e.dataTransfer.setData('application/x-obscura-media-ids', JSON.stringify(dragMediaIds))
+            return
+        }
 
         e.preventDefault()
-
+        onInternalDragStart?.(dragMediaIds)
         if (api.startDrag) {
             console.log('[MediaCard] Calling startDrag IPC with', dragPaths.length, 'files')
             api.startDrag(dragPaths)
@@ -204,8 +213,7 @@ export function MediaCard({
     }
 
     // 繝峨Λ繝・げ邨ゆｺ・凾
-    const handleDragEnd = (_e: React.DragEvent) => {
-        // 蜀・Κ繝峨Λ繝・げ邨ゆｺ・ｒ騾夂衍
+    const handleDragEnd = (e: React.DragEvent) => {
         onInternalDragEnd?.()
     }
 
@@ -288,12 +296,14 @@ export function MediaCard({
                     <img
                         src={thumbnailUrl}
                         alt={media.file_name}
+                        draggable={false}
                         loading={imgLoadingMode}
                         decoding="async"
                         {...imgPriorityProps}
                         onLoad={handleThumbnailLoad}
+                        onDragStart={(e) => e.preventDefault()}
                         style={{
-                            opacity: isLoaded ? 1 : 0,
+                            opacity: 1,
                             transition: 'opacity 0.3s ease'
                         }}
                     />

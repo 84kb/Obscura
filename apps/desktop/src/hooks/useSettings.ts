@@ -10,6 +10,7 @@ export const useSettings = () => {
     const loadSettings = useCallback(async () => {
         try {
             setLoading(true)
+            setError(null)
             const config = await api.getClientConfig()
             setClientConfig(config)
         } catch (err: any) {
@@ -23,6 +24,16 @@ export const useSettings = () => {
     useEffect(() => {
         loadSettings()
     }, [loadSettings])
+
+    useEffect(() => {
+        return api.on('client-config-updated', (_event: any, config: ClientConfig) => {
+            if (config) {
+                setClientConfig(config)
+                setLoading(false)
+                setError(null)
+            }
+        })
+    }, [])
 
     const updateClientConfig = useCallback(async (updates: Partial<ClientConfig>) => {
         try {

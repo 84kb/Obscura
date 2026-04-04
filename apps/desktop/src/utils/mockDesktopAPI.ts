@@ -85,6 +85,9 @@ const storage = {
 
 // モックAPI実装
 export const mockDesktopAPI = {
+    listLibraryBackups: async () => [],
+    createLibraryBackup: async () => ({ success: true, skipped: false }),
+    restoreLibraryBackup: async (_backupId: string) => ({ success: true }),
     // ファイル操作
     selectFile: async (_options?: any) => null,
 
@@ -244,6 +247,7 @@ export const mockDesktopAPI = {
         autoImport: { enabled: false, watchPaths: [] },
         thumbnailMode: 'speed' as const,
         discordRichPresenceEnabled: false,
+        libraryBackupRetention: 5,
         enableF12DeveloperTools: false,
         libraryViewSettings: {}
     }),
@@ -256,6 +260,7 @@ export const mockDesktopAPI = {
         autoImport: { enabled: false, watchPaths: [] },
         thumbnailMode: 'speed' as const,
         discordRichPresenceEnabled: false,
+        libraryBackupRetention: 5,
         enableF12DeveloperTools: false,
         libraryViewSettings: {}
     }),

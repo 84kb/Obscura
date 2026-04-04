@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { MediaFile } from '@obscura/core'
 import { api } from '../api'
+import { toMediaUrl } from '../utils/fileUrl'
 // Reuse existing styles to match the standard duplicate warning
 import './DuplicateModal.css'
 
@@ -61,8 +62,8 @@ export const DuplicateResolutionModal: React.FC<DuplicateResolutionModalProps> =
         return null
     }
 
-    const thumbA = fileA.thumbnail_path ? `media://${fileA.thumbnail_path.replace(/\\/g, '/')}` : ''
-    const thumbB = fileB.thumbnail_path ? `media://${fileB.thumbnail_path.replace(/\\/g, '/')}` : ''
+    const thumbA = toMediaUrl(fileA.thumbnail_path)
+    const thumbB = toMediaUrl(fileB.thumbnail_path)
 
     const handleConfirm = async () => {
         if (isProcessing) return

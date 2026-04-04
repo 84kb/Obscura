@@ -4,10 +4,16 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
+use std::thread;
+use std::time::Duration;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
+use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source};
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow, Window};
@@ -37,6 +43,216 @@ struct SidecarStatus {
     pid: Option<u32>,
 }
 
+struct NativeAudioPlayback {
+    _stream: OutputStream,
+    sink: Arc<Sink>,
+    monitor_stop: Arc<AtomicBool>,
+}
+
+#[derive(Default)]
+struct NativeAudioState {
+    playback: Mutex<Option<NativeAudioPlayback>>,
+    desired_volume: Mutex<f32>,
+}
+
+fn emit_audio_event<T: Serialize + Clone>(app: &AppHandle, event: &str, payload: T) {
+    let _ = app.emit(event, payload);
+}
+
+fn stop_native_audio_locked(playback: &mut Option<NativeAudioPlayback>) {
+    if let Some(current) = playback.take() {
+        current.monitor_stop.store(true, Ordering::Relaxed);
+        current.sink.stop();
+    }
+}
+
+fn spawn_audio_monitor(app: AppHandle, sink: Arc<Sink>, monitor_stop: Arc<AtomicBool>) {
+    thread::spawn(move || {
+        let mut last_paused = sink.is_paused();
+        loop {
+            if monitor_stop.load(Ordering::Relaxed) {
+                break;
+            }
+
+            emit_audio_event(&app, "audio:time-update", sink.get_pos().as_secs_f64());
+
+            let paused = sink.is_paused();
+            if paused != last_paused {
+                emit_audio_event(&app, "audio:pause-update", paused);
+                last_paused = paused;
+            }
+
+            if sink.empty() {
+                emit_audio_event(&app, "audio:pause-update", true);
+                emit_audio_event(&app, "audio:ended", true);
+                break;
+            }
+
+            thread::sleep(Duration::from_millis(200));
+        }
+    });
+}
+
+#[tauri::command]
+async fn native_audio_play(
+    app: AppHandle,
+    audio_state: State<'_, NativeAudioState>,
+    file_path: Option<String>,
+) -> Result<(), String> {
+    let desired_volume = {
+        let guard = audio_state
+            .desired_volume
+            .lock()
+            .map_err(|_| "failed to lock audio volume state".to_string())?;
+        *guard
+    };
+
+    let mut playback_guard = audio_state
+        .playback
+        .lock()
+        .map_err(|_| "failed to lock audio playback state".to_string())?;
+
+    if let Some(file_path) = file_path {
+        let trimmed = file_path.trim();
+        if trimmed.is_empty() {
+            return Ok(());
+        }
+
+        stop_native_audio_locked(&mut playback_guard);
+
+        let file = fs::File::open(trimmed)
+            .map_err(|e| format!("failed to open audio file '{}': {e}", trimmed))?;
+        let decoder = Decoder::try_from(file)
+            .map_err(|e| format!("failed to decode audio '{}': {e}", trimmed))?;
+        let duration = decoder.total_duration().unwrap_or_default().as_secs_f64();
+
+        let stream = OutputStreamBuilder::open_default_stream()
+            .map_err(|e| format!("failed to open native audio output: {e}"))?;
+        let sink = Arc::new(Sink::connect_new(stream.mixer()));
+        sink.set_volume(desired_volume);
+        sink.append(decoder);
+        sink.play();
+
+        let monitor_stop = Arc::new(AtomicBool::new(false));
+        spawn_audio_monitor(app.clone(), sink.clone(), monitor_stop.clone());
+
+        *playback_guard = Some(NativeAudioPlayback {
+            _stream: stream,
+            sink: sink.clone(),
+            monitor_stop,
+        });
+
+        emit_audio_event(&app, "audio:duration-update", duration);
+        emit_audio_event(&app, "audio:time-update", 0.0_f64);
+        emit_audio_event(&app, "audio:pause-update", false);
+        return Ok(());
+    }
+
+    if let Some(playback) = playback_guard.as_ref() {
+        playback.sink.play();
+        emit_audio_event(&app, "audio:pause-update", false);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn native_audio_pause(
+    app: AppHandle,
+    audio_state: State<'_, NativeAudioState>,
+) -> Result<(), String> {
+    let playback_guard = audio_state
+        .playback
+        .lock()
+        .map_err(|_| "failed to lock audio playback state".to_string())?;
+    if let Some(playback) = playback_guard.as_ref() {
+        playback.sink.pause();
+        emit_audio_event(&app, "audio:pause-update", true);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn native_audio_resume(
+    app: AppHandle,
+    audio_state: State<'_, NativeAudioState>,
+) -> Result<(), String> {
+    let playback_guard = audio_state
+        .playback
+        .lock()
+        .map_err(|_| "failed to lock audio playback state".to_string())?;
+    if let Some(playback) = playback_guard.as_ref() {
+        playback.sink.play();
+        emit_audio_event(&app, "audio:pause-update", false);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn native_audio_stop(
+    app: AppHandle,
+    audio_state: State<'_, NativeAudioState>,
+) -> Result<(), String> {
+    let mut playback_guard = audio_state
+        .playback
+        .lock()
+        .map_err(|_| "failed to lock audio playback state".to_string())?;
+    stop_native_audio_locked(&mut playback_guard);
+    emit_audio_event(&app, "audio:pause-update", true);
+    emit_audio_event(&app, "audio:time-update", 0.0_f64);
+    Ok(())
+}
+
+#[tauri::command]
+async fn native_audio_seek(
+    app: AppHandle,
+    audio_state: State<'_, NativeAudioState>,
+    time: f64,
+) -> Result<(), String> {
+    let playback_guard = audio_state
+        .playback
+        .lock()
+        .map_err(|_| "failed to lock audio playback state".to_string())?;
+    if let Some(playback) = playback_guard.as_ref() {
+        let target = if time.is_finite() { time.max(0.0) } else { 0.0 };
+        playback
+            .sink
+            .try_seek(Duration::from_secs_f64(target))
+            .map_err(|e| format!("failed to seek audio: {e}"))?;
+        emit_audio_event(&app, "audio:time-update", target);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn native_audio_set_volume(
+    audio_state: State<'_, NativeAudioState>,
+    volume: f64,
+) -> Result<(), String> {
+    let normalized = if volume.is_finite() {
+        (volume / 100.0).clamp(0.0, 1.0) as f32
+    } else {
+        1.0
+    };
+
+    {
+        let mut guard = audio_state
+            .desired_volume
+            .lock()
+            .map_err(|_| "failed to lock audio volume state".to_string())?;
+        *guard = normalized;
+    }
+
+    let playback_guard = audio_state
+        .playback
+        .lock()
+        .map_err(|_| "failed to lock audio playback state".to_string())?;
+    if let Some(playback) = playback_guard.as_ref() {
+        playback.sink.set_volume(normalized);
+    }
+    Ok(())
+}
+
 fn client_config_path(app: &AppHandle) -> Result<PathBuf, String> {
     let base_dir = app
         .path()
@@ -48,6 +264,140 @@ fn client_config_path(app: &AppHandle) -> Result<PathBuf, String> {
     }
 
     Ok(base_dir.join("client-config.json"))
+}
+
+fn legacy_client_config_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let base_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir error: {e}"))?;
+
+    let parent = base_dir
+        .parent()
+        .ok_or_else(|| "failed to resolve parent app data dir".to_string())?;
+
+    Ok(parent.join("Obscura").join("client-config.json"))
+}
+
+fn read_json_file(path: &PathBuf) -> Option<Value> {
+    let raw = fs::read_to_string(path).ok()?;
+    serde_json::from_str::<Value>(&raw).ok()
+}
+
+fn config_has_meaningful_user_settings(config: &Value) -> bool {
+    let auto_import_paths = config
+        .get("autoImport")
+        .and_then(|v| v.get("watchPaths"))
+        .and_then(|v| v.as_array())
+        .map(|items| !items.is_empty())
+        .unwrap_or(false);
+
+    let has_remote_libraries = config
+        .get("remoteLibraries")
+        .and_then(|v| v.as_array())
+        .map(|items| !items.is_empty())
+        .unwrap_or(false);
+
+    let has_custom_themes = config
+        .get("customThemes")
+        .and_then(|v| v.as_array())
+        .map(|items| !items.is_empty())
+        .unwrap_or(false);
+
+    let has_library_transfer = config.get("libraryTransferSettings").is_some();
+    let has_nickname = config
+        .get("nickname")
+        .and_then(|v| v.as_str())
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+    let has_icon = config
+        .get("iconUrl")
+        .and_then(|v| v.as_str())
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+    let has_audio_device = config
+        .get("audioDevice")
+        .and_then(|v| v.as_str())
+        .map(|value| !value.trim().is_empty() && value.trim() != "auto")
+        .unwrap_or(false);
+
+    auto_import_paths
+        || has_remote_libraries
+        || has_custom_themes
+        || has_library_transfer
+        || has_nickname
+        || has_icon
+        || has_audio_device
+}
+
+fn merge_config_values(base: &mut Value, incoming: &Value) {
+    match incoming {
+        Value::Object(incoming_map) => {
+            let Some(base_map) = base.as_object_mut() else {
+                if base.is_null() {
+                    *base = incoming.clone();
+                }
+                return;
+            };
+            for (key, incoming_value) in incoming_map {
+                match base_map.get_mut(key) {
+                    Some(base_value) => merge_config_values(base_value, incoming_value),
+                    None => {
+                        base_map.insert(key.clone(), incoming_value.clone());
+                    }
+                }
+            }
+        }
+        Value::Array(incoming_items) => {
+            if let Some(base_items) = base.as_array_mut() {
+                if base_items.is_empty() {
+                    *base_items = incoming_items.clone();
+                }
+            } else if base.is_null() {
+                *base = incoming.clone();
+            }
+        }
+        Value::String(incoming_str) => {
+            if let Some(base_str) = base.as_str() {
+                if base_str.trim().is_empty() {
+                    *base = Value::String(incoming_str.clone());
+                }
+            } else if base.is_null() {
+                *base = Value::String(incoming_str.clone());
+            }
+        }
+        _ => {
+            if base.is_null() {
+                *base = incoming.clone();
+            }
+        }
+    }
+}
+
+fn load_effective_client_config(app: &AppHandle) -> Result<String, String> {
+    let path = client_config_path(app)?;
+    let legacy_path = legacy_client_config_path(app)?;
+
+    let mut current_value = if path.exists() {
+        read_json_file(&path).unwrap_or_else(|| json!({}))
+    } else {
+        json!({})
+    };
+
+    let current_has_data = config_has_meaningful_user_settings(&current_value);
+    if !current_has_data && legacy_path.exists() {
+        if let Some(legacy_value) = read_json_file(&legacy_path) {
+            if config_has_meaningful_user_settings(&legacy_value) {
+                merge_config_values(&mut current_value, &legacy_value);
+                if let Ok(serialized) = serde_json::to_string_pretty(&current_value) {
+                    let _ = fs::write(&path, &serialized);
+                    return Ok(serialized);
+                }
+            }
+        }
+    }
+
+    serde_json::to_string_pretty(&current_value).map_err(|e| format!("serialize config failed: {e}"))
 }
 
 fn sidecar_script_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -454,12 +804,7 @@ fn window_toggle_devtools(webview: WebviewWindow) -> Result<(), String> {
 
 #[tauri::command]
 async fn read_client_config(app: AppHandle) -> Result<String, String> {
-    let path = client_config_path(&app)?;
-    if !path.exists() {
-        return Ok("{}".to_string());
-    }
-
-    fs::read_to_string(path).map_err(|e| format!("read config failed: {e}"))
+    load_effective_client_config(&app)
 }
 
 #[tauri::command]
@@ -476,6 +821,7 @@ async fn write_client_config(app: AppHandle, content: String) -> Result<BasicRes
 fn main() {
     tauri::Builder::default()
         .manage(SidecarState::default())
+        .manage(NativeAudioState::default())
         .setup(|app| {
             let _ = sidecar_start(app.handle().clone(), app.state::<SidecarState>());
             Ok(())
@@ -485,6 +831,7 @@ fn main() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_drag::init())
         .invoke_handler(tauri::generate_handler![
             sidecar_start,
             sidecar_stop,
@@ -495,6 +842,12 @@ fn main() {
             window_close,
             window_focus,
             window_toggle_devtools,
+            native_audio_play,
+            native_audio_pause,
+            native_audio_resume,
+            native_audio_stop,
+            native_audio_seek,
+            native_audio_set_volume,
             read_client_config,
             write_client_config,
         ])

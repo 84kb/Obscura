@@ -839,7 +839,7 @@ export function Inspector({
     }
 
     return (
-        <div className="inspector slide-in-right" ref={inspectorRef}>
+        <div className="inspector" ref={inspectorRef}>
             <div className="inspector-header">
                 <h2 className="inspector-title">{i18nT(language, 'inspector.title')}</h2>
                 <div className="window-controls">

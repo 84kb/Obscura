@@ -62,10 +62,16 @@ Obscura/
 - ユーザー向けガイド: [USER_GUIDE.md](./USER_GUIDE.md)
 - そのほか設計資料は `docs/` を参照
 
+## 開発体制
+
+- 本プロジェクトのソースコードは全てcodexにより作成されました
+
 ## ライセンス
 
-[MIT License](./LICENSE)
+- 本リポジトリのソースコードは [MIT License](./LICENSE) の下で提供されます
+- 依存ライブラリ・ランタイム・外部ツールには、それぞれ個別のライセンスが適用されます
+- 配布物を再利用・再配布する場合は、本リポジトリの `LICENSE` と依存先のライセンス条件をあわせて確認してください
 
-## Author
+## Repository
 
-84kb
+- GitHub: [84kb/Obscura](https://github.com/84kb/Obscura)

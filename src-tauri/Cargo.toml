@@ -1,6 +1,6 @@
 [package]
 name = "obscura-tauri"
-version = "0.8.13"
+version = "0.8.16"
 description = "Obscura Tauri host"
 authors = ["84kb"]
 license = "MIT"
@@ -19,6 +19,8 @@ tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-drag = "2.1.0"
+rodio = { version = "0.21.1", default-features = false, features = ["playback", "symphonia-all"] }
 
 [features]
 default = ["custom-protocol"]

@@ -12,8 +12,7 @@
     -webkit-app-region: drag;
 }
 
-body.dragging-file .main-header,
-body.dragging-file .app-drag-overlay {
+body.dragging-file .main-header {
     -webkit-app-region: no-drag !important;
 }
 
@@ -192,6 +191,15 @@ body.dragging-file .app-drag-overlay {
     padding: 8px 20px;
     background-color: var(--bg-dark);
     border-bottom: 1px solid var(--border);
+    justify-content: space-between;
+    flex-wrap: wrap;
+}
+
+.filter-bar-filters {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 .filter-bar-item {
@@ -226,6 +234,197 @@ body.dragging-file .app-drag-overlay {
 
 .filter-bar-btn svg {
     flex-shrink: 0;
+}
+
+.filter-bar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+}
+
+.filter-action-item {
+    position: relative;
+}
+
+.filter-action-btn {
+    width: 34px;
+    height: 34px;
+    justify-content: center;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-main);
+    padding: 0;
+}
+
+.filter-reset-btn {
+    width: 34px;
+}
+
+.filter-preset-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 260px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    z-index: 1100;
+    overflow: hidden;
+}
+
+.filter-preset-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-muted);
+}
+
+.filter-preset-search-input {
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: var(--text-main);
+    outline: none;
+    font-size: 13px;
+}
+
+.filter-preset-menu-header {
+    padding: 10px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-main);
+    border-bottom: 1px solid var(--border);
+}
+
+.filter-preset-list {
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 6px;
+}
+
+.filter-preset-empty {
+    padding: 10px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.filter-preset-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: var(--text-main);
+    cursor: pointer;
+    text-align: left;
+}
+
+.filter-preset-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 6px;
+}
+
+.filter-preset-row:hover {
+    background: var(--bg-hover);
+}
+
+.filter-preset-row.active {
+    background: color-mix(in srgb, var(--primary), transparent 85%);
+    color: var(--primary);
+}
+
+.filter-preset-item {
+    width: 100%;
+}
+
+.filter-preset-actions {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.filter-preset-more-btn {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: inherit;
+    cursor: pointer;
+}
+
+.filter-preset-more-btn:hover {
+    background: color-mix(in srgb, var(--bg-hover) 85%, transparent);
+}
+
+.filter-preset-row-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    min-width: 120px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    padding: 4px;
+    z-index: 1200;
+}
+
+.filter-preset-row-action {
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: var(--text-main);
+    text-align: left;
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.filter-preset-row-action:hover {
+    background: var(--bg-hover);
+}
+
+.filter-preset-row-action.danger {
+    color: var(--accent);
+}
+
+.filter-preset-save {
+    display: flex;
+    padding: 10px;
+    border-top: 1px solid var(--border);
+}
+
+.filter-preset-save-btn {
+    width: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 12px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-main);
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.filter-preset-save-btn:hover {
+    background: var(--bg-hover);
 }
 
 /* 表示オプションドロップダウン */

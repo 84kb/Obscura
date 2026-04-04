@@ -11,6 +11,14 @@ type PlayerClientConfig = {
     enableMpvForVideo?: boolean
 }
 
+function normalizePlayerClientConfig(config: any): PlayerClientConfig {
+    return {
+        exclusiveMode: !!config?.exclusiveMode,
+        useMpvAudio: !!config?.useMpvAudio,
+        enableMpvForVideo: !!config?.enableMpvForVideo,
+    }
+}
+
 let cachedPlayerClientConfig: PlayerClientConfig | null = null
 let pendingPlayerClientConfigPromise: Promise<PlayerClientConfig> | null = null
 
@@ -20,11 +28,7 @@ async function getPlayerClientConfigFast(): Promise<PlayerClientConfig> {
 
     pendingPlayerClientConfigPromise = api.getClientConfig()
         .then((c: any) => {
-            const next: PlayerClientConfig = {
-                exclusiveMode: !!c?.exclusiveMode,
-                useMpvAudio: !!c?.useMpvAudio,
-                enableMpvForVideo: !!c?.enableMpvForVideo,
-            }
+            const next = normalizePlayerClientConfig(c)
             cachedPlayerClientConfig = next
             return next
         })
@@ -102,13 +106,29 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
         media?.file_type === 'audio' ||
         (media?.file_type === 'video' && enableMpvForVideo)
     )
+    const useNativeVideoAudio = useMpvAudio && media?.file_type === 'video' && !enableMpvForVideo
+    const usesNativeAudio = isMpv || useNativeVideoAudio
 
     useEffect(() => {
-        getPlayerClientConfigFast().then((c) => {
+        const applyConfig = (c: PlayerClientConfig) => {
             setExclusiveMode(!!c.exclusiveMode)
             setUseMpvAudio(!!c.useMpvAudio)
             setEnableMpvForVideo(!!c.enableMpvForVideo)
+        }
+
+        getPlayerClientConfigFast().then((c) => {
+            applyConfig(c)
         })
+
+        const unsubscribe = api.on('client-config-updated', (_event: any, config: any) => {
+            const next = normalizePlayerClientConfig(config)
+            cachedPlayerClientConfig = next
+            applyConfig(next)
+        })
+
+        return () => {
+            if (unsubscribe) unsubscribe()
+        }
     }, [])
 
 
@@ -168,9 +188,12 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
 
     // 再生/一時停止（メディア要素の実際の状態を基準に）
     const togglePlay = async () => {
-        if (isMpv) {
+        if (usesNativeAudio) {
             if (isPlaying) {
                 await api.pauseAudio()
+                if (useNativeVideoAudio && videoRef.current) {
+                    videoRef.current.pause()
+                }
                 setIsPlaying(false)
             } else {
                 if (currentTime === 0 && !isPlaying) {
@@ -178,6 +201,14 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
                     await api.playAudio(media?.file_path)
                 } else {
                     await api.resumeAudio()
+                }
+                if (useNativeVideoAudio && videoRef.current) {
+                    try {
+                        videoRef.current.currentTime = currentTime
+                        await videoRef.current.play()
+                    } catch {
+                        // Keep native audio active even if visual playback cannot start immediately.
+                    }
                 }
                 setIsPlaying(true)
             }
@@ -217,8 +248,11 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
 
     // シーク（時間のみを設定、再生状態は変更しない）
     const seek = async (time: number) => {
-        if (isMpv) {
+        if (usesNativeAudio) {
             await api.seekAudio(time)
+            if (useNativeVideoAudio && videoRef.current) {
+                videoRef.current.currentTime = time
+            }
             setCurrentTime(time)
             return
         }
@@ -265,7 +299,7 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
         setVolume(newVolume)
         if (newVolume > 0 && isMuted) {
             setIsMuted(false)
-            if (isMpv) {
+            if (usesNativeAudio) {
                 // MPV unMute is complicated, setting volume is easier
             }
         }
@@ -273,7 +307,7 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
         // 人間の聴感特性に合わせて2乗のスケーリングを適用
         const scaledVolume = newVolume * newVolume
 
-        if (isMpv) {
+        if (usesNativeAudio) {
             api.setAudioVolume(scaledVolume * 100) // MPV uses 0-100
         } else {
             const media = videoRef.current || audioRef.current
@@ -286,7 +320,7 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
 
     // ミュート切り替え
     const toggleMute = () => {
-        if (isMpv) {
+        if (usesNativeAudio) {
             // MPV doesn't expose mute easy toggle via IPC without property get/set, or we track state.
             // We track state in isMuted.
             // Mute behavior is currently represented by setting volume to 0.
@@ -306,9 +340,12 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
 
     // 再生速度変更
     const changePlaybackRate = (rate: number) => {
-        if (isMpv) {
+        if (usesNativeAudio) {
             setPlaybackRate(rate)
             // Playback speed bridge can be added later if needed.
+            if (useNativeVideoAudio && videoRef.current) {
+                videoRef.current.playbackRate = rate
+            }
             return
         }
 
@@ -321,8 +358,11 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
 
     // ループ切り替え
     const toggleLoop = () => {
-        if (isMpv) {
+        if (usesNativeAudio) {
             setIsLooping(!isLooping)
+            if (useNativeVideoAudio && videoRef.current) {
+                videoRef.current.loop = !isLooping
+            }
             return
         }
 
@@ -353,14 +393,24 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
         const mediaElement = videoRef.current || audioRef.current
         if (mediaElement && mediaElement.paused) {
             const fps = media?.framerate || 30
-            mediaElement.currentTime = Math.min(mediaElement.duration, mediaElement.currentTime + (1 / fps))
+            const targetTime = Math.min(mediaElement.duration, mediaElement.currentTime + (1 / fps))
+            if (usesNativeAudio) {
+                void seek(targetTime)
+            } else {
+                mediaElement.currentTime = targetTime
+            }
         }
     }, { scope: 'player' })
     useShortcut('PLAYER_STEP_BACKWARD', () => {
         const mediaElement = videoRef.current || audioRef.current
         if (mediaElement && mediaElement.paused) {
             const fps = media?.framerate || 30
-            mediaElement.currentTime = Math.max(0, mediaElement.currentTime - (1 / fps))
+            const targetTime = Math.max(0, mediaElement.currentTime - (1 / fps))
+            if (usesNativeAudio) {
+                void seek(targetTime)
+            } else {
+                mediaElement.currentTime = targetTime
+            }
         }
     }, { scope: 'player' })
     useShortcut('PLAYER_TOGGLE_FULLSCREEN', toggleFullscreen, { scope: 'player' })
@@ -393,7 +443,7 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
 
         // 保存された設定を適用
         media.volume = volume * volume // 聴感補正を適用
-        media.muted = isMuted
+        media.muted = useNativeVideoAudio ? true : isMuted
         media.loop = isLooping
         media.playbackRate = playbackRate
 
@@ -452,7 +502,7 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
             if (animationFrameId !== null) {
             }
         }
-    }, [videoRef.current, audioRef.current, volume, isMuted, isLooping, playbackRate, isMpv])
+    }, [videoRef.current, audioRef.current, volume, isMuted, isLooping, playbackRate, isMpv, useNativeVideoAudio])
 
     // Keep refs updated
     useEffect(() => {
@@ -463,9 +513,9 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
         isLoopingRef.current = isLooping
     }, [onNext, onPlayFirst, autoPlayEnabled, isLooping])
 
-    // MPV Event Listeners
+    // Native audio event listeners
     useEffect(() => {
-        if (!isMpv) return
+        if (!usesNativeAudio) return
 
         // 初期化時にボリューム設定 (聴感補正を適用)
         api.setAudioVolume(volume * volume * 100)
@@ -473,12 +523,22 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
         // イベント購読
         const cleanupTime = api.on('audio:time-update', (_: any, time: number) => {
             setCurrentTime(time)
+            if (useNativeVideoAudio && videoRef.current && Math.abs(videoRef.current.currentTime - time) > 0.25) {
+                videoRef.current.currentTime = time
+            }
         })
         const cleanupDuration = api.on('audio:duration-update', (_: any, dur: number) => {
             setDuration(dur)
         })
         const cleanupPause = api.on('audio:pause-update', (_: any, paused: boolean) => {
             setIsPlaying(!paused)
+            if (useNativeVideoAudio && videoRef.current) {
+                if (paused) {
+                    videoRef.current.pause()
+                } else {
+                    void videoRef.current.play().catch(() => { })
+                }
+            }
         })
         const cleanupEnded = api.on('audio:ended', () => {
             // Auto-play logic
@@ -516,6 +576,10 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
 
         // 自動再生
         api.playAudio(media?.file_path)
+        if (useNativeVideoAudio && videoRef.current) {
+            videoRef.current.currentTime = 0
+            void videoRef.current.play().catch(() => { })
+        }
 
         return () => {
             if (cleanupTime) cleanupTime()
@@ -524,8 +588,11 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
             if (cleanupEnded) cleanupEnded()
             // Cleanup: stop audio
             api.stopAudio()
+            if (useNativeVideoAudio && videoRef.current) {
+                videoRef.current.pause()
+            }
         }
-    }, [isMpv, media?.id])
+    }, [usesNativeAudio, useNativeVideoAudio, media?.id])
 
     // コンポーネントアンマウント時にメディアを確実に停止
     useEffect(() => {
@@ -714,7 +781,7 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
 
     useEffect(() => {
         const media = videoRef.current || audioRef.current
-        if (!media || isMpv) return
+        if (!media || usesNativeAudio) return
 
         const updateBuffered = () => {
             if (media.buffered.length > 0) {
@@ -758,7 +825,7 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
             media.removeEventListener('progress', updateBuffered)
             media.removeEventListener('timeupdate', updateBuffered)
         }
-    }, [videoRef.current, audioRef.current, isMpv])
+    }, [videoRef.current, audioRef.current, usesNativeAudio])
 
     useEffect(() => {
         // Guard against accidental fullscreen trigger while switching from library to player.
@@ -791,6 +858,8 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
 
         audioEngine,
         isMpv,
+        usesNativeAudio,
+        useNativeVideoAudio,
         configLoaded
     }
 }

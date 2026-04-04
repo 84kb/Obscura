@@ -5,6 +5,9 @@ import {
 } from '../core/types';
 
 export class AndroidAdapter implements IMediaLibraryAPI {
+    async listLibraryBackups(): Promise<{ id: string; createdAt: string; fileName: string; size: number }[]> { return []; }
+    async createLibraryBackup(): Promise<{ success: boolean; fileName?: string; createdAt?: string; skipped?: boolean }> { return { success: false }; }
+    async restoreLibraryBackup(_backupId: string): Promise<{ success: boolean }> { return { success: false }; }
     async selectFile(_options?: any): Promise<string | null> { return null; }
     async selectDownloadDirectory(): Promise<string | null> { return null; }
     async createLibrary(_name: string, _parentPath: string): Promise<Library> { throw new Error('Not implemented'); }

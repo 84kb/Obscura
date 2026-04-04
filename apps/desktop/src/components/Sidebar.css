@@ -384,7 +384,6 @@
     right: 0;
     height: 2px;
     background: var(--primary);
-    box-shadow: 0 0 4px color-mix(in srgb, var(--primary), transparent 50%);
     z-index: 11;
 }
 
@@ -402,14 +401,34 @@
     right: 0;
     height: 2px;
     background: var(--primary);
-    box-shadow: 0 0 4px color-mix(in srgb, var(--primary), transparent 50%);
     z-index: 11;
 }
 
 .sidebar-nav-item.drop-middle {
-    background: color-mix(in srgb, var(--primary), transparent 85%);
-    border-color: var(--primary);
-    box-shadow: inset 0 0 0 1px var(--primary);
+    background: color-mix(in srgb, var(--primary) 12%, var(--bg-hover));
+    border-color: color-mix(in srgb, var(--primary) 78%, var(--border));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 24%, transparent);
+    color: var(--text-main);
+}
+
+.sidebar-nav-item.drop-middle .folder-icon {
+    color: var(--primary);
+}
+
+.sidebar-nav-item.external-drop-target,
+.sidebar-nav-item.external-drop-target-live,
+.sidebar-nav-item.active.external-drop-target {
+    background: color-mix(in srgb, var(--primary) 18%, var(--bg-hover));
+    border-color: color-mix(in srgb, var(--primary) 92%, white 8%);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 36%, transparent), var(--shadow-md);
+    color: var(--text-main);
+    transform: translateX(4px);
+}
+
+.sidebar-nav-item.external-drop-target .folder-icon,
+.sidebar-nav-item.external-drop-target-live .folder-icon,
+.sidebar-nav-item.active.external-drop-target .folder-icon {
+    color: var(--primary);
 }
 
 .sidebar-genre-list {

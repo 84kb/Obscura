@@ -29,6 +29,64 @@ import { initializePluginSystem, loadPluginScripts } from './api/plugin-system'
 import { t as i18nT, AppLanguage } from './i18n'
 
 const ENABLE_RANDOM_THUMB_PREFETCH = false
+const FILTER_PRESETS_STORAGE_KEY = 'obscura_filter_presets'
+const DEFAULT_SEARCH_TARGETS = {
+    name: true,
+    folder: true,
+    description: true,
+    extension: true,
+    tags: true,
+    url: true,
+    comments: true,
+    memo: true,
+    artist: true
+} as const
+type FilterPreset = {
+    id: string
+    name: string
+    options: FilterOptions
+    createdAt: string
+}
+
+const createDefaultFilterOptions = (): FilterOptions => ({
+    searchQuery: '',
+    searchTargets: { ...DEFAULT_SEARCH_TARGETS },
+    selectedTags: [],
+    excludedTags: [],
+    selectedFolders: [],
+    excludedFolders: [],
+    tagFilterMode: 'or',
+    selectedSysDirs: [],
+    excludedSysDirs: [],
+    folderFilterMode: 'or',
+    filterType: 'all',
+    fileType: 'all',
+    sortOrder: 'name',
+    sortDirection: 'desc',
+    selectedRatings: [],
+    excludedRatings: [],
+    selectedExtensions: [],
+    excludedExtensions: [],
+    selectedArtists: [],
+    excludedArtists: [],
+    durationMin: undefined,
+    durationMax: undefined,
+    dateModifiedMin: undefined,
+    dateModifiedMax: undefined,
+})
+
+const normalizeFilterOptions = (input: Partial<FilterOptions> | null | undefined): FilterOptions => {
+    const defaults = createDefaultFilterOptions()
+    return {
+        ...defaults,
+        ...(input || {}),
+        searchTargets: {
+            ...DEFAULT_SEARCH_TARGETS,
+            ...((input as any)?.searchTargets || {})
+        }
+    }
+}
+
 const DEFAULT_INSPECTOR_SETTINGS = {
     sectionVisibility: {
         artist: true,
@@ -309,6 +367,7 @@ function AppContent() {
         loadMore,
         hasMore
     } = useLibrary()
+    const isStartupOverlayVisible = startupLoading && loadingProgress < 100
 
     const getSearchScopeKey = useCallback((options: Pick<FilterOptions, 'filterType' | 'selectedFolders'>) => {
         const selectedFolders = Array.isArray(options.selectedFolders) ? options.selectedFolders : []
@@ -342,7 +401,7 @@ function AppContent() {
     }, [getSearchScopeKey, setFilterOptions])
 
     // テーマシステムの初期化
-    const { updateClientConfig, clientConfig } = useSettings()
+    const { updateClientConfig, clientConfig, reloadSettings } = useSettings()
     // useThemeは内部でサイドエフェクトとしてCSS変数を適用する
     // clientConfigがロードされるまではデフォルトテーマ（初期状態）が維持される
     useTheme(clientConfig || {} as any, updateClientConfig)
@@ -763,10 +822,8 @@ function AppContent() {
     const [availableLibraries, setAvailableLibraries] = useState<{ name: string, path: string }[]>([])
 
     useEffect(() => {
-        api.getLibraries()
-            .then((libs: any) => setAvailableLibraries(libs))
-            .catch(console.error)
-    }, [])
+        setAvailableLibraries(Array.isArray(libraries) ? libraries : [])
+    }, [libraries])
 
     useEffect(() => {
         if (!api.onRefreshProgress) return
@@ -788,20 +845,223 @@ function AppContent() {
         }
     }
     const [showSettingsModal, setShowSettingsModal] = useState(false)
+    const [filterPresets, setFilterPresets] = useState<FilterPreset[]>(() => {
+        try {
+            const raw = localStorage.getItem(FILTER_PRESETS_STORAGE_KEY)
+            if (!raw) return []
+            const parsed = JSON.parse(raw)
+            if (!Array.isArray(parsed)) return []
+            return parsed
+                .filter((item) => item && typeof item === 'object' && typeof item.id === 'string' && typeof item.name === 'string')
+                .map((item) => ({
+                    id: item.id,
+                    name: item.name,
+                    createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
+                    options: normalizeFilterOptions(item.options)
+                }))
+        } catch {
+            return []
+        }
+    })
     const [showLibraryModal, setShowLibraryModal] = useState(false)
     const [isDragging, setIsDragging] = useState(false)
+    const [externalDropFolderId, setExternalDropFolderId] = useState<number | null>(null)
     const isInternalDrag = useRef(false)
+    const internalDraggedMediaIdsRef = useRef<number[]>([])
+    const currentExternalDropZoneRef = useRef<{ type: 'none' | 'library' | 'folder'; folderId?: number }>({ type: 'none' })
+    const pendingNativeDropZoneRef = useRef<{ type: 'none' | 'library' | 'folder'; folderId?: number } | null>(null)
+    const highlightedExternalDropFolderIdRef = useRef<number | null>(null)
     const dragCounter = useRef(0)
     const dragOverlayHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     const lastDragActivityAt = useRef(0)
     const [gridSize, setGridSize] = useState<number>(settings.gridSize)
     const [viewMode, setViewMode] = useState<'grid' | 'list'>(settings.viewMode)
 
+    useEffect(() => {
+        localStorage.setItem(FILTER_PRESETS_STORAGE_KEY, JSON.stringify(filterPresets))
+    }, [filterPresets])
+
+    const handleApplyFilterPreset = useCallback((presetId: string) => {
+        const preset = filterPresets.find((item) => item.id === presetId)
+        if (!preset) return
+        updateFilterOptions(normalizeFilterOptions(preset.options))
+    }, [filterPresets, updateFilterOptions])
+
+    const handleSaveFilterPreset = useCallback((name: string) => {
+        const trimmedName = name.trim()
+        if (!trimmedName) return null
+
+        const preset: FilterPreset = {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            name: trimmedName,
+            options: normalizeFilterOptions(filterOptions),
+            createdAt: new Date().toISOString()
+        }
+
+        setFilterPresets((prev) => {
+            const existing = prev.find((item) => item.name === trimmedName)
+            if (existing) {
+                return prev.map((item) =>
+                    item.id === existing.id
+                        ? { ...item, options: preset.options, createdAt: preset.createdAt }
+                        : item
+                )
+            }
+            return [...prev, preset]
+        })
+
+        const existing = filterPresets.find((item) => item.name === trimmedName)
+        return existing?.id || preset.id
+    }, [filterOptions, filterPresets])
+
+    const handleDeleteFilterPreset = useCallback((presetId: string) => {
+        setFilterPresets((prev) => prev.filter((item) => item.id !== presetId))
+    }, [])
+
+    const handleRenameFilterPreset = useCallback((presetId: string, name: string) => {
+        const trimmedName = name.trim()
+        if (!trimmedName) return
+        setFilterPresets((prev) => prev.map((item) => (
+            item.id === presetId
+                ? { ...item, name: trimmedName }
+                : item
+        )))
+    }, [])
+
+    const handleResetFilters = useCallback(() => {
+        updateFilterOptions(createDefaultFilterOptions())
+    }, [updateFilterOptions])
+
     // イベントリスナー内で最新の状態を参照するための Ref
     const isDraggingRef = useRef(isDragging)
     const hasActiveLibraryRef = useRef(hasActiveLibrary)
+    const activeLibraryRef = useRef(activeLibrary)
     const activeRemoteLibraryRef = useRef(activeRemoteLibrary)
     const allMediaFilesRef = useRef(allMediaFiles)
+
+    const beginInternalMediaDrag = useCallback((mediaIds?: number[]) => {
+        internalDraggedMediaIdsRef.current = Array.isArray(mediaIds)
+            ? Array.from(new Set(mediaIds.map((id) => Number(id)).filter(Number.isFinite)))
+            : []
+        isInternalDrag.current = true
+    }, [])
+
+    const beginInternalUiDrag = useCallback(() => {
+        internalDraggedMediaIdsRef.current = []
+        isInternalDrag.current = true
+    }, [])
+
+    const endInternalMediaDrag = useCallback(() => {
+        internalDraggedMediaIdsRef.current = []
+        isInternalDrag.current = false
+    }, [])
+
+    const syncExternalDropFolderHighlight = useCallback((folderId: number | null) => {
+        const normalizedFolderId = Number.isFinite(folderId as number) ? Number(folderId) : null
+        if (highlightedExternalDropFolderIdRef.current === normalizedFolderId) {
+            return
+        }
+
+        document
+            .querySelectorAll('.sidebar-nav-item.external-drop-target-live')
+            .forEach((element) => {
+                element.classList.remove('external-drop-target-live')
+                const htmlElement = element as HTMLElement
+                htmlElement.style.removeProperty('background')
+                htmlElement.style.removeProperty('border-color')
+                htmlElement.style.removeProperty('box-shadow')
+                htmlElement.style.removeProperty('transform')
+                htmlElement.style.removeProperty('color')
+            })
+
+        highlightedExternalDropFolderIdRef.current = normalizedFolderId
+
+        if (normalizedFolderId === null) return
+
+        document
+            .querySelectorAll(`.sidebar-nav-item[data-folder-id="${normalizedFolderId}"]`)
+            .forEach((element) => {
+                const target = element as HTMLElement
+                target.classList.add('external-drop-target-live')
+                target.style.setProperty('background', 'color-mix(in srgb, var(--primary) 18%, var(--bg-hover))', 'important')
+                target.style.setProperty('border-color', 'color-mix(in srgb, var(--primary) 92%, white 8%)', 'important')
+                target.style.setProperty('box-shadow', 'inset 0 0 0 1px color-mix(in srgb, var(--primary) 36%, transparent), var(--shadow-md)', 'important')
+                target.style.setProperty('transform', 'translateX(4px)', 'important')
+                target.style.setProperty('color', 'var(--text-main)', 'important')
+            })
+    }, [])
+
+    const clearExternalDragState = useCallback(() => {
+        currentExternalDropZoneRef.current = { type: 'none' }
+        pendingNativeDropZoneRef.current = null
+        syncExternalDropFolderHighlight(null)
+        setExternalDropFolderId(null)
+        setIsDragging(false)
+        document.body.classList.remove('dragging-file')
+    }, [syncExternalDropFolderHighlight])
+
+    const applyExternalDropZone = useCallback((zone: { type: 'none' | 'library' | 'folder'; folderId?: number }) => {
+        currentExternalDropZoneRef.current = zone
+        pendingNativeDropZoneRef.current = zone.type === 'none' ? pendingNativeDropZoneRef.current : zone
+
+        if (zone.type === 'folder' && typeof zone.folderId === 'number') {
+            syncExternalDropFolderHighlight(zone.folderId)
+            setExternalDropFolderId(zone.folderId)
+            setIsDragging(false)
+            document.body.classList.remove('dragging-file')
+            return
+        }
+
+        syncExternalDropFolderHighlight(null)
+        setExternalDropFolderId(null)
+
+        if (zone.type === 'library') {
+            setIsDragging(true)
+            document.body.classList.add('dragging-file')
+            return
+        }
+
+        setIsDragging(false)
+        document.body.classList.remove('dragging-file')
+    }, [syncExternalDropFolderHighlight])
+
+    const resolveExternalDropZone = useCallback((clientX: number, clientY: number) => {
+        const target = document.elementFromPoint(clientX, clientY) as HTMLElement | null
+        if (!target) return { type: 'none' as const }
+
+        const folderElement = target.closest('[data-folder-id]') as HTMLElement | null
+        if (folderElement) {
+            const folderId = Number(folderElement.dataset.folderId)
+            if (Number.isFinite(folderId)) {
+                return { type: 'folder' as const, folderId }
+            }
+        }
+
+        if (target.closest('[data-library-drop-zone=\"true\"]')) {
+            return { type: 'library' as const }
+        }
+
+        return { type: 'none' as const }
+    }, [])
+
+    const resolveExternalDropZoneFromNativePosition = useCallback((x: number, y: number) => {
+        const candidates: Array<[number, number]> = [
+            [x, y],
+            [x - window.screenX, y - window.screenY],
+            [x - window.screenLeft, y - window.screenTop],
+            [x - (window.outerWidth - window.innerWidth), y - (window.outerHeight - window.innerHeight)],
+        ]
+
+        for (const [candidateX, candidateY] of candidates) {
+            if (!Number.isFinite(candidateX) || !Number.isFinite(candidateY)) continue
+            const zone = resolveExternalDropZone(candidateX, candidateY)
+            if (zone.type !== 'none') {
+                return zone
+            }
+        }
+
+        return { type: 'none' as const }
+    }, [resolveExternalDropZone])
 
     // StateとRefの同期
     useEffect(() => {
@@ -811,6 +1071,10 @@ function AppContent() {
     useEffect(() => {
         hasActiveLibraryRef.current = hasActiveLibrary
     }, [hasActiveLibrary])
+
+    useEffect(() => {
+        activeLibraryRef.current = activeLibrary
+    }, [activeLibrary])
 
     useEffect(() => {
         activeRemoteLibraryRef.current = activeRemoteLibrary
@@ -833,9 +1097,8 @@ function AppContent() {
             clearDragOverlayHideTimer()
             dragOverlayHideTimer.current = setTimeout(() => {
                 dragCounter.current = 0
-                setIsDragging(false)
-                document.body.classList.remove('dragging-file')
-                isInternalDrag.current = false
+                clearExternalDragState()
+                endInternalMediaDrag()
             }, delayMs)
         }
 
@@ -859,27 +1122,28 @@ function AppContent() {
 
                 const hasFiles = Array.from(e.dataTransfer?.types || []).some(t => t.toLowerCase() === 'files')
                 if ((hasActiveLibraryRef.current || activeRemoteLibraryRef.current) && hasFiles) {
-                    console.log('[Global D&D] Showing overlay')
-                    setIsDragging(true)
-                    document.body.classList.add('dragging-file')
+                    applyExternalDropZone(resolveExternalDropZone(e.clientX, e.clientY))
                 }
             }
         }
 
         const handleGlobalDragOver = (e: DragEvent) => {
-            e.preventDefault()
             clearDragOverlayHideTimer()
             markDragActivity()
             if (e.dataTransfer) {
-                e.dataTransfer.dropEffect = 'copy'
+                e.dataTransfer.dropEffect = 'none'
             }
 
             // 内部ドラッグ中なら何もしない
             if (isInternalDrag.current) return
 
-            if (!isDraggingRef.current) {
-                setIsDragging(true)
-                document.body.classList.add('dragging-file')
+            const zone = resolveExternalDropZone(e.clientX, e.clientY)
+            applyExternalDropZone(zone)
+            if (zone.type !== 'none') {
+                e.preventDefault()
+            }
+            if (e.dataTransfer) {
+                e.dataTransfer.dropEffect = zone.type === 'none' ? 'none' : 'copy'
             }
         }
 
@@ -904,11 +1168,10 @@ function AppContent() {
             // 状態リセット
             dragCounter.current = 0
             markDragActivity()
-            setIsDragging(false)
-            document.body.classList.remove('dragging-file')
+            clearExternalDragState()
             clearDragOverlayHideTimer()
             // Drop後に確実にリセット
-            isInternalDrag.current = false
+            endInternalMediaDrag()
 
             if (wasInternal) {
                 console.log('[Global D&D] Internal drop caught at global level, ignore file import')
@@ -916,6 +1179,7 @@ function AppContent() {
             }
 
             e.preventDefault()
+            return
 
             if (!hasActiveLibraryRef.current && !activeRemoteLibraryRef.current) {
                 return
@@ -954,9 +1218,7 @@ function AppContent() {
             console.log('[Global D&D] Global DragEnd')
             dragCounter.current = 0
             markDragActivity()
-            setIsDragging(false)
-            // isInternalDrag.current = false // DELETE: ネイティブドラッグ開始時に誤って呼ばれる可能性大
-            document.body.classList.remove('dragging-file')
+            clearExternalDragState()
             clearDragOverlayHideTimer()
         }
 
@@ -964,9 +1226,8 @@ function AppContent() {
             if (dragCounter.current !== 0 || isDraggingRef.current) {
                 console.log('[Global D&D] Manual reset via mousedown')
                 dragCounter.current = 0
-                setIsDragging(false)
-                isInternalDrag.current = false
-                document.body.classList.remove('dragging-file')
+                clearExternalDragState()
+                endInternalMediaDrag()
                 clearDragOverlayHideTimer()
             }
         }
@@ -979,11 +1240,10 @@ function AppContent() {
                     // もしまだ内部ドラッグフラグが立っていたら、ドロップされずに復帰したとみなしてリセット
                     if (isInternalDrag.current) {
                         console.log('[Global] Resetting isInternalDrag after delay')
-                        isInternalDrag.current = false
+                        endInternalMediaDrag()
                     }
                     dragCounter.current = 0
-                    setIsDragging(false)
-                    document.body.classList.remove('dragging-file')
+                    clearExternalDragState()
                     clearDragOverlayHideTimer()
                 }, 500)
             }
@@ -1026,23 +1286,63 @@ function AppContent() {
             const idleMs = Date.now() - (lastDragActivityAt.current || 0)
             if (idleMs > 450) {
                 dragCounter.current = 0
-                setIsDragging(false)
-                document.body.classList.remove('dragging-file')
-                isInternalDrag.current = false
+                clearExternalDragState()
+                endInternalMediaDrag()
             }
         }, 120)
         return () => clearInterval(timer)
     }, [isDragging])
 
     useEffect(() => {
-        const handleTriggerImport = (_: any, filePaths: string[], options?: { deleteSource?: boolean; importSource?: string }) => {
+        const handleTriggerImport = (
+            _: any,
+            payloadOrPaths: string[] | { filePaths?: string[]; position?: { x?: number; y?: number } | null },
+            options?: { deleteSource?: boolean; importSource?: string },
+        ) => {
+            const filePaths = Array.isArray(payloadOrPaths)
+                ? payloadOrPaths
+                : Array.isArray(payloadOrPaths?.filePaths)
+                    ? payloadOrPaths.filePaths
+                    : []
+            const payloadPosition = Array.isArray(payloadOrPaths)
+                ? null
+                : payloadOrPaths?.position ?? null
+
             console.log('[App] Received trigger-import:', filePaths)
+
+            const x = Number(payloadPosition?.x)
+            const y = Number(payloadPosition?.y)
+            if (Number.isFinite(x) && Number.isFinite(y)) {
+                pendingNativeDropZoneRef.current = resolveExternalDropZoneFromNativePosition(x, y)
+            }
+
+            const currentDropZone = pendingNativeDropZoneRef.current ?? currentExternalDropZoneRef.current
+            console.log(
+                '[App] trigger-import drop zone summary:',
+                JSON.stringify({
+                    position: payloadPosition,
+                    pendingType: pendingNativeDropZoneRef.current?.type ?? 'none',
+                    pendingFolderId: pendingNativeDropZoneRef.current?.folderId ?? null,
+                    currentType: currentDropZone.type,
+                    currentFolderId: currentDropZone.folderId ?? null,
+                    isInternalDrag: isInternalDrag.current,
+                    internalDraggedMediaIds: internalDraggedMediaIdsRef.current,
+                }),
+            )
 
             // 内部ドラッグ中はインポートしない
             if (isInternalDrag.current) {
+                if (currentDropZone.type === 'folder' && typeof currentDropZone.folderId === 'number') {
+                    handleDropOnFolder(currentDropZone.folderId, null, internalDraggedMediaIdsRef.current).catch((e) => {
+                        console.error('Failed to add dragged media to folder:', e)
+                    })
+                    clearExternalDragState()
+                    return
+                }
                 console.log('[App] Internal drag detected in trigger-import, ignoring.')
                 // フラグをリセット (ドロップは完了したとみなせるため)
-                isInternalDrag.current = false
+                endInternalMediaDrag()
+                clearExternalDragState()
                 return
             }
 
@@ -1051,6 +1351,11 @@ function AppContent() {
                 .filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
 
             if ((hasActiveLibraryRef.current || activeRemoteLibraryRef.current) && safeFilePaths.length > 0) {
+                if (currentDropZone.type === 'none') {
+                    console.log('[App] Ignoring trigger-import outside allowed drop zones')
+                    clearExternalDragState()
+                    return
+                }
                 // ライブラリに既に存在するファイルを除外（重複防止の安全策）
                 const normalizePath = (p: string) => p.replace(/\\/g, '/').toLowerCase()
                 const existingPaths = new Set(
@@ -1073,10 +1378,19 @@ function AppContent() {
                 }
 
                 if (newFilePaths.length > 0) {
-                    handleSmartImport(newFilePaths, undefined, options).catch(e => console.error('Import failed via trigger:', e))
+                    const targetFolder = currentDropZone.type === 'folder' && typeof currentDropZone.folderId === 'number'
+                        ? folders.find((folder) => Number(folder.id) === Number(currentDropZone.folderId)) || null
+                        : null
+                    const importTask = currentDropZone.type === 'folder' && typeof currentDropZone.folderId === 'number'
+                        ? handleSmartImport(newFilePaths, async (media) => {
+                            await addFolderToMedia(media.id, currentDropZone.folderId!, targetFolder)
+                        }, options)
+                        : handleSmartImport(newFilePaths, undefined, options)
+                    importTask.catch(e => console.error('Import failed via trigger:', e))
                 } else {
                     console.log('[App] All files filtered out as existing in library')
                 }
+                clearExternalDragState()
             }
         }
 
@@ -1105,6 +1419,79 @@ function AppContent() {
             }])
         }
 
+        const handleAutoImportTrigger = async (_: any, payload: any) => {
+            const safeFilePaths = Array.isArray(payload?.filePaths)
+                ? payload.filePaths.filter((p: unknown): p is string => typeof p === 'string' && p.trim().length > 0)
+                : []
+            const targetLibraryPath = String(payload?.targetLibraryId || '').trim()
+
+            if (safeFilePaths.length === 0) return
+
+            const normalizePath = (p: string) => p.replace(/\\/g, '/').toLowerCase()
+            const existingPaths = new Set(
+                allMediaFilesRef.current.flatMap((m: any) => {
+                    const currentPath = typeof m?.file_path === 'string' ? normalizePath(m.file_path) : ''
+                    const sourcePath = typeof m?.import_source_path === 'string' ? normalizePath(m.import_source_path) : ''
+                    return [currentPath, sourcePath].filter(Boolean)
+                }),
+            )
+            const newFilePaths = safeFilePaths.filter((p: string) => !existingPaths.has(normalizePath(p)))
+            const skippedPaths = safeFilePaths.filter((p: string) => !newFilePaths.includes(p))
+
+            if (skippedPaths.length > 0) {
+                void api.deleteFileSystemFiles(skippedPaths).catch((e) => {
+                    console.warn('Failed to clean skipped auto-import files:', skippedPaths, e)
+                })
+            }
+
+            if (newFilePaths.length === 0) {
+                console.log('[App] Auto-import skipped because all files already exist')
+                return
+            }
+
+            const previousLibraryPath = activeRemoteLibraryRef.current
+                ? await api.getRemoteCachePath(activeRemoteLibraryRef.current.id)
+                : activeLibraryRef.current?.path || null
+            const importLibraryPath = targetLibraryPath || previousLibraryPath
+
+            if (!importLibraryPath) {
+                console.warn('[App] Auto-import skipped because no target library is available')
+                return
+            }
+
+            try {
+                if (previousLibraryPath !== importLibraryPath) {
+                    await api.setActiveLibrary(importLibraryPath)
+                }
+                await (api.importMedia as any)(newFilePaths, { deleteSource: true, importSource: 'auto-import' })
+
+                if (!activeRemoteLibraryRef.current && activeLibraryRef.current?.path === importLibraryPath) {
+                    refreshLibrary()
+                }
+
+                addNotification({
+                    type: 'success',
+                    title: tr('Auto import complete', 'Auto import complete'),
+                    message: tr(`Imported ${newFilePaths.length} files`, `Imported ${newFilePaths.length} files`),
+                    duration: 4000
+                })
+            } catch (error) {
+                console.error('Auto-import failed:', error)
+                addNotification({
+                    type: 'error',
+                    title: tr('Auto import failed', 'Auto import failed'),
+                    message: String(error),
+                    duration: 5000
+                })
+            } finally {
+                if (previousLibraryPath && previousLibraryPath !== importLibraryPath) {
+                    await api.setActiveLibrary(previousLibraryPath).catch((e: any) => {
+                        console.warn('Failed to restore previous library after auto-import:', e)
+                    })
+                }
+            }
+        }
+
         // イベントリスナー登録
         let unsubscribeTrigger: (() => void) | undefined
         let unsubscribeAutoImportTrigger: (() => void) | undefined
@@ -1116,10 +1503,9 @@ function AppContent() {
         let unsubscribeNativeDragDrop: (() => void) | undefined
 
         if (api && api.on) {
-            unsubscribeTrigger = api.on('trigger-import', (_e: any, filePaths: string[]) => handleTriggerImport(null, filePaths))
-            unsubscribeAutoImportTrigger = api.on('auto-import-trigger', (_e: any, payload: any) => {
-                const paths = Array.isArray(payload?.filePaths) ? payload.filePaths : []
-                handleTriggerImport(null, paths, { deleteSource: true, importSource: 'auto-import' })
+            unsubscribeTrigger = api.on('trigger-import', (_e: any, payload: any) => handleTriggerImport(null, payload))
+            unsubscribeAutoImportTrigger = api.on('auto-import-trigger', (e: any, payload: any) => {
+                void handleAutoImportTrigger(e, payload)
             })
             unsubscribeAutoImport = api.on('auto-import-complete', (_e: any, files: string[]) => handleAutoImportComplete(null, files))
             unsubscribeAutoImportCollision = api.on('auto-import-collision', (_e: any, data: any) => handleAutoImportCollision(null, data))
@@ -1129,24 +1515,55 @@ function AppContent() {
                     updateProgress(data.id, data.progress)
                 }
             })
-            unsubscribeNativeDragOver = api.on('native-file-drag-over', () => {
+            unsubscribeNativeDragOver = api.on('native-file-drag-over', (_e: any, payload: any) => {
                 lastDragActivityAt.current = Date.now()
-                if (!isInternalDrag.current) {
-                    setIsDragging(true)
-                    document.body.classList.add('dragging-file')
+                const x = Number(payload?.position?.x)
+                const y = Number(payload?.position?.y)
+                if (Number.isFinite(x) && Number.isFinite(y)) {
+                    const zone = resolveExternalDropZoneFromNativePosition(x, y)
+                    console.log(
+                        '[App] native-file-drag-over summary:',
+                        JSON.stringify({
+                            position: payload?.position ?? null,
+                            zoneType: zone.type,
+                            zoneFolderId: zone.folderId ?? null,
+                            isInternalDrag: isInternalDrag.current,
+                        }),
+                    )
+                    if (isInternalDrag.current) {
+                        applyExternalDropZone(zone.type === 'folder' ? zone : { type: 'none' })
+                        return
+                    }
+                    applyExternalDropZone(zone)
                 }
             })
             unsubscribeNativeDragCancel = api.on('native-file-drag-cancel', () => {
                 lastDragActivityAt.current = Date.now()
                 dragCounter.current = 0
-                setIsDragging(false)
-                document.body.classList.remove('dragging-file')
+                clearExternalDragState()
             })
-            unsubscribeNativeDragDrop = api.on('native-file-drag-drop', () => {
+            unsubscribeNativeDragDrop = api.on('native-file-drag-drop', (_e: any, payload: any) => {
                 lastDragActivityAt.current = Date.now()
                 dragCounter.current = 0
-                setIsDragging(false)
-                document.body.classList.remove('dragging-file')
+                const x = Number(payload?.position?.x)
+                const y = Number(payload?.position?.y)
+                if (Number.isFinite(x) && Number.isFinite(y)) {
+                    const zone = resolveExternalDropZoneFromNativePosition(x, y)
+                    console.log(
+                        '[App] native-file-drag-drop summary:',
+                        JSON.stringify({
+                            position: payload?.position ?? null,
+                            zoneType: zone.type,
+                            zoneFolderId: zone.folderId ?? null,
+                            isInternalDrag: isInternalDrag.current,
+                        }),
+                    )
+                    if (isInternalDrag.current) {
+                        applyExternalDropZone(zone.type === 'folder' ? zone : { type: 'none' })
+                    } else {
+                        applyExternalDropZone(zone)
+                    }
+                }
             })
         }
 
@@ -1161,7 +1578,7 @@ function AppContent() {
             if (unsubscribeNativeDragCancel) unsubscribeNativeDragCancel()
             if (unsubscribeNativeDragDrop) unsubscribeNativeDragDrop()
         }
-    }, [importMedia, refreshLibrary, addNotification])
+    }, [importMedia, refreshLibrary, addNotification, endInternalMediaDrag, applyExternalDropZone, clearExternalDragState, resolveExternalDropZoneFromNativePosition])
 
     // 表示設定
     const [viewSettings, setViewSettings] = useState<ViewSettings>(() => {
@@ -1189,6 +1606,11 @@ function AppContent() {
     useEffect(() => {
         localStorage.setItem('app_settings', JSON.stringify(settings))
     }, [settings])
+
+    useEffect(() => {
+        if (startupLoading) return
+        reloadSettings()
+    }, [startupLoading, reloadSettings])
 
     // 重複検知・解決用ステート
     const [duplicateQueue, setDuplicateQueue] = useState<{ newMedia: MediaFile; existingMedia: MediaFile; onResolve?: (media: MediaFile) => void }[]>([])
@@ -1648,17 +2070,64 @@ function AppContent() {
 
     const handleAddToFolder = async (folderId: number) => {
         if (contextMenu?.media) {
-            await addFolderToMedia(contextMenu.media.id, folderId)
+            const targetFolder = folders.find((folder) => Number(folder.id) === Number(folderId)) || null
+            await addFolderToMedia(contextMenu.media.id, folderId, targetFolder)
         }
         closeContextMenu()
     }
 
-    const handleDropOnFolder = async (folderId: number, files: FileList) => {
+    const handleAddFolderFromInspector = useCallback(async (mediaId: number, folderId: number) => {
+        const targetFolder = folders.find((folder) => Number(folder.id) === Number(folderId)) || null
+        await addFolderToMedia(mediaId, folderId, targetFolder)
+    }, [addFolderToMedia, folders])
+
+    const handleDropOnFolder = async (folderId: number, files?: FileList | null, mediaIds?: number[]) => {
+        const targetFolder = folders.find((folder) => Number(folder.id) === Number(folderId)) || null
+        const normalizedMediaIds = Array.isArray(mediaIds)
+            ? Array.from(new Set(mediaIds.map((id) => Number(id)).filter(Number.isFinite)))
+            : []
+
+        if (normalizedMediaIds.length > 0) {
+            for (const mediaId of normalizedMediaIds) {
+                await addFolderToMedia(mediaId, folderId, targetFolder)
+            }
+            endInternalMediaDrag()
+            return
+        }
+
+        if (isInternalDrag.current && internalDraggedMediaIdsRef.current.length > 0) {
+            const draggedMediaIds = [...internalDraggedMediaIdsRef.current]
+            for (const mediaId of draggedMediaIds) {
+                await addFolderToMedia(mediaId, folderId, targetFolder)
+            }
+            endInternalMediaDrag()
+            return
+        }
+
         if (!files || files.length === 0) return
 
         const filePaths = Array.from(files)
             .map(f => (f as any).path)
             .filter((p): p is string => typeof p === 'string' && p.trim().length > 0)
+
+        const normalizedPathSet = new Set(filePaths.map((p) => p.replace(/\\/g, '/').toLowerCase()))
+        const matchedMediaIds = Array.from(new Set(
+            mediaFiles
+                .filter((media) => {
+                    const filePath = typeof media.file_path === 'string' ? media.file_path.replace(/\\/g, '/').toLowerCase() : ''
+                    const sourcePath = typeof media.import_source_path === 'string' ? media.import_source_path.replace(/\\/g, '/').toLowerCase() : ''
+                    return normalizedPathSet.has(filePath) || normalizedPathSet.has(sourcePath)
+                })
+                .map((media) => media.id),
+        ))
+
+        if (matchedMediaIds.length > 0) {
+            for (const mediaId of matchedMediaIds) {
+                await addFolderToMedia(mediaId, folderId, targetFolder)
+            }
+            endInternalMediaDrag()
+            return
+        }
 
         if (isInternalDrag.current) {
             // 内部ドラッグ：既存のメディアファイルを特定して追加
@@ -1680,12 +2149,12 @@ function AppContent() {
             const uniqueIds = Array.from(new Set(targetIds))
 
             for (const mediaId of uniqueIds) {
-                await addFolderToMedia(mediaId, folderId)
+                await addFolderToMedia(mediaId, folderId, targetFolder)
             }
         } else {
             // 外部ドラッグ：Smartインポートを使用して解決
             await handleSmartImport(filePaths, async (media) => {
-                await addFolderToMedia(media.id, folderId)
+                await addFolderToMedia(media.id, folderId, targetFolder)
             })
             // ライブラリをリフレッシュ (addFolderToMedia内でloadMediaFilesしていれば不要だが念のため)
             await refreshLibrary()
@@ -1885,19 +2354,15 @@ function AppContent() {
                     onDeleteTag={deleteTag}
                     disabled={!hasActiveLibrary && !activeRemoteLibrary}
                     onRefresh={refreshLibrary}
-                    onInternalDragStart={() => {
-                        isInternalDrag.current = true
-                    }}
-                    onInternalDragEnd={() => {
-                        isInternalDrag.current = false
-                    }}
+                    onInternalDragStart={beginInternalUiDrag}
+                    onInternalDragEnd={endInternalMediaDrag}
                     allMediaFiles={allMediaFiles}
                 />
             )
         } else {
             mainContent = (
                 <div
-                    className={`content-container ${isDragging ? 'dragging' : ''}`}
+                    className="content-container"
                     onClick={(e) => {
                         if (e.target === e.currentTarget) {
                             setSelectedMediaIds([])
@@ -1909,6 +2374,12 @@ function AppContent() {
                         title={getHeaderTitle()}
                         filterOptions={filterOptions}
                         onFilterChange={updateFilterOptions}
+                        filterPresets={filterPresets}
+                        onApplyFilterPreset={handleApplyFilterPreset}
+                        onSaveFilterPreset={handleSaveFilterPreset}
+                        onDeleteFilterPreset={handleDeleteFilterPreset}
+                        onRenameFilterPreset={handleRenameFilterPreset}
+                        onResetFilters={handleResetFilters}
                         gridSize={gridSize}
                         onGridSizeChange={setGridSize}
                         viewMode={viewMode}
@@ -1922,6 +2393,7 @@ function AppContent() {
                         onRefreshLibrary={handleRefreshLibrary}
                         onReload={reloadLibrary}
                     />
+                    <div className={`library-drop-zone ${isDragging ? 'dragging' : ''}`} data-library-drop-zone="true">
                     {/* サブフォルダー表示 */}
                     {filterOptions.selectedFolders.length > 0 && (
                         <SubfolderGrid
@@ -1937,7 +2409,7 @@ function AppContent() {
                     )}
 
                     {/* Loading Overlay */}
-                    <LoadingOverlay isVisible={startupLoading} message={i18nT(uiLanguage, 'app.loadingData')} progress={loadingProgress} />
+                    <LoadingOverlay isVisible={isStartupOverlayVisible} message={i18nT(uiLanguage, 'app.loadingData')} progress={loadingProgress} />
 
                     {/* モーダル群 */}
                     {filterOptions.selectedFolders.length > 0 && folders.filter(f => f.parentId === filterOptions.selectedFolders[0]).length > 0 && (
@@ -1964,12 +2436,10 @@ function AppContent() {
                                 setSelectedMediaIds(ids)
                                 if (ids.length > 0) setLastSelectedId(ids[ids.length - 1])
                             }}
-                            onInternalDragStart={() => {
-                                isInternalDrag.current = true
-                            }}
+                            onInternalDragStart={beginInternalMediaDrag}
                             onInternalDragEnd={() => {
                                 // 少し遅延させてクリア（ドロップ処理との競合を防ぐ）
-                                setTimeout(() => isInternalDrag.current = false, 100)
+                                endInternalMediaDrag()
                             }}
                             renamingMediaId={renamingMediaId}
                             onRenameSubmit={async (id, newName) => {
@@ -1999,8 +2469,11 @@ function AppContent() {
                             onFilterChange={updateFilterOptions}
                             onLoadMore={loadMore}
                             hasMore={hasMore}
+                            onInternalDragStart={beginInternalMediaDrag}
+                            onInternalDragEnd={endInternalMediaDrag}
                         />
                     )}
+                    </div>
                 </div>
             )
         }
@@ -2057,11 +2530,12 @@ function AppContent() {
                 hasActiveLibrary={hasActiveLibrary}
                 onRefreshFolders={loadFolders}
                 onDropFileOnFolder={handleDropOnFolder}
+                externalDropFolderId={externalDropFolderId}
                 // 内部ドラッグの通知を追加
-                onInternalDragStart={() => isInternalDrag.current = true}
+                onInternalDragStart={beginInternalUiDrag}
                 onInternalDragEnd={() => {
                     // 少し遅延させてクリア（ドロップ処理との競合を防ぐ）
-                    setTimeout(() => isInternalDrag.current = false, 100)
+                    endInternalMediaDrag()
                 }}
                 itemCounts={sidebarCounts}
             />
@@ -2104,7 +2578,7 @@ function AppContent() {
                     onAddTags={addTagsToMedia}
                     onRemoveTag={removeTagFromMedia}
                     onCreateTag={createTag}
-                    onAddFolder={addFolderToMedia}
+                    onAddFolder={handleAddFolderFromInspector}
                     onRemoveFolder={removeFolderFromMedia}
                     onCreateFolder={createFolder}
                     onUpdateDescription={activeRemoteLibrary ? undefined : updateDescription} // TODO: Remote update
@@ -2151,6 +2625,7 @@ function AppContent() {
                 <SettingsModal
                     language={uiLanguage}
                     settings={settings}
+                    initialClientConfig={clientConfig}
                     onUpdateSettings={(newSettings) => {
                         setSettings(newSettings)
                         localStorage.setItem('app_settings', JSON.stringify(newSettings))
@@ -2256,7 +2731,7 @@ function AppContent() {
                 />
             )}
 
-            {isDragging && (
+            {false && isDragging && (
                 <div className="app-drag-overlay">
                     <div className="drag-content">
                         <div className="drag-icon">

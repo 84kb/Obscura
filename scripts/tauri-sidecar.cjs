@@ -67,6 +67,17 @@ function getDataRoot() {
   return path.resolve(__dirname, '..', '.sidecar-data')
 }
 
+function getClientConfigPath() {
+  return path.join(path.dirname(getDataRoot()), 'client-config.json')
+}
+
+function getLibraryBackupRetention() {
+  const raw = readJsonIfExists(getClientConfigPath(), {})
+  const value = Number(raw?.libraryBackupRetention)
+  if (!Number.isFinite(value)) return 5
+  return Math.max(1, Math.min(100, Math.floor(value)))
+}
+
 function appendDebugLog(line) {
   try {
     const root = getDataRoot()
@@ -334,13 +345,13 @@ function buildMergedMediaForLibrary(libraryPath) {
   const merged = mediaList.map((m) => {
     const filePath = String(m?.file_path || '')
     const overlay = byFilePath[filePath] || {}
-    const tagIds = asArray(overlay?.tag_ids).map((v) => Number(v)).filter(Number.isFinite)
+    const overlayTagNames = resolveOverlayTagNames(overlay, tagById)
     const folderIds = asArray(overlay?.folder_ids).map((v) => Number(v)).filter(Number.isFinite)
     return {
       ...m,
       ...overlay,
       tags: mergeNamedEntities(
-        tagIds.length > 0 ? tagIds.map((id) => tagById.get(id)).filter(Boolean) : [],
+        normalizeNamedEntities(overlayTagNames, tagById, tagByName, 'tag'),
         normalizeNamedEntities(m?.tags, tagById, tagByName, 'tag'),
       ),
       folders: mergeNamedEntities(
@@ -749,6 +760,15 @@ function spawnDetached(command, args) {
   child.unref()
 }
 
+function spawnVisibleDetached(command, args) {
+  const child = spawn(command, args, {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: false,
+  })
+  child.unref()
+}
+
 function toPowerShellLiteral(value) {
   return `'${String(value || '').replace(/'/g, "''")}'`
 }
@@ -776,6 +796,21 @@ function openPathWithDefaultFileManager(targetPath) {
     windowsHide: true,
   })
   child.unref()
+}
+
+function launchInstaller(installerPath) {
+  const target = String(installerPath || '').trim()
+  if (!target) throw new Error('installer path is empty')
+  const ext = path.extname(target).toLowerCase()
+  if (isWindows()) {
+    if (ext === '.msi') {
+      spawnVisibleDetached('msiexec.exe', ['/i', target])
+      return
+    }
+    spawnVisibleDetached(target, [])
+    return
+  }
+  spawnDetached('xdg-open', [target])
 }
 
 function getExistingParentDir(inputPath) {
@@ -1436,6 +1471,10 @@ const LIBRARY_INDEX_VERSION = 2
 const LIBRARY_INDEX_FILE = '.obscura-media-index.json'
 const LIBRARY_INDEX_BACKUP_FILE = '.obscura-media-index.backup.json'
 const LEGACY_MEDIA_CACHE_FILE = 'media_cache.json'
+const LIBRARY_BACKUP_DIR = 'backup'
+const LIBRARY_BACKUP_INTERVAL_MS = 10 * 60 * 1000
+let suspendLibraryBackup = false
+const lastLibraryBackupAt = new Map()
 const INDEX_PACKED_FIELDS = [
   'id',
   'file_path',
@@ -1477,6 +1516,181 @@ function getLibraryMediaIndexBackupPath(libraryPath) {
   const normalized = String(libraryPath || '').trim()
   if (!normalized) return null
   return path.join(normalized, LIBRARY_INDEX_BACKUP_FILE)
+}
+
+function getLibraryBackupDir(libraryPath) {
+  const normalized = String(libraryPath || '').trim()
+  if (!normalized) return null
+  return path.join(normalized, LIBRARY_BACKUP_DIR)
+}
+
+function getLibraryBackupPath(libraryPath, fileName) {
+  const dir = getLibraryBackupDir(libraryPath)
+  if (!dir) return null
+  return path.join(dir, fileName)
+}
+
+function makeBackupStamp(date = new Date()) {
+  const pad = (v) => String(v).padStart(2, '0')
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+}
+
+function collectLibraryMetadataEntries(libraryPath) {
+  const normalized = String(libraryPath || '').trim()
+  const out = {}
+  if (!normalized) return out
+  const imagesRoot = path.join(normalized, 'images')
+  if (!fs.existsSync(imagesRoot)) return out
+  let dirs = []
+  try {
+    dirs = fs.readdirSync(imagesRoot, { withFileTypes: true })
+  } catch {
+    return out
+  }
+  for (const dir of dirs) {
+    if (!dir?.isDirectory?.()) continue
+    const metadataPath = path.join(imagesRoot, dir.name, 'metadata.json')
+    if (!fs.existsSync(metadataPath)) continue
+    const raw = readJsonIfExists(metadataPath, null)
+    if (raw == null) continue
+    out[path.relative(normalized, metadataPath).replace(/\\/g, '/')] = raw
+  }
+  return out
+}
+
+function buildLibraryBackupSnapshot(libraryPath, reason = 'manual') {
+  const normalized = String(libraryPath || '').trim()
+  if (!normalized) throw new Error('No active library')
+  const createdAt = new Date().toISOString()
+  const snapshot = {
+    version: 1,
+    createdAt,
+    reason: String(reason || 'manual'),
+    libraryPath: normalized,
+    localMeta: loadLocalMetaForLibrary(normalized),
+    tags: readJsonIfExists(path.join(normalized, 'tags.json'), []),
+    folders: readJsonIfExists(path.join(normalized, 'folders.json'), []),
+    mediaIndex: readJsonIfExists(getLibraryMediaIndexPath(normalized), null),
+    mediaIndexBackup: readJsonIfExists(getLibraryMediaIndexBackupPath(normalized), null),
+    legacyMediaCache: readJsonIfExists(path.join(normalized, LEGACY_MEDIA_CACHE_FILE), null),
+    imageMetadata: collectLibraryMetadataEntries(normalized),
+  }
+  return snapshot
+}
+
+function listLibraryBackups(libraryPath) {
+  const dir = getLibraryBackupDir(libraryPath)
+  if (!dir || !fs.existsSync(dir)) return []
+  let entries = []
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  return entries
+    .filter((entry) => entry?.isFile?.() && /\.json$/i.test(String(entry.name || '')))
+    .map((entry) => {
+      const fullPath = path.join(dir, entry.name)
+      let stat = null
+      let createdAt = ''
+      try {
+        stat = fs.statSync(fullPath)
+      } catch {
+        stat = null
+      }
+      const raw = readJsonIfExists(fullPath, null)
+      if (raw && typeof raw === 'object' && typeof raw.createdAt === 'string') {
+        createdAt = raw.createdAt
+      }
+      if (!createdAt && stat?.mtime) {
+        createdAt = new Date(stat.mtime).toISOString()
+      }
+      return {
+        id: entry.name,
+        fileName: entry.name,
+        createdAt,
+        size: Number(stat?.size || 0),
+      }
+    })
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+}
+
+function createLibraryBackup(libraryPath, reason = 'manual', options = {}) {
+  const normalized = String(libraryPath || '').trim()
+  if (!normalized) throw new Error('No active library')
+  if (suspendLibraryBackup) {
+    return { success: false, skipped: true }
+  }
+  const force = Boolean(options?.force)
+  const now = Date.now()
+  const lastAt = Number(lastLibraryBackupAt.get(normalized) || 0)
+  if (!force && lastAt > 0 && now - lastAt < LIBRARY_BACKUP_INTERVAL_MS) {
+    return { success: false, skipped: true }
+  }
+  const backupDir = getLibraryBackupDir(normalized)
+  ensureDir(backupDir)
+  const snapshot = buildLibraryBackupSnapshot(normalized, reason)
+  const fileName = `${makeBackupStamp(new Date(snapshot.createdAt))}-${String(reason || 'manual').replace(/[^a-z0-9_-]+/gi, '-').toLowerCase()}.json`
+  const targetPath = getLibraryBackupPath(normalized, fileName)
+  fs.writeFileSync(targetPath, JSON.stringify(snapshot, null, 2), 'utf8')
+  lastLibraryBackupAt.set(normalized, now)
+  try {
+    const backups = listLibraryBackups(normalized)
+    const retention = getLibraryBackupRetention()
+    for (const stale of backups.slice(retention)) {
+      const stalePath = getLibraryBackupPath(normalized, stale.fileName)
+      if (stalePath && fs.existsSync(stalePath)) {
+        fs.unlinkSync(stalePath)
+      }
+    }
+  } catch {
+    // ignore retention cleanup failures
+  }
+  return { success: true, fileName, createdAt: snapshot.createdAt }
+}
+
+function restoreLibraryBackup(libraryPath, backupId) {
+  const normalized = String(libraryPath || '').trim()
+  const backupName = path.basename(String(backupId || '').trim())
+  if (!normalized) throw new Error('No active library')
+  if (!backupName) throw new Error('backupId is required')
+  const backupPath = getLibraryBackupPath(normalized, backupName)
+  if (!backupPath || !fs.existsSync(backupPath)) throw new Error('Backup not found')
+  const snapshot = readJsonIfExists(backupPath, null)
+  if (!snapshot || typeof snapshot !== 'object') throw new Error('Backup file is invalid')
+
+  suspendLibraryBackup = true
+  try {
+    if (snapshot.tags !== undefined) {
+      fs.writeFileSync(path.join(normalized, 'tags.json'), JSON.stringify(asArray(snapshot.tags), null, 2), 'utf8')
+    }
+    if (snapshot.folders !== undefined) {
+      fs.writeFileSync(path.join(normalized, 'folders.json'), JSON.stringify(asArray(snapshot.folders), null, 2), 'utf8')
+    }
+    if (snapshot.mediaIndex !== undefined) {
+      const indexPath = getLibraryMediaIndexPath(normalized)
+      if (indexPath) fs.writeFileSync(indexPath, JSON.stringify(snapshot.mediaIndex), 'utf8')
+    }
+    if (snapshot.mediaIndexBackup !== undefined) {
+      const backupIndexPath = getLibraryMediaIndexBackupPath(normalized)
+      if (backupIndexPath) fs.writeFileSync(backupIndexPath, JSON.stringify(snapshot.mediaIndexBackup), 'utf8')
+    }
+    if (snapshot.legacyMediaCache !== undefined) {
+      fs.writeFileSync(path.join(normalized, LEGACY_MEDIA_CACHE_FILE), JSON.stringify(snapshot.legacyMediaCache), 'utf8')
+    }
+    const imageMetadata = snapshot.imageMetadata && typeof snapshot.imageMetadata === 'object' ? snapshot.imageMetadata : {}
+    for (const [relativePath, raw] of Object.entries(imageMetadata)) {
+      const target = path.join(normalized, relativePath)
+      ensureDir(path.dirname(target))
+      fs.writeFileSync(target, JSON.stringify(raw, null, 2), 'utf8')
+    }
+    saveLocalMetaForLibrary(normalized, snapshot.localMeta || {})
+    const reloadedIndex = readLibraryMediaIndex(normalized)
+    setCachedScannedMedia(normalized, reloadedIndex)
+    return { success: true }
+  } finally {
+    suspendLibraryBackup = false
+  }
 }
 
 function packIndexItems(items) {
@@ -1603,6 +1817,11 @@ function writeLibraryMediaIndex(libraryPath, media) {
     fs.writeFileSync(path.join(normalized, LEGACY_MEDIA_CACHE_FILE), JSON.stringify(items), 'utf8')
   } catch {
     // ignore legacy cache write failure
+  }
+  try {
+    createLibraryBackup(normalized, 'auto')
+  } catch {
+    // ignore backup failures
   }
 }
 
@@ -2093,6 +2312,11 @@ function applyMetadataOverlayFromEntry(item, overlay, entry) {
     stringOrEmpty(entry.audioCodec)
   const audioCodec = stringOrEmpty(entry.audio_codec) || stringOrEmpty(entry.audioCodec)
   const videoCodec = stringOrEmpty(entry.video_codec) || stringOrEmpty(entry.videoCodec)
+  const parentIds = [...new Set(
+    asArray(entry.parentIds ?? entry.parent_ids)
+      .map((value) => Number(value))
+      .filter(Number.isFinite),
+  )]
   const formatName = normalizeFormatLabel(
     formatNameRaw,
     item?.file_path || overlay?.file_path || entry?.file_path || '',
@@ -2140,6 +2364,10 @@ function applyMetadataOverlayFromEntry(item, overlay, entry) {
     overlay.video_codec = videoCodec
     item.video_codec = videoCodec
   }
+  if (parentIds.length > 0) {
+    overlay.parentIds = parentIds
+    item.parentIds = parentIds
+  }
 }
 
 function localMetaPathForLibrary(libraryPath) {
@@ -2155,17 +2383,99 @@ function localMetaPath() {
   return localMetaPathForLibrary(activeLibraryPath)
 }
 
+function normalizeTagName(value) {
+  return String(value || '').trim()
+}
+
+function tagNameKey(value) {
+  return normalizeTagName(value).toLowerCase()
+}
+
+function normalizeStoredTagList(values) {
+  const out = []
+  const seen = new Set()
+  for (const value of asArray(values)) {
+    const name = typeof value === 'string'
+      ? normalizeTagName(value)
+      : normalizeTagName(value?.name)
+    if (!name) continue
+    const key = tagNameKey(name)
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({ name })
+  }
+  return out
+}
+
+function buildLegacyTagNameMap(tags) {
+  const map = new Map()
+  for (const tag of asArray(tags)) {
+    const idNum = Number(tag?.id)
+    const name = normalizeTagName(tag?.name)
+    if (!Number.isFinite(idNum) || !name) continue
+    map.set(idNum, name)
+  }
+  return map
+}
+
+function normalizeTagGroupByNameMap(rawMap, tags) {
+  const nextMap = {}
+  const nameById = buildLegacyTagNameMap(tags)
+  if (rawMap && typeof rawMap === 'object') {
+    for (const [rawKey, rawValue] of Object.entries(rawMap)) {
+      const directName = normalizeTagName(rawKey)
+      const mappedName = directName || nameById.get(Number(rawKey)) || ''
+      if (!mappedName) continue
+      const groupId = rawValue == null ? null : Number(rawValue)
+      nextMap[mappedName] = groupId == null || Number.isFinite(groupId) ? groupId : null
+    }
+  }
+  return nextMap
+}
+
+function normalizeDeletedTagNames(rawDeletedTagNames, rawDeletedTagIds, tags) {
+  const out = new Set()
+  for (const name of asArray(rawDeletedTagNames).map(normalizeTagName).filter(Boolean)) {
+    out.add(name)
+  }
+  const nameById = buildLegacyTagNameMap(tags)
+  for (const idNum of asArray(rawDeletedTagIds).map((v) => Number(v)).filter(Number.isFinite)) {
+    const mapped = nameById.get(idNum)
+    if (mapped) out.add(mapped)
+  }
+  return [...out]
+}
+
+function normalizeByFilePathTagStorage(byFilePath, tags) {
+  const next = {}
+  const nameById = buildLegacyTagNameMap(tags)
+  for (const [fp, rawEntry] of Object.entries(byFilePath && typeof byFilePath === 'object' ? byFilePath : {})) {
+    const entry = rawEntry && typeof rawEntry === 'object' ? { ...rawEntry } : {}
+    const tagNames = new Set(asArray(entry.tag_names).map(normalizeTagName).filter(Boolean))
+    for (const tagId of asArray(entry.tag_ids).map((v) => Number(v)).filter(Number.isFinite)) {
+      const mapped = nameById.get(tagId)
+      if (mapped) tagNames.add(mapped)
+    }
+    if (tagNames.size > 0) {
+      entry.tag_names = [...tagNames]
+    }
+    delete entry.tag_ids
+    next[fp] = entry
+  }
+  return next
+}
+
 function loadLocalMetaFromPath(metaPath) {
   const raw = readJsonIfExists(metaPath, {})
-  const byFilePath = raw?.byFilePath && typeof raw.byFilePath === 'object' ? raw.byFilePath : {}
-  const tags = Array.isArray(raw?.tags) ? raw.tags : []
+  const tags = normalizeStoredTagList(raw?.tags)
+  const byFilePath = normalizeByFilePathTagStorage(raw?.byFilePath, raw?.tags)
   const folders = Array.isArray(raw?.folders) ? raw.folders : []
   const tagGroups = Array.isArray(raw?.tagGroups) ? raw.tagGroups : []
-  const tagGroupById = raw?.tagGroupById && typeof raw.tagGroupById === 'object' ? raw.tagGroupById : {}
+  const tagGroupByName = normalizeTagGroupByNameMap(raw?.tagGroupByName || raw?.tagGroupById, raw?.tags)
   const commentsByMedia = raw?.commentsByMedia && typeof raw.commentsByMedia === 'object' ? raw.commentsByMedia : {}
   const auditLogs = Array.isArray(raw?.auditLogs) ? raw.auditLogs : []
   const manualMedia = Array.isArray(raw?.manualMedia) ? raw.manualMedia : []
-  const deletedTagIds = Array.isArray(raw?.deletedTagIds) ? raw.deletedTagIds : []
+  const deletedTagNames = normalizeDeletedTagNames(raw?.deletedTagNames, raw?.deletedTagIds, raw?.tags)
   const deletedFolderIds = Array.isArray(raw?.deletedFolderIds) ? raw.deletedFolderIds : []
   const nextTagId = Number.isFinite(raw?.nextTagId) ? raw.nextTagId : 1
   const nextTagGroupId = Number.isFinite(raw?.nextTagGroupId) ? raw.nextTagGroupId : 1
@@ -2176,11 +2486,11 @@ function loadLocalMetaFromPath(metaPath) {
     tags,
     folders,
     tagGroups,
-    tagGroupById,
+    tagGroupByName,
     commentsByMedia,
     auditLogs,
     manualMedia,
-    deletedTagIds,
+    deletedTagNames,
     deletedFolderIds,
     nextTagId,
     nextTagGroupId,
@@ -2225,6 +2535,11 @@ function saveLocalMetaForLibrary(libraryPath, meta) {
     cachedResolvedTfRevision = -1
     cachedResolvedTf = { tags: [], folders: [] }
   }
+  try {
+    createLibraryBackup(normalized, 'auto')
+  } catch {
+    // ignore backup failures
+  }
 }
 
 function saveLocalMeta(meta) {
@@ -2255,15 +2570,15 @@ function appendAuditLog(entry) {
 function loadLocalMetaFromObject(input) {
   const raw = input || {}
   return {
-    byFilePath: raw?.byFilePath && typeof raw.byFilePath === 'object' ? raw.byFilePath : {},
-    tags: Array.isArray(raw?.tags) ? raw.tags : [],
+    byFilePath: normalizeByFilePathTagStorage(raw?.byFilePath, raw?.tags),
+    tags: normalizeStoredTagList(raw?.tags),
     folders: Array.isArray(raw?.folders) ? raw.folders : [],
     tagGroups: Array.isArray(raw?.tagGroups) ? raw.tagGroups : [],
-    tagGroupById: raw?.tagGroupById && typeof raw.tagGroupById === 'object' ? raw.tagGroupById : {},
+    tagGroupByName: normalizeTagGroupByNameMap(raw?.tagGroupByName || raw?.tagGroupById, raw?.tags),
     commentsByMedia: raw?.commentsByMedia && typeof raw.commentsByMedia === 'object' ? raw.commentsByMedia : {},
     auditLogs: Array.isArray(raw?.auditLogs) ? raw.auditLogs : [],
     manualMedia: Array.isArray(raw?.manualMedia) ? raw.manualMedia : [],
-    deletedTagIds: Array.isArray(raw?.deletedTagIds) ? raw.deletedTagIds : [],
+    deletedTagNames: normalizeDeletedTagNames(raw?.deletedTagNames, raw?.deletedTagIds, raw?.tags),
     deletedFolderIds: Array.isArray(raw?.deletedFolderIds) ? raw.deletedFolderIds : [],
     nextTagId: Number.isFinite(raw?.nextTagId) ? raw.nextTagId : 1,
     nextTagGroupId: Number.isFinite(raw?.nextTagGroupId) ? raw.nextTagGroupId : 1,
@@ -2281,9 +2596,9 @@ function getResolvedTagsAndFolders(meta, libraryPath) {
   ) {
     return cachedResolvedTf
   }
-  const deletedTagIds = new Set(asArray(meta?.deletedTagIds).map((v) => Number(v)).filter(Number.isFinite))
-  const baseTags = asArray(readJsonIfExists(resolvedLibraryPath ? path.join(resolvedLibraryPath, 'tags.json') : null, []))
-    .filter((t) => !deletedTagIds.has(Number(t?.id)))
+  const rawBaseTags = asArray(readJsonIfExists(resolvedLibraryPath ? path.join(resolvedLibraryPath, 'tags.json') : null, []))
+  const deletedTagNames = new Set(asArray(meta?.deletedTagNames).map(tagNameKey).filter(Boolean))
+  const baseTags = normalizeStoredTagList(rawBaseTags)
   const deletedFolderIds = new Set(asArray(meta?.deletedFolderIds).map((v) => Number(v)).filter(Number.isFinite))
   const baseFolders = asArray(readJsonIfExists(resolvedLibraryPath ? path.join(resolvedLibraryPath, 'folders.json') : null, []))
     .filter((f) => !deletedFolderIds.has(Number(f?.id)))
@@ -2297,9 +2612,9 @@ function getResolvedTagsAndFolders(meta, libraryPath) {
   const fallbackFolders = collectNamedEntitiesFromLibraryMetadata(resolvedLibraryPath, 'folder')
   const tags = [
     ...baseTags,
-    ...asArray(meta?.tags).filter((t) => !deletedTagIds.has(Number(t?.id))),
-    ...discoveredTags.filter((t) => !deletedTagIds.has(Number(t?.id))),
-    ...fallbackTags.filter((t) => !deletedTagIds.has(Number(t?.id))),
+    ...normalizeStoredTagList(meta?.tags),
+    ...normalizeStoredTagList(discoveredTags),
+    ...normalizeStoredTagList(fallbackTags),
   ]
   const folders = [
     ...baseFolders,
@@ -2318,20 +2633,31 @@ function getResolvedTagsAndFolders(meta, libraryPath) {
     return [...map.values()]
   }
 
-  const tagGroupMapRaw = meta?.tagGroupById && typeof meta.tagGroupById === 'object' ? meta.tagGroupById : {}
+  const uniqueTagsByName = (() => {
+    const map = new Map()
+    for (const item of tags) {
+      const name = normalizeTagName(item?.name)
+      if (!name) continue
+      const key = tagNameKey(name)
+      if (deletedTagNames.has(key)) continue
+      map.set(key, { id: toSyntheticNamedId('tag', name), name })
+    }
+    return [...map.values()]
+  })()
+
+  const tagGroupMapRaw = meta?.tagGroupByName && typeof meta.tagGroupByName === 'object' ? meta.tagGroupByName : {}
   const tagGroupMap = new Map(
     Object.entries(tagGroupMapRaw)
-      .map(([k, v]) => [Number(k), v == null ? null : Number(v)])
-      .filter(([k]) => Number.isFinite(k)),
+      .map(([k, v]) => [tagNameKey(k), v == null ? null : Number(v)])
+      .filter(([k]) => Boolean(k)),
   )
 
-  const resolvedTags = uniqueById(tags).map((tag) => {
-    const idNum = Number(tag?.id)
-    if (!Number.isFinite(idNum)) return tag
-    if (!tagGroupMap.has(idNum)) return tag
+  const resolvedTags = uniqueTagsByName.map((tag) => {
+    const key = tagNameKey(tag?.name)
+    if (!tagGroupMap.has(key)) return tag
     return {
       ...tag,
-      groupId: tagGroupMap.get(idNum),
+      groupId: tagGroupMap.get(key),
     }
   })
 
@@ -2455,10 +2781,10 @@ function normalizeNamedEntities(values, byId, byName, kind) {
       resolved = byName.get(name.toLowerCase()) || { id: toSyntheticNamedId(kind, name), name }
     }
 
-    const resolvedId = Number(resolved?.id)
     const resolvedName = String(resolved?.name || '').trim()
-    const dedupeKey = Number.isFinite(resolvedId) ? `id:${resolvedId}` : `name:${resolvedName.toLowerCase()}`
-    if (!resolvedName && !Number.isFinite(resolvedId)) continue
+    const resolvedId = Number(resolved?.id)
+    const dedupeKey = resolvedName ? `name:${resolvedName.toLowerCase()}` : (Number.isFinite(resolvedId) ? `id:${resolvedId}` : '')
+    if (!dedupeKey) continue
     if (seen.has(dedupeKey)) continue
     seen.add(dedupeKey)
     out.push(resolved)
@@ -2471,15 +2797,57 @@ function mergeNamedEntities(primary, secondary) {
   const out = []
   const seen = new Set()
   for (const item of [...asArray(primary), ...asArray(secondary)]) {
-    const idNum = Number(item?.id)
     const name = String(item?.name || '').trim()
-    const key = Number.isFinite(idNum) ? `id:${idNum}` : `name:${name.toLowerCase()}`
-    if (!name && !Number.isFinite(idNum)) continue
+    const idNum = Number(item?.id)
+    const key = name ? `name:${name.toLowerCase()}` : (Number.isFinite(idNum) ? `id:${idNum}` : '')
+    if (!key) continue
     if (seen.has(key)) continue
     seen.add(key)
     out.push(item)
   }
   return out
+}
+
+function resolveOverlayTagNames(overlay, tagById) {
+  const names = new Set(asArray(overlay?.tag_names).map(normalizeTagName).filter(Boolean))
+  for (const tagId of asArray(overlay?.tag_ids).map((v) => Number(v)).filter(Number.isFinite)) {
+    const mappedName = normalizeTagName(tagById.get(tagId)?.name)
+    if (mappedName) names.add(mappedName)
+  }
+  return [...names]
+}
+
+function resolveTagNameFromIdentifier(meta, libraryPath, identifier) {
+  if (typeof identifier === 'string' && normalizeTagName(identifier)) {
+    return normalizeTagName(identifier)
+  }
+  const idNum = Number(identifier)
+  if (!Number.isFinite(idNum)) return ''
+  const { tags } = getResolvedTagsAndFolders(meta, libraryPath)
+  const found = asArray(tags).find((tag) => Number(tag?.id) === idNum)
+  return normalizeTagName(found?.name)
+}
+
+function toRelationSummary(media) {
+  if (!media || typeof media !== 'object') return null
+  return {
+    id: Number(media.id),
+    uniqueId: media.uniqueId,
+    file_path: media.file_path,
+    file_name: media.file_name,
+    file_type: media.file_type,
+    duration: media.duration ?? null,
+    thumbnail_path: media.thumbnail_path ?? null,
+    created_at: media.created_at,
+    is_deleted: Boolean(media.is_deleted),
+    last_played_at: media.last_played_at ?? null,
+    file_size: Number(media.file_size || 0),
+    rating: media.rating,
+    artist: media.artist ?? null,
+    description: media.description ?? null,
+    url: media.url ?? null,
+    title: media.title ?? null,
+  }
 }
 
 function mergeMediaWithMeta(mediaList, libraryPath) {
@@ -2515,10 +2883,10 @@ function mergeMediaWithMeta(mediaList, libraryPath) {
     .map((m) => {
       const filePath = String(m?.file_path || '')
       const overlay = byFilePath[filePath] || {}
-      const tagIds = asArray(overlay.tag_ids).map((v) => Number(v)).filter(Number.isFinite)
+      const overlayTagNames = resolveOverlayTagNames(overlay, tagById)
       const folderIds = asArray(overlay.folder_ids).map((v) => Number(v)).filter(Number.isFinite)
       const resolvedTags = mergeNamedEntities(
-        tagIds.length > 0 ? tagIds.map((id) => tagById.get(id)).filter(Boolean) : [],
+        normalizeNamedEntities(overlayTagNames, tagById, tagByName, 'tag'),
         normalizeNamedEntities(m?.tags, tagById, tagByName, 'tag'),
       )
       const resolvedFolders = mergeNamedEntities(
@@ -2551,7 +2919,46 @@ function mergeMediaWithMeta(mediaList, libraryPath) {
     })
   }
 
-  return [...indexed.values()].filter((m) => !m?.permanently_deleted)
+  const mergedList = [...indexed.values()].filter((m) => !m?.permanently_deleted)
+  const mediaById = new Map()
+
+  for (const item of mergedList) {
+    const itemId = Number(item?.id)
+    if (!Number.isFinite(itemId)) continue
+    mediaById.set(itemId, item)
+  }
+
+  const childIdsByParentId = new Map()
+
+  for (const item of mergedList) {
+    const parentIds = [...new Set(
+      asArray(item?.parentIds ?? item?.parent_ids)
+        .map((v) => Number(v))
+        .filter((v) => Number.isFinite(v) && v !== Number(item?.id)),
+    )]
+
+    item.parentIds = parentIds
+    delete item.parent_ids
+    item.parents = parentIds
+      .map((parentId) => toRelationSummary(mediaById.get(parentId)))
+      .filter(Boolean)
+
+    for (const parentId of parentIds) {
+      if (!childIdsByParentId.has(parentId)) {
+        childIdsByParentId.set(parentId, new Set())
+      }
+      childIdsByParentId.get(parentId).add(Number(item.id))
+    }
+  }
+
+  for (const item of mergedList) {
+    const childIds = [...(childIdsByParentId.get(Number(item?.id)) || new Set())]
+    item.children = childIds
+      .map((childId) => toRelationSummary(mediaById.get(childId)))
+      .filter(Boolean)
+  }
+
+  return mergedList
 }
 
 function getAllMediaForActiveLibrary() {
@@ -2632,35 +3039,30 @@ function normalizeNamedList(values) {
     .filter(Boolean))]
 }
 
-function ensureTagIdsByName(targetMeta, targetLibraryPath, names) {
+function ensureTagsByName(targetMeta, targetLibraryPath, names) {
   const requested = normalizeNamedList(names)
   if (requested.length === 0) return []
 
   const { tags: resolvedTags } = getResolvedTagsAndFolders(targetMeta, targetLibraryPath)
-  const tags = asArray(targetMeta.tags)
+  const tags = normalizeStoredTagList(targetMeta.tags)
   const byName = new Map(resolvedTags
     .filter((tag) => tag && typeof tag.name === 'string')
-    .map((tag) => [String(tag.name).trim().toLowerCase(), Number(tag.id)]))
-  const allKnownIds = new Set(resolvedTags.map((tag) => Number(tag.id)).filter(Number.isFinite))
-  let nextTagId = Math.max(Number(targetMeta.nextTagId) || 1, (allKnownIds.size > 0 ? Math.max(...allKnownIds) + 1 : 1))
-  const ids = []
+    .map((tag) => [tagNameKey(tag.name), normalizeTagName(tag.name)]))
+  const ensured = []
 
   for (const name of requested) {
-    const key = name.toLowerCase()
-    let id = byName.get(key)
-    if (!Number.isFinite(id)) {
-      id = nextTagId
-      nextTagId += 1
-      const newTag = { id, name }
-      tags.push(newTag)
-      byName.set(key, id)
+    const key = tagNameKey(name)
+    let ensuredName = byName.get(key)
+    if (!ensuredName) {
+      ensuredName = normalizeTagName(name)
+      tags.push({ name: ensuredName })
+      byName.set(key, ensuredName)
     }
-    ids.push(id)
+    ensured.push(ensuredName)
   }
 
   targetMeta.tags = tags
-  targetMeta.nextTagId = nextTagId
-  return [...new Set(ids.filter(Number.isFinite))]
+  return [...new Set(ensured.filter(Boolean))]
 }
 
 function ensureFolderIdsByName(targetMeta, targetLibraryPath, names) {
@@ -2720,8 +3122,8 @@ function buildTransferredOverlay(media, settings, targetMeta, targetLibraryPath)
     overlay.thumbnail_path = media.thumbnail_path
   }
   if (cfg.keepTags) {
-    const tagIds = ensureTagIdsByName(targetMeta, targetLibraryPath, media?.tags)
-    if (tagIds.length > 0) overlay.tag_ids = tagIds
+    const tagNames = ensureTagsByName(targetMeta, targetLibraryPath, media?.tags)
+    if (tagNames.length > 0) overlay.tag_names = tagNames
   }
   if (cfg.keepFolders) {
     const folderIds = ensureFolderIdsByName(targetMeta, targetLibraryPath, media?.folders)
@@ -2866,9 +3268,9 @@ function refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache) {
     }
   }
 
-  const resolvedTagIds = ensureTagIdsByName(meta, activeLibraryPath, item.tags)
-  if (resolvedTagIds.length > 0) {
-    overlay.tag_ids = resolvedTagIds
+  const resolvedTagNames = ensureTagsByName(meta, activeLibraryPath, item.tags)
+  if (resolvedTagNames.length > 0) {
+    overlay.tag_names = resolvedTagNames
   }
   const resolvedFolderIds = ensureFolderIdsByName(meta, activeLibraryPath, item.folders)
   if (resolvedFolderIds.length > 0) {
@@ -3109,10 +3511,10 @@ function syncMetadataJsonForMedia(media, overlay, meta) {
         .map((f) => [String(f.name).trim().toLowerCase(), f]),
     )
 
-    const tagIds = asArray(overlay?.tag_ids).map((v) => Number(v)).filter(Number.isFinite)
+    const overlayTagNames = resolveOverlayTagNames(overlay, tagById)
     const folderIds = asArray(overlay?.folder_ids).map((v) => Number(v)).filter(Number.isFinite)
-    const resolvedTags = tagIds.length > 0
-      ? tagIds.map((id) => tagById.get(id)).filter(Boolean)
+    const resolvedTags = overlayTagNames.length > 0
+      ? normalizeNamedEntities(overlayTagNames, tagById, tagByName, 'tag')
       : normalizeNamedEntities(merged?.tags, tagById, tagByName, 'tag')
     const resolvedFolders = folderIds.length > 0
       ? folderIds.map((id) => folderById.get(id)).filter(Boolean)
@@ -3127,7 +3529,9 @@ function syncMetadataJsonForMedia(media, overlay, meta) {
       folders: resolvedFolders,
     }
     delete payload.tag_ids
+    delete payload.tag_names
     delete payload.folder_ids
+    delete payload.parent_ids
 
     fs.writeFileSync(metadataPath, JSON.stringify(payload, null, 2), 'utf8')
   } catch {
@@ -3535,6 +3939,33 @@ function handleRequest(req) {
     return
   }
 
+  if (method === 'list_library_backups') {
+    try {
+      send({ id, ok: true, result: listLibraryBackups(activeLibraryPath) })
+    } catch (err) {
+      send({ id, ok: false, error: `list_library_backups failed: ${err?.message || String(err)}` })
+    }
+    return
+  }
+
+  if (method === 'create_library_backup') {
+    try {
+      send({ id, ok: true, result: createLibraryBackup(activeLibraryPath, 'manual', { force: true }) })
+    } catch (err) {
+      send({ id, ok: false, error: `create_library_backup failed: ${err?.message || String(err)}` })
+    }
+    return
+  }
+
+  if (method === 'restore_library_backup') {
+    try {
+      send({ id, ok: true, result: restoreLibraryBackup(activeLibraryPath, params?.backupId) })
+    } catch (err) {
+      send({ id, ok: false, error: `restore_library_backup failed: ${err?.message || String(err)}` })
+    }
+    return
+  }
+
   if (method === 'get_media_files') {
     try {
       const rawFilters = params?.filters && typeof params.filters === 'object' ? { ...params.filters } : {}
@@ -3789,21 +4220,22 @@ function handleRequest(req) {
         return
       }
       const meta = loadLocalMeta()
-      const { tags } = getResolvedTagsAndFolders(meta)
-      const maxId = tags.reduce((acc, t) => Math.max(acc, Number(t?.id) || 0), 0)
-      const nextId = Math.max(Number(meta.nextTagId || 1), maxId + 1)
-      const newTag = { id: nextId, name }
-      meta.tags = [...asArray(meta.tags), newTag]
-      meta.deletedTagIds = asArray(meta.deletedTagIds).map(Number).filter((id) => id !== nextId)
-      meta.nextTagId = nextId + 1
+      const { tags } = getResolvedTagsAndFolders(meta, activeLibraryPath)
+      const existing = asArray(tags).find((tag) => tagNameKey(tag?.name) === tagNameKey(name))
+      if (existing) {
+        send({ id, ok: true, result: existing })
+        return
+      }
+      meta.tags = [...normalizeStoredTagList(meta.tags), { name }]
+      meta.deletedTagNames = asArray(meta.deletedTagNames).map(normalizeTagName).filter((entry) => tagNameKey(entry) !== tagNameKey(name))
       saveLocalMeta(meta)
       appendAuditLog({
         action: 'tag:create',
-        targetId: nextId,
+        targetId: toSyntheticNamedId('tag', name),
         targetName: name,
         description: `Created tag "${name}"`,
       })
-      send({ id, ok: true, result: newTag })
+      send({ id, ok: true, result: { id: toSyntheticNamedId('tag', name), name } })
     } catch (err) {
       send({ id, ok: false, error: `create_tag failed: ${err?.message || String(err)}` })
     }
@@ -3812,21 +4244,33 @@ function handleRequest(req) {
 
   if (method === 'delete_tag') {
     try {
-      const tagId = Number(params?.id)
       const meta = loadLocalMeta()
-      meta.tags = asArray(meta.tags).filter((t) => Number(t?.id) !== tagId)
-      meta.deletedTagIds = [...new Set([...asArray(meta.deletedTagIds).map(Number).filter(Number.isFinite), tagId])]
+      const tagName = resolveTagNameFromIdentifier(meta, activeLibraryPath, params?.id)
+      if (!tagName) {
+        send({ id, ok: false, error: 'delete_tag requires existing tag' })
+        return
+      }
+      const key = tagNameKey(tagName)
+      meta.tags = normalizeStoredTagList(meta.tags).filter((t) => tagNameKey(t?.name) !== key)
+      meta.deletedTagNames = [...new Set([...asArray(meta.deletedTagNames).map(normalizeTagName).filter(Boolean), tagName])]
+      const nextGroupMap = {}
+      for (const [name, mappedGroupId] of Object.entries(meta.tagGroupByName || {})) {
+        if (tagNameKey(name) === key) continue
+        nextGroupMap[name] = mappedGroupId
+      }
+      meta.tagGroupByName = nextGroupMap
       for (const [fp, entry] of Object.entries(meta.byFilePath || {})) {
-        const current = entry && typeof entry === 'object' ? entry : {}
-        current.tag_ids = asArray(current.tag_ids).map(Number).filter((id) => id !== tagId)
+        const current = entry && typeof entry === 'object' ? { ...entry } : {}
+        current.tag_names = asArray(current.tag_names).map(normalizeTagName).filter((name) => tagNameKey(name) !== key)
+        delete current.tag_ids
         meta.byFilePath[fp] = current
       }
       saveLocalMeta(meta)
       appendAuditLog({
         action: 'tag:delete',
-        targetId: tagId,
-        targetName: String(tagId),
-        description: `Deleted tag #${tagId}`,
+        targetId: toSyntheticNamedId('tag', tagName),
+        targetName: tagName,
+        description: `Deleted tag "${tagName}"`,
       })
       send({ id, ok: true, result: true })
     } catch (err) {
@@ -3838,12 +4282,16 @@ function handleRequest(req) {
   if (method === 'add_tag_to_media') {
     try {
       const mediaId = Number(params?.mediaId)
-      const tagId = Number(params?.tagId)
+      const meta = loadLocalMeta()
+      const tagName = resolveTagNameFromIdentifier(meta, activeLibraryPath, params?.tagId ?? params?.tagName)
+      if (!tagName) {
+        send({ id, ok: false, error: 'add_tag_to_media requires existing tag' })
+        return
+      }
       updateMediaMetaById(mediaId, (prev) => {
-        const current = asArray(prev.tag_ids).map(Number).filter(Number.isFinite)
-        const next = new Set(current)
-        next.add(tagId)
-        return { ...prev, tag_ids: [...next] }
+        const current = new Set(asArray(prev.tag_names).map(normalizeTagName).filter(Boolean))
+        current.add(tagName)
+        return { ...prev, tag_names: [...current] }
       })
       send({ id, ok: true, result: true })
     } catch (err) {
@@ -3855,13 +4303,18 @@ function handleRequest(req) {
   if (method === 'add_tags_to_media') {
     try {
       const mediaIds = asArray(params?.mediaIds).map(Number).filter(Number.isFinite)
-      const tagIds = asArray(params?.tagIds).map(Number).filter(Number.isFinite)
+      const meta = loadLocalMeta()
+      const tagNames = [...new Set(asArray(params?.tagNames).map(normalizeTagName).filter(Boolean))]
+      for (const rawTagId of asArray(params?.tagIds)) {
+        const resolved = resolveTagNameFromIdentifier(meta, activeLibraryPath, rawTagId)
+        if (resolved) tagNames.push(resolved)
+      }
+      const dedupedTagNames = [...new Set(tagNames.map(normalizeTagName).filter(Boolean))]
       for (const mediaId of mediaIds) {
         updateMediaMetaById(mediaId, (prev) => {
-          const current = asArray(prev.tag_ids).map(Number).filter(Number.isFinite)
-          const next = new Set(current)
-          for (const tagId of tagIds) next.add(tagId)
-          return { ...prev, tag_ids: [...next] }
+          const current = new Set(asArray(prev.tag_names).map(normalizeTagName).filter(Boolean))
+          for (const tagName of dedupedTagNames) current.add(tagName)
+          return { ...prev, tag_names: [...current] }
         })
       }
       send({ id, ok: true, result: true })
@@ -3874,10 +4327,16 @@ function handleRequest(req) {
   if (method === 'remove_tag_from_media') {
     try {
       const mediaId = Number(params?.mediaId)
-      const tagId = Number(params?.tagId)
+      const meta = loadLocalMeta()
+      const tagName = resolveTagNameFromIdentifier(meta, activeLibraryPath, params?.tagId ?? params?.tagName)
+      if (!tagName) {
+        send({ id, ok: false, error: 'remove_tag_from_media requires existing tag' })
+        return
+      }
+      const key = tagNameKey(tagName)
       updateMediaMetaById(mediaId, (prev) => ({
         ...prev,
-        tag_ids: asArray(prev.tag_ids).map(Number).filter((id) => id !== tagId),
+        tag_names: asArray(prev.tag_names).map(normalizeTagName).filter((name) => tagNameKey(name) !== key),
       }))
       send({ id, ok: true, result: true })
     } catch (err) {
@@ -3930,15 +4389,15 @@ function handleRequest(req) {
       const meta = loadLocalMeta()
       meta.tagGroups = asArray(meta.tagGroups).filter((g) => Number(g?.id) !== groupId)
       const nextMap = {}
-      for (const [tagId, mappedGroupId] of Object.entries(meta.tagGroupById || {})) {
+      for (const [tagName, mappedGroupId] of Object.entries(meta.tagGroupByName || {})) {
         const n = mappedGroupId == null ? null : Number(mappedGroupId)
         if (n === groupId) {
-          nextMap[tagId] = null
+          nextMap[tagName] = null
         } else {
-          nextMap[tagId] = n
+          nextMap[tagName] = n
         }
       }
-      meta.tagGroupById = nextMap
+      meta.tagGroupByName = nextMap
       saveLocalMeta(meta)
       appendAuditLog({
         action: 'tag-group:delete',
@@ -3980,15 +4439,20 @@ function handleRequest(req) {
       const tagId = Number(params?.tagId)
       const groupId = params?.groupId == null ? null : Number(params.groupId)
       const meta = loadLocalMeta()
-      const map = meta.tagGroupById && typeof meta.tagGroupById === 'object' ? { ...meta.tagGroupById } : {}
-      map[String(tagId)] = groupId
-      meta.tagGroupById = map
+      const tagName = resolveTagNameFromIdentifier(meta, activeLibraryPath, tagId)
+      if (!tagName) {
+        send({ id, ok: false, error: 'update_tag_group requires existing tag' })
+        return
+      }
+      const map = meta.tagGroupByName && typeof meta.tagGroupByName === 'object' ? { ...meta.tagGroupByName } : {}
+      map[tagName] = groupId
+      meta.tagGroupByName = map
       saveLocalMeta(meta)
       appendAuditLog({
         action: 'tag-group:update-tag',
-        targetId: tagId,
-        targetName: String(tagId),
-        description: `Assigned tag #${tagId} to group ${groupId == null ? 'none' : `#${groupId}`}`,
+        targetId: toSyntheticNamedId('tag', tagName),
+        targetName: tagName,
+        description: `Assigned tag "${tagName}" to group ${groupId == null ? 'none' : `#${groupId}`}`,
       })
       send({ id, ok: true, result: true })
     } catch (err) {
@@ -5287,11 +5751,7 @@ function handleRequest(req) {
         send({ id, ok: true, result: false })
         return
       }
-      if (isWindows()) {
-        spawnDetached(installerPath, [])
-      } else {
-        spawnDetached('xdg-open', [installerPath])
-      }
+      launchInstaller(installerPath)
       send({ id, ok: true, result: true })
     } catch {
       send({ id, ok: true, result: false })
@@ -5434,9 +5894,10 @@ function handleRequest(req) {
       }
       updateMediaMetaById(childId, (prev) => {
         const next = { ...prev }
-        const ids = new Set(asArray(next.parent_ids).map((v) => Number(v)).filter(Number.isFinite))
+        const ids = new Set(asArray(next.parentIds ?? next.parent_ids).map((v) => Number(v)).filter(Number.isFinite))
         ids.add(parentId)
-        next.parent_ids = [...ids]
+        next.parentIds = [...ids]
+        delete next.parent_ids
         return next
       })
       send({ id, ok: true, result: true })
@@ -5456,10 +5917,11 @@ function handleRequest(req) {
       }
       updateMediaMetaById(childId, (prev) => {
         const next = { ...prev }
-        const ids = asArray(next.parent_ids)
+        const ids = asArray(next.parentIds ?? next.parent_ids)
           .map((v) => Number(v))
           .filter((v) => Number.isFinite(v) && v !== parentId)
-        next.parent_ids = ids
+        next.parentIds = ids
+        delete next.parent_ids
         return next
       })
       send({ id, ok: true, result: true })
@@ -5540,23 +6002,146 @@ function handleRequest(req) {
       if (!targetMeta.byFilePath || typeof targetMeta.byFilePath !== 'object') {
         targetMeta.byFilePath = {}
       }
+      if (!Array.isArray(targetMeta.manualMedia)) {
+        targetMeta.manualMedia = []
+      }
       let copied = 0
       let failed = 0
+      const importedItems = []
 
       for (const item of itemsToTransfer) {
         try {
-          const targetPath = getUniqueTargetPath(path.join(libraryPath, path.basename(item.sourcePath)))
-          fs.copyFileSync(item.sourcePath, targetPath)
+          const sourcePath = item.sourcePath
+          const sourceStat = fs.statSync(sourcePath)
+          const sourceBaseName = path.basename(sourcePath)
+          const sanitizedName = sourceBaseName.replace(/[\\/:*?"<>|]/g, '_')
+          const ext = path.extname(sourcePath).toLowerCase()
+          if (!MEDIA_EXTENSIONS.has(ext)) {
+            failed += 1
+            continue
+          }
+
+          const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(ext)
+          const isAudio = ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a'].includes(ext)
+          const fileType = isImage ? 'image' : isAudio ? 'audio' : 'video'
+
+          const uniqueId = crypto.randomBytes(6).toString('hex')
+          const destDir = path.join(libraryPath, 'images', uniqueId)
+          ensureDir(destDir)
+
+          const targetPath = path.join(destDir, sanitizedName)
+          fs.copyFileSync(sourcePath, targetPath)
+          try {
+            fs.utimesSync(targetPath, sourceStat.atime, sourceStat.mtime)
+          } catch {
+            // Keep transfer success if timestamp sync fails.
+          }
+
+          const destBaseName = path.basename(sanitizedName, path.extname(sanitizedName))
+          let thumbnailPath = isImage ? targetPath : ''
+          if (settings.keepThumbnails && typeof item.media?.thumbnail_path === 'string' && item.media.thumbnail_path.trim()) {
+            const sourceThumbPath = String(item.media.thumbnail_path).trim()
+            if (fs.existsSync(sourceThumbPath)) {
+              const thumbExt = path.extname(sourceThumbPath) || '.png'
+              const copiedThumbPath = path.join(destDir, `${destBaseName}_thumbnail${thumbExt}`)
+              try {
+                fs.copyFileSync(sourceThumbPath, copiedThumbPath)
+                thumbnailPath = copiedThumbPath
+              } catch {
+                // Fall back to generated thumbnail below.
+              }
+            }
+          }
+          if (fileType === 'video' && !thumbnailPath) {
+            const generatedThumbPath = path.join(destDir, `${destBaseName}_thumbnail.png`)
+            try {
+              if (extractThumbnailWithFfmpeg(targetPath, generatedThumbPath)) {
+                thumbnailPath = generatedThumbPath
+              }
+            } catch {
+              // Continue transfer even if thumbnail generation fails.
+            }
+          }
+
+          const probed = probeMediaMetadata(targetPath)
           const overlay = buildTransferredOverlay(item.media, settings, targetMeta, libraryPath)
+          if (thumbnailPath) overlay.thumbnail_path = thumbnailPath
+
+          const transferredItem = {
+            id: toMediaId(targetPath),
+            uniqueId,
+            file_name: sanitizedName,
+            title: String(item.media?.title || path.basename(sanitizedName, path.extname(sanitizedName))),
+            file_type: fileType,
+            file_path: targetPath,
+            thumbnail_path: thumbnailPath,
+            file_size: sourceStat?.size || 0,
+            created_date: sourceStat?.birthtime ? new Date(sourceStat.birthtime).toISOString() : '',
+            created_at: sourceStat?.ctime ? new Date(sourceStat.ctime).toISOString() : '',
+            modified_date: sourceStat?.mtime ? new Date(sourceStat.mtime).toISOString() : '',
+            rating: settings.keepRatings && Number.isFinite(Number(item.media?.rating)) ? Number(item.media.rating) : 0,
+            duration: Number.isFinite(Number(probed?.duration)) ? Number(probed.duration) : null,
+            width: Number.isFinite(Number(probed?.width)) ? Number(probed.width) : undefined,
+            height: Number.isFinite(Number(probed?.height)) ? Number(probed.height) : undefined,
+            framerate: Number.isFinite(Number(probed?.framerate)) ? Number(probed.framerate) : undefined,
+            audio_bitrate: Number.isFinite(Number(probed?.audio_bitrate)) ? Number(probed.audio_bitrate) : undefined,
+            video_bitrate: Number.isFinite(Number(probed?.video_bitrate)) ? Number(probed.video_bitrate) : undefined,
+            format_name: typeof probed?.format_name === 'string' ? probed.format_name : undefined,
+            codec_id: typeof probed?.codec_id === 'string' ? probed.codec_id : undefined,
+            audio_codec: typeof probed?.audio_codec === 'string' ? probed.audio_codec : undefined,
+            video_codec: typeof probed?.video_codec === 'string' ? probed.video_codec : undefined,
+            artist: settings.keepArtists
+              ? (typeof item.media?.artist === 'string' && item.media.artist.trim()
+                ? item.media.artist.trim()
+                : normalizeNamedList(item.media?.artists).join(', '))
+              : (typeof probed?.artist === 'string' ? probed.artist : undefined),
+            description: settings.keepDescription && typeof item.media?.description === 'string'
+              ? item.media.description
+              : (typeof probed?.description === 'string' ? probed.description : undefined),
+            url: settings.keepUrl && typeof item.media?.url === 'string'
+              ? item.media.url
+              : (typeof probed?.url === 'string' ? probed.url : undefined),
+            is_deleted: false,
+            last_played_at: null,
+            tags: settings.keepTags && Array.isArray(item.media?.tags) ? item.media.tags : [],
+            folders: settings.keepFolders && Array.isArray(item.media?.folders) ? item.media.folders : [],
+            comments: settings.keepComments && Array.isArray(item.media?.comments) ? item.media.comments : [],
+            import_source_path: sourcePath,
+          }
+
+          if (Number.isFinite(Number(probed?.duration))) overlay.duration = Number(probed.duration)
+          if (Number.isFinite(Number(probed?.width))) overlay.width = Number(probed.width)
+          if (Number.isFinite(Number(probed?.height))) overlay.height = Number(probed.height)
+          if (Number.isFinite(Number(probed?.framerate))) overlay.framerate = Number(probed.framerate)
+          if (Number.isFinite(Number(probed?.audio_bitrate))) overlay.audio_bitrate = Number(probed.audio_bitrate)
+          if (Number.isFinite(Number(probed?.video_bitrate))) overlay.video_bitrate = Number(probed.video_bitrate)
+          if (typeof probed?.format_name === 'string' && probed.format_name.trim()) overlay.format_name = probed.format_name.trim()
+          if (typeof probed?.codec_id === 'string' && probed.codec_id.trim()) overlay.codec_id = probed.codec_id.trim()
+          if (typeof probed?.audio_codec === 'string' && probed.audio_codec.trim()) overlay.audio_codec = probed.audio_codec.trim()
+          if (typeof probed?.video_codec === 'string' && probed.video_codec.trim()) overlay.video_codec = probed.video_codec.trim()
+          if (!settings.keepArtists && typeof probed?.artist === 'string' && probed.artist.trim()) overlay.artist = probed.artist.trim()
+          if (!settings.keepDescription && typeof probed?.description === 'string' && probed.description.trim()) overlay.description = probed.description.trim()
+          if (!settings.keepUrl && typeof probed?.url === 'string' && probed.url.trim()) overlay.url = probed.url.trim()
+
           if (Object.keys(overlay).length > 0) {
             targetMeta.byFilePath[targetPath] = overlay
           }
+          try {
+            fs.writeFileSync(path.join(destDir, 'metadata.json'), JSON.stringify(transferredItem, null, 2), 'utf8')
+          } catch {
+            // metadata.json write errors should not abort transfer
+          }
+          targetMeta.manualMedia.push(transferredItem)
+          importedItems.push(transferredItem)
           copied += 1
         } catch {
           failed += 1
         }
       }
       saveLocalMetaForLibrary(libraryPath, targetMeta)
+      if (importedItems.length > 0) {
+        upsertLibraryMediaIndex(libraryPath, importedItems)
+      }
 
       const success = failed === 0
       if (success) {

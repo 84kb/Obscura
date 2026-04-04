@@ -623,6 +623,7 @@ export interface ClientConfig {
     nickname?: string
     iconUrl?: string
     libraryTransferSettings?: LibraryTransferSettings
+    libraryBackupRetention?: number
     enableGPUAcceleration?: boolean
     enableF12DeveloperTools?: boolean
     audioDevice?: string

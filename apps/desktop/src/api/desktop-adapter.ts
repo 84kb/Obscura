@@ -5,7 +5,25 @@ import {
 } from '@obscura/core';
 
 export class DesktopAdapter implements IMediaLibraryAPI {
-    private api = (window as any).obscuraAPI;
+    private get api() {
+        const api = (window as any).obscuraAPI
+        if (!api) {
+            throw new Error('obscuraAPI bridge is not initialized')
+        }
+        return api
+    }
+
+    async listLibraryBackups(): Promise<{ id: string; createdAt: string; fileName: string; size: number }[]> {
+        return this.api.listLibraryBackups();
+    }
+
+    async createLibraryBackup(): Promise<{ success: boolean; fileName?: string; createdAt?: string; skipped?: boolean }> {
+        return this.api.createLibraryBackup();
+    }
+
+    async restoreLibraryBackup(backupId: string): Promise<{ success: boolean }> {
+        return this.api.restoreLibraryBackup(backupId);
+    }
 
     async selectFile(options?: any): Promise<string | null> {
         return this.api.selectFile(options);

@@ -17,7 +17,7 @@ interface LibraryGridProps {
     viewSettings?: ViewSettings
     onClearSelection?: () => void
     onSelectionChange?: (ids: number[]) => void
-    onInternalDragStart?: () => void
+    onInternalDragStart?: (mediaIds?: number[]) => void
     onInternalDragEnd?: () => void
     renamingMediaId?: number | null
     onRenameSubmit?: (id: number, newName: string) => void
@@ -446,6 +446,14 @@ export function LibraryGrid({
         return target ? [target.file_path] : []
     }
 
+    const handleDragGetMediaIds = (draggedIdStr: string) => {
+        const draggedId = Number(draggedIdStr)
+        if (selectedMediaIds.includes(draggedId)) {
+            return selectedMediaIds
+        }
+        return Number.isFinite(draggedId) ? [draggedId] : []
+    }
+
     return (
         <div
             ref={setContainerRef}
@@ -520,6 +528,7 @@ export function LibraryGrid({
                                 onRenameSubmit={(newName) => onRenameSubmit?.(media.id, newName)}
                                 onRenameCancel={onRenameCancel}
                                 onDragGetPaths={handleDragGetPaths}
+                                onDragGetMediaIds={handleDragGetMediaIds}
                                 priorityLoad={index < columnCount * 2}
                             />
                         </div>

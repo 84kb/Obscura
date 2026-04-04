@@ -2,6 +2,7 @@ import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { Image as TauriImage } from '@tauri-apps/api/image'
 import { getVersion } from '@tauri-apps/api/app'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { startDrag as startNativeDrag } from '@crabnebula/tauri-plugin-drag'
 import { open, save, confirm, message } from '@tauri-apps/plugin-dialog'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { writeImage, writeText } from '@tauri-apps/plugin-clipboard-manager'
@@ -29,11 +30,31 @@ const TAURI_EVENTS = {
     TRIGGER_FRAME_CAPTURE: 'trigger-frame-capture',
     FFMPEG_UPDATE_PROGRESS: 'ffmpeg-update-progress',
 } as const
+const TRANSPARENT_DRAG_ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO9WnWQAAAAASUVORK5CYII='
+const SIDECAR_RETRY_DELAYS_MS = [150, 350, 750] as const
 
 function isTauriRuntime(): boolean {
     if (typeof window === 'undefined') return false
     const w = window as any
     return Boolean(w.__TAURI_INTERNALS__ || w.__TAURI__)
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function invokeSidecarWithRetry<T = any>(method: string, params: any): Promise<T> {
+    let lastError: unknown = null
+    for (let attempt = 0; attempt <= SIDECAR_RETRY_DELAYS_MS.length; attempt += 1) {
+        try {
+            return await invoke<T>('sidecar_request', { method, params })
+        } catch (error) {
+            lastError = error
+            if (attempt >= SIDECAR_RETRY_DELAYS_MS.length) break
+            await sleep(SIDECAR_RETRY_DELAYS_MS[attempt])
+        }
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError))
 }
 
 function getFallbackConfig() {
@@ -46,8 +67,31 @@ function getFallbackConfig() {
         autoImport: { enabled: false, watchPaths: [] },
         thumbnailMode: 'speed' as const,
         discordRichPresenceEnabled: false,
+        libraryBackupRetention: 5,
         enableF12DeveloperTools: false,
         libraryViewSettings: {},
+    }
+}
+
+function normalizeClientConfig(config: any) {
+    const fallback = getFallbackConfig()
+    const autoImport = config?.autoImport && typeof config.autoImport === 'object'
+        ? config.autoImport
+        : {}
+
+    return {
+        ...fallback,
+        ...(config && typeof config === 'object' ? config : {}),
+        remoteLibraries: Array.isArray(config?.remoteLibraries) ? config.remoteLibraries : fallback.remoteLibraries,
+        autoImport: {
+            ...fallback.autoImport,
+            ...autoImport,
+            watchPaths: Array.isArray(autoImport?.watchPaths) ? autoImport.watchPaths : fallback.autoImport.watchPaths,
+        },
+        libraryViewSettings:
+            config?.libraryViewSettings && typeof config.libraryViewSettings === 'object'
+                ? config.libraryViewSettings
+                : fallback.libraryViewSettings,
     }
 }
 
@@ -152,15 +196,32 @@ function toPlayableSrc(inputPath: string): string {
     return convertFileSrc(normalized)
 }
 
+async function startNativeFileDrag(filePaths: string[]): Promise<void> {
+    const normalizedPaths = (filePaths ?? [])
+        .map((filePath) => decodeMediaProtocolPath(String(filePath || '')))
+        .filter((filePath) => filePath.length > 0)
+
+    if (normalizedPaths.length === 0) return
+
+    await startNativeDrag({
+        item: normalizedPaths,
+        icon: TRANSPARENT_DRAG_ICON,
+        mode: 'copy',
+    })
+}
+
 function normalizeMediaRecord(media: any): any {
     if (!media || typeof media !== 'object') return media
 
     const next: any = { ...media }
-    if (typeof next.file_path === 'string' && next.file_path) {
-        next.file_path = toPlayableSrc(next.file_path) as any
-    }
     if (typeof next.thumbnail_path === 'string' && next.thumbnail_path) {
         next.thumbnail_path = toPlayableSrc(next.thumbnail_path) as any
+    }
+    if (Array.isArray(next.parents)) {
+        next.parents = next.parents.map((item: any) => normalizeMediaRecord(item))
+    }
+    if (Array.isArray(next.children)) {
+        next.children = next.children.map((item: any) => normalizeMediaRecord(item))
     }
     return next
 }
@@ -274,15 +335,32 @@ function subscribeBridgeEvent<T>(
 
 async function getStoredClientConfig() {
     try {
-        const raw = await invoke<string>('read_client_config')
+        const raw = await (async () => {
+            let lastError: unknown = null
+            for (let attempt = 0; attempt <= SIDECAR_RETRY_DELAYS_MS.length; attempt += 1) {
+                try {
+                    return await invoke<string>('read_client_config')
+                } catch (error) {
+                    lastError = error
+                    if (attempt >= SIDECAR_RETRY_DELAYS_MS.length) break
+                    await sleep(SIDECAR_RETRY_DELAYS_MS[attempt])
+                }
+            }
+            throw lastError instanceof Error ? lastError : new Error(String(lastError))
+        })()
         const parsed = JSON.parse(raw || '{}')
-        const merged = { ...getFallbackConfig(), ...parsed }
+        const merged = normalizeClientConfig(parsed)
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(merged))
+        } catch {
+            // Ignore cache write errors.
+        }
         updateCachedGpuAcceleration(merged)
         return merged
     } catch {
         try {
             const localRaw = localStorage.getItem(STORAGE_KEY)
-            const merged = localRaw ? { ...getFallbackConfig(), ...JSON.parse(localRaw) } : getFallbackConfig()
+            const merged = localRaw ? normalizeClientConfig(JSON.parse(localRaw)) : getFallbackConfig()
             updateCachedGpuAcceleration(merged)
             return merged
         } catch {
@@ -299,6 +377,18 @@ function toLibraryEntry(libraryPath: string) {
 
     const name = (normalizedNoSlash.split(/[/\\]/).pop() || normalizedNoSlash).replace(/\.library$/i, '')
     return { name, path: normalizedNoSlash }
+}
+
+function resolveSingleSelectedPath(selected: string | string[] | null): string | null {
+    if (typeof selected === 'string') {
+        const normalized = selected.trim()
+        return normalized || null
+    }
+    if (Array.isArray(selected)) {
+        const first = selected.find((value) => typeof value === 'string' && value.trim())
+        return typeof first === 'string' ? first.trim() : null
+    }
+    return null
 }
 
 function mergeLocalLibraries(config: any) {
@@ -387,20 +477,29 @@ async function setupNativeDropBridge(): Promise<void> {
             const payload = event?.payload
             const type = String(payload?.type || '')
             if (type === 'over') {
-                void emitBridgeEvent('native-file-drag-over', true)
+                void emitBridgeEvent('native-file-drag-over', {
+                    position: payload?.position ?? null,
+                })
                 return
             }
             if (type === 'cancel') {
-                void emitBridgeEvent('native-file-drag-cancel', true)
+                void emitBridgeEvent('native-file-drag-cancel', {
+                    position: payload?.position ?? null,
+                })
                 return
             }
             if (type !== 'drop') return
-            void emitBridgeEvent('native-file-drag-drop', true)
+            void emitBridgeEvent('native-file-drag-drop', {
+                position: payload?.position ?? null,
+            })
             const paths = Array.isArray(payload.paths)
                 ? payload.paths.filter((p: unknown) => typeof p === 'string' && String(p).trim().length > 0)
                 : []
             if (paths.length === 0) return
-            void emitBridgeEvent('trigger-import', paths)
+            void emitBridgeEvent('trigger-import', {
+                filePaths: paths,
+                position: payload?.position ?? null,
+            })
         })
     } catch {
         // Keep app working even if drag-drop bridge is unavailable.
@@ -479,6 +578,7 @@ async function pollAutoImport(): Promise<void> {
                     void emitBridgeEvent('auto-import-trigger', {
                         watchId,
                         watchPath,
+                        targetLibraryId: String(watch?.targetLibraryId || '').trim(),
                         filePaths: existingNotImported,
                     })
                 }
@@ -498,6 +598,7 @@ async function pollAutoImport(): Promise<void> {
                 void emitBridgeEvent('auto-import-trigger', {
                     watchId,
                     watchPath,
+                    targetLibraryId: String(watch?.targetLibraryId || '').trim(),
                     filePaths: newPaths,
                 })
             }
@@ -543,7 +644,7 @@ export function initTauriDesktopBridge(): void {
                 multiple: false,
                 directory: true,
             })
-            return typeof selected === 'string' ? selected : null
+            return resolveSingleSelectedPath(selected)
         },
         scanFolder: async (folderPath: string) => {
             try {
@@ -587,7 +688,7 @@ export function initTauriDesktopBridge(): void {
                 multiple: false,
                 directory: true,
             })
-            const selectedPath = typeof selected === 'string' ? selected : ''
+            const selectedPath = resolveSingleSelectedPath(selected) || ''
             const lib = toLibraryEntry(selectedPath)
             if (!lib) return null
 
@@ -624,22 +725,16 @@ export function initTauriDesktopBridge(): void {
         },
         getActiveLibrary: async () => {
             try {
-                const result = await invoke<any>('sidecar_request', {
-                    method: 'get_active_library',
-                    params: null,
-                })
+                const result = await invokeSidecarWithRetry<any>('get_active_library', null)
                 if (result && typeof result === 'object' && result.path) return result
-            } catch {
-                // Fallback below.
+            } catch (error) {
+                console.error('[TauriBridge] getActiveLibrary failed, falling back to config:', error)
             }
 
             const config = await getStoredClientConfig()
             const fallback = toLibraryEntry(config?.activeLibraryPath)
             if (!fallback) return null
-            await invoke('sidecar_request', {
-                method: 'set_active_library',
-                params: { libraryPath: fallback.path },
-            })
+            await invokeSidecarWithRetry('set_active_library', { libraryPath: fallback.path })
             return fallback
         },
         refreshLibrary: async () => {
@@ -660,13 +755,10 @@ export function initTauriDesktopBridge(): void {
             try {
                 const targetPage = Number.isFinite(page) && (page as number) > 0 ? Math.floor(page as number) : 1
                 const targetLimit = Number.isFinite(limit) && (limit as number) > 0 ? Math.floor(limit as number) : 100
-                const result = await invoke<any>('sidecar_request', {
-                    method: 'get_media_files',
-                    params: {
-                        page: targetPage,
-                        limit: targetLimit,
-                        filters: filters ?? null,
-                    },
+                const result = await invokeSidecarWithRetry<any>('get_media_files', {
+                    page: targetPage,
+                    limit: targetLimit,
+                    filters: filters ?? null,
                 })
                 if (Array.isArray(result)) {
                     return result.map((m) => normalizeMediaRecord(m))
@@ -680,7 +772,8 @@ export function initTauriDesktopBridge(): void {
                 }
 
                 return []
-            } catch {
+            } catch (error) {
+                console.error('[TauriBridge] getMediaFiles failed:', error)
                 return []
             }
         },
@@ -927,6 +1020,35 @@ export function initTauriDesktopBridge(): void {
             } catch {
                 return []
             }
+        },
+        listLibraryBackups: async () => {
+            try {
+                const result = await invoke<any>('sidecar_request', {
+                    method: 'list_library_backups',
+                    params: null,
+                })
+                return Array.isArray(result) ? result : []
+            } catch {
+                return []
+            }
+        },
+        createLibraryBackup: async () => {
+            try {
+                const result = await invoke<any>('sidecar_request', {
+                    method: 'create_library_backup',
+                    params: null,
+                })
+                return result && typeof result === 'object' ? result : { success: false }
+            } catch {
+                return { success: false }
+            }
+        },
+        restoreLibraryBackup: async (backupId: string) => {
+            const result = await invoke<any>('sidecar_request', {
+                method: 'restore_library_backup',
+                params: { backupId },
+            })
+            return result && typeof result === 'object' ? result : { success: false }
         },
         createFolder: async (name: string, parentId?: number | null) => {
             return await invoke<any>('sidecar_request', {
@@ -1283,6 +1405,11 @@ export function initTauriDesktopBridge(): void {
         copyToClipboard: async (text: string) => {
             await copyTextWithFallback(decodeMediaProtocolPath(text))
         },
+        startDrag: (filePaths: string[]) => {
+            void startNativeFileDrag(filePaths).catch((error) => {
+                console.error('[TauriBridge] startDrag failed:', error)
+            })
+        },
         copyFileToClipboard: async (filePath: string) => {
             await invoke('sidecar_request', {
                 method: 'file_copy_to_clipboard',
@@ -1555,6 +1682,15 @@ export function initTauriDesktopBridge(): void {
             }
         },
         playAudio: async (filePath?: string) => {
+            try {
+                await invoke('native_audio_play', {
+                    filePath: filePath ?? null,
+                })
+                return
+            } catch {
+                // Fallback to renderer audio below.
+            }
+
             const audio = getAudioElement()
             ensureAudioEventBridge(audio)
             if (filePath) {
@@ -1572,26 +1708,57 @@ export function initTauriDesktopBridge(): void {
             await audio.play()
         },
         pauseAudio: async () => {
-            getAudioElement().pause()
+            try {
+                await invoke('native_audio_pause')
+                return
+            } catch {
+                getAudioElement().pause()
+            }
         },
         resumeAudio: async () => {
-            const audio = getAudioElement()
-            if (!audio.src) return
-            await audio.play()
+            try {
+                await invoke('native_audio_resume')
+                return
+            } catch {
+                const audio = getAudioElement()
+                if (!audio.src) return
+                await audio.play()
+            }
         },
         stopAudio: async () => {
-            const audio = getAudioElement()
-            audio.pause()
-            audio.currentTime = 0
+            try {
+                await invoke('native_audio_stop')
+                return
+            } catch {
+                const audio = getAudioElement()
+                audio.pause()
+                audio.currentTime = 0
+            }
         },
         seekAudio: async (time: number) => {
-            const audio = getAudioElement()
-            audio.currentTime = Number.isFinite(time) ? Math.max(0, time) : 0
+            try {
+                await invoke('native_audio_seek', {
+                    time: Number.isFinite(time) ? Math.max(0, time) : 0,
+                })
+                return
+            } catch {
+                const audio = getAudioElement()
+                audio.currentTime = Number.isFinite(time) ? Math.max(0, time) : 0
+            }
         },
         setAudioVolume: async (volume: number) => {
-            const audio = getAudioElement()
-            const normalized = Number.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : 1
-            audio.volume = normalized
+            try {
+                await invoke('native_audio_set_volume', {
+                    volume: Number.isFinite(volume) ? volume : 100,
+                })
+                return
+            } catch {
+                const audio = getAudioElement()
+                const normalized = Number.isFinite(volume)
+                    ? Math.max(0, Math.min(1, volume / 100))
+                    : 1
+                audio.volume = normalized
+            }
         },
         getClientConfig: async () => {
             return await getStoredClientConfig()
@@ -1607,6 +1774,8 @@ export function initTauriDesktopBridge(): void {
             } catch {
                 localStorage.setItem(STORAGE_KEY, payload)
             }
+
+            await emitBridgeEvent('client-config-updated', nextConfig)
 
             return nextConfig
         },

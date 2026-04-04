@@ -20,6 +20,7 @@
     "opener:default",
     "dialog:default",
     "notification:default",
+    "drag:default",
     "clipboard-manager:default",
     "clipboard-manager:allow-write-image"
   ]

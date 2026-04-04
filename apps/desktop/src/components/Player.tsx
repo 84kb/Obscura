@@ -83,6 +83,7 @@ export const Player: React.FC<PlayerProps> = ({
 
         audioEngine,
         isMpv,
+        usesNativeAudio,
         configLoaded,
         buffered
     } = usePlayer({
@@ -1237,6 +1238,7 @@ export const Player: React.FC<PlayerProps> = ({
                                 onLoadedData={() => setVideoVisualReady(true)}
                                 onClick={togglePlay}
                                 onEnded={() => {
+                                    if (usesNativeAudio) return
                                     if (autoPlayEnabled) {
                                         if (onNext && hasNext) {
                                             onNext()
@@ -1300,6 +1302,7 @@ export const Player: React.FC<PlayerProps> = ({
                                 src={fileUrl}
                                 crossOrigin="anonymous"
                                 onEnded={() => {
+                                    if (usesNativeAudio) return
                                     if (autoPlayEnabled) {
                                         if (onNext && hasNext) {
                                             onNext()

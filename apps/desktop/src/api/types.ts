@@ -1,6 +1,9 @@
 import { Library, MediaFile, Tag, TagGroup, Folder, MediaComment, AuditLogEntry, ServerConfig, ClientConfig, SharedUser, LibraryTransferSettings } from '@obscura/core';
 
 export interface IMediaLibraryAPI {
+    listLibraryBackups(): Promise<{ id: string; createdAt: string; fileName: string; size: number }[]>;
+    createLibraryBackup(): Promise<{ success: boolean; fileName?: string; createdAt?: string; skipped?: boolean }>;
+    restoreLibraryBackup(backupId: string): Promise<{ success: boolean }>;
     // ファイル操作汎用
     selectFile(options?: any): Promise<string | null>;
 

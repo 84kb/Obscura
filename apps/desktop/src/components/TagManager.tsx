@@ -25,7 +25,10 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
     const [selectedTagIds, setSelectedTagIds] = useState<Set<number>>(new Set())
     const [lastSelectedTagId, setLastSelectedTagId] = useState<number | null>(null)
     const [draggedTagIds, setDraggedTagIds] = useState<number[]>([])
+    const [groupOverrideByTagId, setGroupOverrideByTagId] = useState<Record<number, number | null>>({})
     const [dragOverGroupId, setDragOverGroupId] = useState<number | null>(null)
+    const [pointerDraggingTagIds, setPointerDraggingTagIds] = useState<number[]>([])
+    const [pointerDragPreview, setPointerDragPreview] = useState<{ x: number; y: number } | null>(null)
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; group: TagGroup } | null>(null)
     const [tagContextMenu, setTagContextMenu] = useState<{ x: number; y: number; tagId: number } | null>(null)
     const [editingGroupId, setEditingGroupId] = useState<number | null>(null)
@@ -47,6 +50,26 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
     // イベントハンドラの最新版を保持するRef (Stale Closure対策)
     const handleMouseMoveRef = useRef<(e: MouseEvent) => void>()
     const handleMouseUpRef = useRef<(e: MouseEvent) => void>()
+    const draggedTagIdsRef = useRef<number[]>([])
+    const pointerDragStateRef = useRef<null | {
+        startX: number
+        startY: number
+        tagIds: number[]
+        started: boolean
+        overGroupId: number | null | undefined
+    }>(null)
+    const suppressNextTagClickRef = useRef(false)
+
+    const tagById = useMemo(() => {
+        return new Map(
+            tags.map((tag) => [
+                tag.id,
+                Object.prototype.hasOwnProperty.call(groupOverrideByTagId, tag.id)
+                    ? { ...tag, groupId: groupOverrideByTagId[tag.id] }
+                    : tag,
+            ]),
+        )
+    }, [groupOverrideByTagId, tags])
 
     // グループ一覧を取得
     useEffect(() => {
@@ -66,6 +89,42 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
         }
     }
 
+    const displayedTags = useMemo(() => {
+        return tags.map((tag) => {
+            if (!Object.prototype.hasOwnProperty.call(groupOverrideByTagId, tag.id)) {
+                return tag
+            }
+            return {
+                ...tag,
+                groupId: groupOverrideByTagId[tag.id],
+            }
+        })
+    }, [groupOverrideByTagId, tags])
+
+    useEffect(() => {
+        setGroupOverrideByTagId((prev) => {
+            const next: Record<number, number | null> = {}
+            const tagById = new Map(tags.map((tag) => [tag.id, tag]))
+            let changed = false
+
+            Object.entries(prev).forEach(([rawTagId, groupId]) => {
+                const tagId = Number(rawTagId)
+                const serverTag = tagById.get(tagId)
+                if (!serverTag) {
+                    changed = true
+                    return
+                }
+                if ((serverTag.groupId ?? null) === (groupId ?? null)) {
+                    changed = true
+                    return
+                }
+                next[tagId] = groupId
+            })
+
+            return changed ? next : prev
+        })
+    }, [tags])
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault()
         if (newTagName.trim()) {
@@ -77,11 +136,15 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
     const handleCreateGroup = async (e: React.MouseEvent) => {
         e.preventDefault()
         try {
-            const group = await api.createTagGroup("無題")
+            const group = await api.createTagGroup('無題')
+            if (!group || typeof group.id !== 'number') {
+                throw new Error('Invalid tag group response')
+            }
             setTagGroups(prev => [...prev, group]) // 即時反映
+            setSelectedGroupId(group.id)
             setEditingGroupId(group.id)
             setEditingGroupName(group.name)
-            loadTagGroups() // 正確な同期
+            await loadTagGroups() // 正確な同期
         } catch (error) {
             console.error('Failed to create tag group:', error)
         }
@@ -93,7 +156,7 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
             if (selectedGroupId === id) {
                 setSelectedGroupId('all')
             }
-            loadTagGroups()
+            await loadTagGroups()
         } catch (error) {
             console.error('Failed to delete tag group:', error)
         }
@@ -103,7 +166,7 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
         if (newName.trim()) {
             try {
                 await api.renameTagGroup(id, newName.trim())
-                loadTagGroups()
+                await loadTagGroups()
             } catch (error) {
                 console.error('Failed to rename tag group:', error)
             }
@@ -146,6 +209,7 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
 
     // ドラッグ&ドロップ
     const handleDragStart = (e: React.DragEvent, tagId: number) => {
+        e.stopPropagation()
         let draggingIds: number[] = []
 
         if (selectedTagIds.has(tagId)) {
@@ -153,14 +217,19 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
             draggingIds = Array.from(selectedTagIds)
         } else {
             // 選択されていないタグをドラッグする場合、そのタグだけを選択状態にしてドラッグ
-            setSelectedTagIds(new Set([tagId]))
-            setLastSelectedTagId(tagId)
             draggingIds = [tagId]
         }
 
-        setDraggedTagIds(draggingIds)
+        draggedTagIdsRef.current = draggingIds
+        console.log('[TagManager] dragStart', { tagId, draggingIds })
+        if (onInternalDragStart) {
+            onInternalDragStart()
+        }
         e.dataTransfer.effectAllowed = 'move'
+        e.dataTransfer.dropEffect = 'move'
         e.dataTransfer.setData('application/x-obscura-tag-ids', JSON.stringify(draggingIds))
+        e.dataTransfer.setData('text/plain', JSON.stringify(draggingIds))
+        return
 
         // カスタムドラッグイメージを作成（角丸の黒い背景を回避）
         const dragElement = e.currentTarget as HTMLElement
@@ -188,7 +257,9 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
     }
 
     const handleDragEnd = () => {
+        console.log('[TagManager] dragEnd')
         setDraggedTagIds([])
+        draggedTagIdsRef.current = []
         setDragOverGroupId(null)
 
         // グローバルハンドラーに内部ドラッグ終了を通知
@@ -197,20 +268,50 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
         }
     }
 
+    const applyTagGroupChange = useCallback(async (ids: number[], groupId: number | null) => {
+        if (ids.length === 0) return
+
+        setGroupOverrideByTagId((prev) => {
+            const next = { ...prev }
+            ids.forEach((id) => {
+                next[id] = groupId
+            })
+            return next
+        })
+        try {
+            await Promise.all(ids.map(id => api.updateTagGroup(id, groupId)))
+
+            if (onRefresh) {
+                await onRefresh()
+            } else {
+                await loadTagGroups()
+            }
+        } catch (error) {
+            console.error('Failed to update tag group:', error)
+            setGroupOverrideByTagId((prev) => {
+                const next = { ...prev }
+                ids.forEach((id) => {
+                    delete next[id]
+                })
+                return next
+            })
+        }
+    }, [onRefresh])
+
     const handleDrop = async (e: React.DragEvent, groupId: number | null) => {
         e.preventDefault()
         e.stopPropagation()
         console.log('[TagManager] handleDrop called, groupId:', groupId)
 
-        let ids = draggedTagIds
+        let ids = draggedTagIds.length > 0 ? draggedTagIds : draggedTagIdsRef.current
 
         // stateがクリアされていた場合、dataTransferから取得を試みる
         if (ids.length === 0) {
-            const data = e.dataTransfer.getData('application/x-obscura-tag-ids')
+            const data = e.dataTransfer.getData('application/x-obscura-tag-ids') || e.dataTransfer.getData('text/plain')
             console.log('[TagManager] No state IDs, trying dataTransfer:', data)
             if (data) {
                 try {
-                    ids = JSON.parse(data)
+                    ids = JSON.parse(data).map((id: unknown) => Number(id)).filter(Number.isFinite)
                 } catch (err) {
                     console.error('Failed to parse drag data:', err)
                 }
@@ -218,28 +319,133 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
         }
 
         if (ids.length > 0) {
+            await applyTagGroupChange(ids, groupId)
+            setDraggedTagIds([])
+            draggedTagIdsRef.current = []
+            setDragOverGroupId(null)
+            if (onInternalDragEnd) {
+                onInternalDragEnd()
+            }
+            return
             try {
                 // 複数のタグを更新
                 await Promise.all(ids.map(id => api.updateTagGroup(id, groupId)))
 
                 if (onRefresh) {
-                    onRefresh()
+                    await onRefresh()
                 } else {
-                    loadTagGroups()
+                    await loadTagGroups()
                 }
             } catch (error) {
                 console.error('Failed to update tag group:', error)
+                setGroupOverrideByTagId((prev) => {
+                    const next = { ...prev }
+                    ids.forEach((id) => {
+                        delete next[id]
+                    })
+                    return next
+                })
             }
         }
         setDraggedTagIds([])
+        draggedTagIdsRef.current = []
         setDragOverGroupId(null)
+        if (onInternalDragEnd) {
+            onInternalDragEnd()
+        }
     }
 
     const handleDragOver = (e: React.DragEvent, targetId: number) => {
         e.preventDefault()
         e.stopPropagation()
+        e.dataTransfer.dropEffect = 'move'
+        console.log('[TagManager] dragOver', { targetId })
         setDragOverGroupId(targetId)
     }
+
+    const handleDragEnter = (e: React.DragEvent, targetId: number) => {
+        e.preventDefault()
+        e.stopPropagation()
+        e.dataTransfer.dropEffect = 'move'
+        console.log('[TagManager] dragEnter', { targetId })
+        setDragOverGroupId(targetId)
+    }
+
+    const getDropGroupIdFromElement = (element: Element | null): number | null | undefined => {
+        const dropTarget = element?.closest('[data-tag-drop-group-id]') as HTMLElement | null
+        if (!dropTarget) return undefined
+        const rawGroupId = dropTarget.dataset.tagDropGroupId
+        if (rawGroupId === 'null') return null
+        const parsedGroupId = Number(rawGroupId)
+        return Number.isFinite(parsedGroupId) ? parsedGroupId : undefined
+    }
+
+    const handleTagPointerDown = (e: React.MouseEvent, tagId: number) => {
+        if (e.button !== 0) return
+        const pointerIds = selectedTagIds.has(tagId) ? Array.from(selectedTagIds) : [tagId]
+        pointerDragStateRef.current = {
+            startX: e.clientX,
+            startY: e.clientY,
+            tagIds: pointerIds,
+            started: false,
+            overGroupId: undefined,
+        }
+        setPointerDraggingTagIds(pointerIds)
+        setPointerDragPreview({ x: e.clientX, y: e.clientY })
+    }
+
+    useEffect(() => {
+        const handleWindowMouseMove = (e: MouseEvent) => {
+            const dragState = pointerDragStateRef.current
+            if (!dragState) return
+
+            const distance = Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY)
+            if (!dragState.started) {
+                if (distance < 6) return
+                dragState.started = true
+                console.log('[TagManager] pointerDragStart', { tagIds: dragState.tagIds })
+                if (onInternalDragStart) {
+                    onInternalDragStart()
+                }
+            }
+
+            const hoveredGroupId = getDropGroupIdFromElement(document.elementFromPoint(e.clientX, e.clientY))
+            dragState.overGroupId = hoveredGroupId
+            setPointerDragPreview({ x: e.clientX, y: e.clientY })
+            setDragOverGroupId(hoveredGroupId === null ? -1 : hoveredGroupId ?? null)
+        }
+
+        const handleWindowMouseUp = () => {
+            const dragState = pointerDragStateRef.current
+            if (!dragState) return
+
+            pointerDragStateRef.current = null
+            if (dragState.started) {
+                suppressNextTagClickRef.current = true
+                console.log('[TagManager] pointerDragEnd', { tagIds: dragState.tagIds, overGroupId: dragState.overGroupId })
+                if (dragState.overGroupId !== undefined) {
+                    void applyTagGroupChange(dragState.tagIds, dragState.overGroupId)
+                }
+                if (onInternalDragEnd) {
+                    onInternalDragEnd()
+                }
+            }
+
+            setPointerDraggingTagIds([])
+            setPointerDragPreview(null)
+            setDragOverGroupId(null)
+        }
+
+        window.addEventListener('mousemove', handleWindowMouseMove)
+        window.addEventListener('mouseup', handleWindowMouseUp)
+        return () => {
+            window.removeEventListener('mousemove', handleWindowMouseMove)
+            window.removeEventListener('mouseup', handleWindowMouseUp)
+            if (onInternalDragEnd) {
+                onInternalDragEnd()
+            }
+        }
+    }, [applyTagGroupChange, onInternalDragEnd, onInternalDragStart, selectedTagIds])
 
 
     // 範囲選択ロジック
@@ -342,6 +548,10 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
     const handleTagClick = (e: React.MouseEvent, tagId: number) => {
         e.stopPropagation() // コンテナのクリックイベント（選択解除などあれば）への伝播を防ぐ
 
+        if (suppressNextTagClickRef.current) {
+            suppressNextTagClickRef.current = false
+            return
+        }
         if (e.shiftKey && lastSelectedTagId !== null) {
             // 範囲選択
             const currentIndex = filteredTags.findIndex(t => t.id === tagId)
@@ -387,21 +597,21 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
             const sorted: Tag[] = []
             // グループ順
             tagGroups.forEach(group => {
-                const groupTags = tags.filter(t => t.groupId === group.id)
+                const groupTags = displayedTags.filter(t => t.groupId === group.id)
                 sorted.push(...groupTags)
             })
             // 未分類 (または存在しないグループID)
             const existingGroupIds = new Set(tagGroups.map(g => g.id))
-            const unclassifiedTags = tags.filter(t => !t.groupId || !existingGroupIds.has(t.groupId))
+            const unclassifiedTags = displayedTags.filter(t => !t.groupId || !existingGroupIds.has(t.groupId))
             sorted.push(...unclassifiedTags)
             return sorted
         } else if (selectedGroupId === null) {
             const existingGroupIds = new Set(tagGroups.map(g => g.id))
-            return tags.filter(t => !t.groupId || !existingGroupIds.has(t.groupId))
+            return displayedTags.filter(t => !t.groupId || !existingGroupIds.has(t.groupId))
         } else {
-            return tags.filter(t => t.groupId === selectedGroupId)
+            return displayedTags.filter(t => t.groupId === selectedGroupId)
         }
-    }, [selectedGroupId, tags, tagGroups])
+    }, [displayedTags, selectedGroupId, tagGroups])
 
     const filteredTags = getSortedFilteredTags()
 
@@ -412,8 +622,9 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
             <div
                 key={tag.id}
                 className={`tag-manager-item ${selectedTagIds.has(tag.id) ? 'selected' : ''}`}
-                draggable
+                draggable={false}
                 data-tag-id={tag.id}
+                onMouseDown={(e) => handleTagPointerDown(e, tag.id)}
                 onDragStart={(e) => handleDragStart(e, tag.id)}
                 onDragEnd={handleDragEnd}
                 onClick={(e) => handleTagClick(e, tag.id)}
@@ -435,7 +646,23 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
     }, [contextMenu, tagContextMenu])
 
     return (
-        <div className="tag-manager-container">
+        <div className={`tag-manager-container ${pointerDraggingTagIds.length > 0 ? 'pointer-dragging' : ''}`}>
+            {pointerDragPreview && pointerDraggingTagIds.length > 0 && (
+                <div
+                    className="tag-drag-preview"
+                    style={{
+                        left: pointerDragPreview.x + 14,
+                        top: pointerDragPreview.y + 14,
+                    }}
+                >
+                    <span className="tag-drag-preview-name">
+                        {tagById.get(pointerDraggingTagIds[0])?.name || 'Tag'}
+                    </span>
+                    {pointerDraggingTagIds.length > 1 && (
+                        <span className="tag-drag-preview-count">+{pointerDraggingTagIds.length - 1}</span>
+                    )}
+                </div>
+            )}
             {/* グループサイドバー */}
             <div className="tag-group-sidebar">
                 {/* すべて */}
@@ -445,13 +672,15 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
                 >
 
                     <span className="folder-name">すべて</span>
-                    <span className="tag-count">{tags.length}</span>
+                    <span className="tag-count">{displayedTags.length}</span>
                 </div>
 
                 {/* 未分類 */}
                 <div
                     className={`tag-group-item ${selectedGroupId === null ? 'active' : ''} ${dragOverGroupId === -1 ? 'drag-over' : ''}`}
+                    data-tag-drop-group-id="null"
                     onClick={() => setSelectedGroupId(null)}
+                    onDragEnter={(e) => handleDragEnter(e, -1)}
                     onDrop={(e) => handleDrop(e, null)}
                     onDragOver={(e) => handleDragOver(e, -1)}
                     onDragLeave={handleDragLeave}
@@ -460,7 +689,7 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
                     <span className="folder-name">未分類</span>
                     <span className="tag-count">{(() => {
                         const existingGroupIds = new Set(tagGroups.map(g => g.id))
-                        return tags.filter(t => !t.groupId || !existingGroupIds.has(t.groupId)).length
+                        return displayedTags.filter(t => !t.groupId || !existingGroupIds.has(t.groupId)).length
                     })()}</span>
                 </div>
 
@@ -489,8 +718,10 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
                         <div
                             key={group.id}
                             className={`tag-group-item ${selectedGroupId === group.id ? 'active' : ''} ${dragOverGroupId === group.id ? 'drag-over' : ''}`}
+                            data-tag-drop-group-id={String(group.id)}
                             onClick={() => setSelectedGroupId(group.id)}
                             onContextMenu={(e) => handleGroupContextMenu(e, group)}
+                            onDragEnter={(e) => handleDragEnter(e, group.id)}
                             onDrop={(e) => handleDrop(e, group.id)}
                             onDragOver={(e) => handleDragOver(e, group.id)}
                             onDragLeave={handleDragLeave}
@@ -514,7 +745,7 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
                             ) : (
                                 <span className="folder-name">{group.name}</span>
                             )}
-                            <span className="tag-count">{tags.filter(t => t.groupId === group.id).length}</span>
+                            <span className="tag-count">{displayedTags.filter(t => t.groupId === group.id).length}</span>
                         </div>
                     ))}
                 </div>
@@ -550,7 +781,7 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
                         <>
                             {/* グループごとの表示 */}
                             {tagGroups.map(group => {
-                                const groupTags = tags.filter(t => t.groupId === group.id)
+                                const groupTags = displayedTags.filter(t => t.groupId === group.id)
                                 if (groupTags.length === 0) return null
 
                                 const totalUsage = groupTags.reduce((sum, tag) => sum + (tagUsageCount.get(tag.id) || 0), 0)
@@ -573,7 +804,7 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
                             {/* 未分類 */}
                             {(() => {
                                 const existingGroupIds = new Set(tagGroups.map(g => g.id))
-                                const unclassifiedTags = tags.filter(t => !t.groupId || !existingGroupIds.has(t.groupId))
+                                const unclassifiedTags = displayedTags.filter(t => !t.groupId || !existingGroupIds.has(t.groupId))
                                 if (unclassifiedTags.length === 0) return null
 
                                 const totalUsage = unclassifiedTags.reduce((sum, tag) => sum + (tagUsageCount.get(tag.id) || 0), 0)
@@ -670,7 +901,7 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
                     onClick={(e) => e.stopPropagation()}
                 >
                     <div className="menu-item delete" onClick={() => {
-                        const tag = tags.find(t => t.id === tagContextMenu.tagId)
+                        const tag = displayedTags.find(t => t.id === tagContextMenu.tagId)
                         if (tag) {
                             setConfirmState({
                                 title: 'タグを削除',

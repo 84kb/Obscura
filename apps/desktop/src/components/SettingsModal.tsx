@@ -11,7 +11,9 @@ interface SettingsModalProps {
     settings: AppSettings
     onUpdateSettings: (settings: AppSettings) => void
     onClose: () => void
+    onLibraryRestored?: () => void | Promise<void>
     language?: 'ja' | 'en'
+    initialClientConfig?: ClientConfig | null
 }
 
 // 削除された定義
@@ -116,7 +118,7 @@ const DEFAULT_INSPECTOR_INFO_VISIBILITY = {
     codecId: true
 }
 
-export function SettingsModal({ settings, onUpdateSettings, onClose, language = 'ja' }: SettingsModalProps) {
+export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRestored, language = 'ja', initialClientConfig = null }: SettingsModalProps) {
     const tr = (ja: string, en: string) => language === 'en' ? en : ja
     const [confirmState, setConfirmState] = useState<null | {
         title: string
@@ -248,11 +250,56 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, language = 
     const [sharedUsers, setSharedUsers] = useState<any[]>([])
     const [myUserToken, setMyUserToken] = useState<string>('')
     const [isServerRunning, setIsServerRunning] = useState<boolean>(false)
+    const [serverToggleBusy, setServerToggleBusy] = useState(false)
     const [activeTab, setActiveTab] = useState<'host' | 'client'>('host')
     const [libraries, setLibraries] = useState<Library[]>([])
 
     // === クライアント設定 State ===
-    const [clientConfig, setClientConfig] = useState<any>(null)
+    const [clientConfig, setClientConfig] = useState<any>(initialClientConfig)
+    const [activeLocalLibrary, setActiveLocalLibrary] = useState<Library | null>(null)
+    const [libraryBackups, setLibraryBackups] = useState<{ id: string; createdAt: string; fileName: string; size: number }[]>([])
+    const [backupBusy, setBackupBusy] = useState(false)
+    const [networkDataLoaded, setNetworkDataLoaded] = useState(false)
+    const [networkDataLoading, setNetworkDataLoading] = useState(false)
+
+    useEffect(() => {
+        if (initialClientConfig) {
+            setClientConfig(initialClientConfig)
+        }
+    }, [initialClientConfig])
+
+    const loadNetworkData = useCallback(async (force = false) => {
+        if (networkDataLoading) return
+        if (networkDataLoaded && !force) return
+
+        setNetworkDataLoading(true)
+        try {
+            const clientConfigPromise = clientConfig
+                ? Promise.resolve(clientConfig)
+                : api.getClientConfig()
+
+            const [config, running, users, cConfig, token, libs] = await Promise.all([
+                api.getServerConfig(),
+                api.getServerStatus(),
+                api.getSharedUsers(),
+                clientConfigPromise,
+                api.generateUserToken(),
+                api.getLibraries(),
+            ])
+
+            setServerConfig(config)
+            setIsServerRunning(running)
+            setSharedUsers(users)
+            setClientConfig(cConfig)
+            setMyUserToken(token)
+            setLibraries(libs)
+            setNetworkDataLoaded(true)
+        } catch (e) {
+            console.error('Failed to load network settings data:', e)
+        } finally {
+            setNetworkDataLoading(false)
+        }
+    }, [clientConfig, networkDataLoaded, networkDataLoading])
 
     // === テーマ設定 ===
     const updateClientConfig = useCallback(async (updates: Partial<ClientConfig>) => {
@@ -356,13 +403,19 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, language = 
     // === Import Settings State ===
     const [availableLibraries, setAvailableLibraries] = useState<{ name: string; path: string }[]>([])
 
-    useEffect(() => {
-        if (activeCategory === 'import') {
-            api.getLibraries()
-                .then((libs: any[]) => setAvailableLibraries(libs))
-                .catch((e: any) => console.error('Failed to get libraries:', e))
+    const loadAvailableLibraries = useCallback(async () => {
+        try {
+            const libs = await api.getLibraries()
+            setAvailableLibraries(Array.isArray(libs) ? libs : [])
+        } catch (e: any) {
+            console.error('Failed to get libraries:', e)
+            setAvailableLibraries([])
         }
-    }, [activeCategory])
+    }, [])
+
+    useEffect(() => {
+        void loadAvailableLibraries()
+    }, [loadAvailableLibraries])
 
     // === Profile Settings State ===
     const [nickname, setNickname] = useState('')
@@ -877,66 +930,140 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, language = 
         await api.quitAndInstall()
     }
 
+    useEffect(() => {
+        void loadNetworkData()
+    }, [loadNetworkData])
+
     // データ読み込み
     useEffect(() => {
         const loadData = async () => {
             if (activeCategory === 'network' || activeCategory === 'developer') {
+                await loadNetworkData()
+            } else if (activeCategory === 'general' || activeCategory === 'import' || activeCategory === 'profile' || activeCategory === 'audio') {
                 try {
-                    const config = await api.getServerConfig()
-                    setServerConfig(config)
-                    const running = await api.getServerStatus()
-                    setIsServerRunning(running)
-                    const users = await api.getSharedUsers()
-                    setSharedUsers(users)
-
-                    // クライアント設定も読み込む（リモートライブラリ一覧用）
-                    const cConfig = await api.getClientConfig()
-                    setClientConfig(cConfig)
-
-                    // クライアント用トークン (自分のマシン用)
-                    const token = await api.generateUserToken()
-                    setMyUserToken(token)
-                    // ライブラリ一覧を取得
-                    const libs = await api.getLibraries()
-                    setLibraries(libs)
-                } catch (e) {
-                    console.error('Failed to load settings data:', e)
-                }
-            } else if (activeCategory === 'general' || activeCategory === 'import') {
-                try {
-                    const config = await api.getClientConfig()
-                    setClientConfig(config)
+                    if (!clientConfig) {
+                        const config = await api.getClientConfig()
+                        setClientConfig(config)
+                    }
                 } catch (e) {
                     console.error('Failed to load client config:', e)
                 }
             }
         }
         loadData()
-    }, [activeCategory])
+    }, [activeCategory, clientConfig, loadNetworkData])
 
-    const handleToggleServer = async () => {
+    const syncServerRuntimeState = useCallback(async (expected?: boolean) => {
+        let running = false
+        for (let i = 0; i < 5; i += 1) {
+            running = await api.getServerStatus()
+            if (expected === undefined || running === expected) break
+            await new Promise((resolve) => setTimeout(resolve, 150))
+        }
+        setIsServerRunning(running)
+        const config = await api.getServerConfig()
+        setServerConfig(config)
+        return running
+    }, [])
+
+    const handleToggleServer = useCallback(async () => {
+        if (serverToggleBusy) return
+        setServerToggleBusy(true)
         try {
+            const nextRunning = !isServerRunning
             if (isServerRunning) {
                 const result = await api.stopServer()
                 if (!(result as any)?.success) {
                     throw new Error((result as any)?.error || tr('サーバー停止に失敗しました', 'Failed to stop server'))
                 }
-                setIsServerRunning(false)
             } else {
                 const result = await api.startServer()
                 if (!(result as any)?.success) {
                     throw new Error((result as any)?.error || tr('サーバー起動に失敗しました', 'Failed to start server'))
                 }
-                setIsServerRunning(true)
             }
-            // 設定更新
-            const config = await api.getServerConfig()
-            setServerConfig(config)
+            const actualRunning = await syncServerRuntimeState(nextRunning)
+            if (actualRunning !== nextRunning) {
+                const mismatchMessage = nextRunning
+                    ? tr('サーバーは起動要求後も停止状態のままです', 'The server remained stopped after the start request')
+                    : tr('サーバーは停止要求後も起動状態のままです', 'The server remained running after the stop request')
+                throw new Error(mismatchMessage)
+            }
         } catch (e) {
             console.error('Failed to toggle server:', e)
             alert(tr(`サーバー状態の切り替えに失敗しました: ${(e as any)?.message || e}`, `Failed to toggle server state: ${(e as any)?.message || e}`))
+            await syncServerRuntimeState()
+        } finally {
+            setServerToggleBusy(false)
         }
-    }
+    }, [isServerRunning, serverToggleBusy, syncServerRuntimeState, tr])
+
+    const loadLibraryBackupState = useCallback(async () => {
+        try {
+            const library = await api.getActiveLibrary()
+            setActiveLocalLibrary(library)
+            if (!library) {
+                setLibraryBackups([])
+                return
+            }
+            const backups = await api.listLibraryBackups()
+            setLibraryBackups(Array.isArray(backups) ? backups : [])
+        } catch (error) {
+            console.error('Failed to load library backups:', error)
+            setActiveLocalLibrary(null)
+            setLibraryBackups([])
+        }
+    }, [])
+
+    const handleCreateLibraryBackup = useCallback(async () => {
+        setBackupBusy(true)
+        try {
+            const result = await api.createLibraryBackup()
+            if (!(result as any)?.success) {
+                throw new Error(tr('バックアップの作成に失敗しました', 'Failed to create backup'))
+            }
+            await loadLibraryBackupState()
+        } catch (error) {
+            console.error('Failed to create library backup:', error)
+            alert(tr('バックアップの作成に失敗しました', 'Failed to create backup'))
+        } finally {
+            setBackupBusy(false)
+        }
+    }, [loadLibraryBackupState])
+
+    const handleRestoreLibraryBackup = useCallback((backupId: string) => {
+        setConfirmState({
+            title: tr('バックアップを復元', 'Restore backup'),
+            message: tr('このバックアップを復元しますか？現在のメタデータは上書きされます。', 'Restore this backup? Current metadata will be overwritten.'),
+            confirmLabel: tr('復元', 'Restore'),
+            isDestructive: true,
+            onConfirm: async () => {
+                setBackupBusy(true)
+                try {
+                    const result = await api.restoreLibraryBackup(backupId)
+                    if (!(result as any)?.success) {
+                        throw new Error('restore failed')
+                    }
+                    await loadLibraryBackupState()
+                    if (onLibraryRestored) {
+                        await onLibraryRestored()
+                    }
+                    onClose()
+                } catch (error) {
+                    console.error('Failed to restore library backup:', error)
+                    alert(tr('バックアップの復元に失敗しました', 'Failed to restore backup'))
+                } finally {
+                    setBackupBusy(false)
+                }
+            },
+        })
+    }, [loadLibraryBackupState, onClose, onLibraryRestored, tr])
+
+    useEffect(() => {
+        if (activeCategory === 'general') {
+            void loadLibraryBackupState()
+        }
+    }, [activeCategory, loadLibraryBackupState])
 
     const [inputUserToken, setInputUserToken] = useState('')
     const [newAccessToken, setNewAccessToken] = useState<string | null>(null)
@@ -1345,7 +1472,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, language = 
     }
 
     const renderNetworkSettings = () => {
-        if (!serverConfig) return <div className="loading">{tr('読み込み中...', 'Loading...')}</div>
+        if (!serverConfig || networkDataLoading) return <div className="loading">{tr('読み込み中...', 'Loading...')}</div>
 
         return (
             <div className="settings-page">
@@ -1385,6 +1512,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, language = 
                                             type="checkbox"
                                             checked={isServerRunning}
                                             onChange={handleToggleServer}
+                                            disabled={serverToggleBusy}
                                         />
                                         <span className="slider"></span>
                                     </label>
@@ -2307,6 +2435,22 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, language = 
         updateClientConfig({ autoImport: newConfig.autoImport })
     }
 
+    const getImportTargetOptions = useCallback((targetLibraryId: string) => {
+        if (availableLibraries.some(lib => lib.path === targetLibraryId)) {
+            return availableLibraries
+        }
+        if (!targetLibraryId) {
+            return availableLibraries
+        }
+        return [
+            ...availableLibraries,
+            {
+                name: tr('現在の設定先', 'Current target'),
+                path: targetLibraryId
+            }
+        ]
+    }, [availableLibraries, tr])
+
     const renderImportSettings = () => {
         if (!clientConfig) return <div className="loading">{tr('読み込み中...', 'Loading...')}</div>
 
@@ -2373,9 +2517,21 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, language = 
                                                     onChange={(e) => handleUpdateWatchPath(p.id, { targetLibraryId: e.target.value })}
                                                     className="settings-input watcher-select"
                                                 >
-                                                    {availableLibraries.map(lib => (
+                                                    {(() => {
+                                                        const libraryOptions = getImportTargetOptions(p.targetLibraryId)
+                                                        return (
+                                                            <>
+                                                    {libraryOptions.length === 0 && (
+                                                        <option value="">
+                                                            {tr('ライブラリがありません', 'No libraries available')}
+                                                        </option>
+                                                    )}
+                                                    {libraryOptions.map(lib => (
                                                         <option key={lib.path} value={lib.path}>{lib.name}</option>
                                                     ))}
+                                                            </>
+                                                        )
+                                                    })()}
                                                 </select>
                                             </div>
                                             <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.path}>
@@ -2535,6 +2691,85 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, language = 
                         </div>
                     </div>
                 </section>
+
+                <section className="settings-section">
+                    <h4 className="section-title">{tr('ライブラリバックアップ', 'Library Backup')}</h4>
+                    <div className="settings-card">
+                        {!activeLocalLibrary ? (
+                            <div className="settings-description-box">
+                                <span className="settings-description">
+                                    {tr('ローカルライブラリを開くとバックアップを利用できます。', 'Open a local library to use backups.')}
+                                </span>
+                            </div>
+                        ) : (
+                            <div className="settings-row-vertical">
+                                <div className="settings-description-box">
+                                    <span className="settings-description">
+                                        {tr('バックアップは .library/backup に保存されます。10分以上経過した後の操作時に自動バックアップされます。', 'Backups are stored in .library/backup. An automatic backup is created when you perform an operation after 10 minutes have passed.')}
+                                    </span>
+                                    <span className="settings-description" style={{ marginTop: '6px', display: 'block' }}>
+                                        {activeLocalLibrary.path}
+                                    </span>
+                                </div>
+                                <div className="settings-row">
+                                    <div className="settings-info">
+                                        <span className="settings-label">{tr('保持するバックアップ数', 'Backup retention count')}</span>
+                                        <span className="settings-description">
+                                            {tr('古いバックアップはこの件数を超えると自動で削除されます。', 'Older backups are automatically deleted when this count is exceeded.')}
+                                        </span>
+                                    </div>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        max={100}
+                                        className="settings-input"
+                                        style={{ width: '100px' }}
+                                        value={Number(clientConfig.libraryBackupRetention || 5)}
+                                        onChange={(e) => {
+                                            const nextValue = Math.max(1, Math.min(100, Math.floor(Number(e.target.value) || 5)))
+                                            const nextConfig = { ...clientConfig, libraryBackupRetention: nextValue }
+                                            setClientConfig(nextConfig)
+                                            updateClientConfig({ libraryBackupRetention: nextValue })
+                                        }}
+                                    />
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                    <button className="btn btn-secondary" onClick={handleCreateLibraryBackup} disabled={backupBusy}>
+                                        {tr('今すぐバックアップ', 'Back up now')}
+                                    </button>
+                                </div>
+                                <div className="users-list">
+                                    {libraryBackups.length === 0 ? (
+                                        <div className="empty-message">
+                                            {tr('バックアップはまだありません', 'No backups yet')}
+                                        </div>
+                                    ) : (
+                                        libraryBackups.map((backup) => (
+                                            <div key={backup.id} className="user-card-item">
+                                                <div className="user-card-header">
+                                                    <span className="user-card-name">{backup.fileName}</span>
+                                                    <button
+                                                        onClick={() => handleRestoreLibraryBackup(backup.id)}
+                                                        className="btn btn-outline btn-small"
+                                                        disabled={backupBusy}
+                                                    >
+                                                        {tr('復元', 'Restore')}
+                                                    </button>
+                                                </div>
+                                                <div className="user-card-last-access">
+                                                    {tr('作成日時', 'Created')}: {backup.createdAt ? new Date(backup.createdAt).toLocaleString() : '-'}
+                                                </div>
+                                                <div className="user-card-last-access">
+                                                    {tr('サイズ', 'Size')}: {(backup.size / 1024).toFixed(1)} KB
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </section>
             </div>
         )
     }
@@ -2627,6 +2862,8 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, language = 
 
 
     const renderProfileSettings = () => {
+        if (!clientConfig) return <div className="loading">{tr('読み込み中...', 'Loading...')}</div>
+
         return (
             <div className="settings-page">
                 <h3 className="settings-page-title">{tr('プロファイル設定', 'Profile Settings')}</h3>
@@ -3008,8 +3245,8 @@ const AudioSettings = ({ language = 'ja', clientConfig, setClientConfig }: { lan
 
     const updateConfig = async (update: Partial<ClientConfig>) => {
         try {
-            await api.updateClientConfig(update)
-            setClientConfig({ ...clientConfig, ...update })
+            const nextConfig = await api.updateClientConfig(update)
+            setClientConfig(nextConfig)
 
             // Trigger backend updates if needed
             if (update.audioDevice) {
