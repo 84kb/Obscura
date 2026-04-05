@@ -48,7 +48,7 @@
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
     -webkit-app-region: no-drag;
 }
 
@@ -60,7 +60,6 @@
 
 .header-back-button:hover {
     background: rgba(255, 255, 255, 0.1);
-    transform: scale(1.1);
 }
 
 /* 繝翫ン繧ｲ繝ｼ繧ｷ繝ｧ繝ｳ繝懊ち繝ｳ */
@@ -80,13 +79,12 @@
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
     -webkit-app-region: no-drag;
 }
 
 .nav-btn:hover:not(:disabled) {
     background: rgba(255, 255, 255, 0.1);
-    transform: scale(1.1);
 }
 
 .nav-btn:disabled {
@@ -196,7 +194,7 @@
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 .control-btn:hover {

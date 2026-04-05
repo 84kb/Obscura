@@ -3,6 +3,7 @@ import { TableVirtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { MediaFile, ViewSettings, FilterOptions } from '@obscura/core'
 import { formatSize, formatDate } from '../utils/format'
 import { toMediaUrl } from '../utils/fileUrl'
+import { enqueueThumbnailLoad } from '../utils/thumbnailLoadQueue'
 import { ShortcutContext, useShortcut } from '../contexts/ShortcutContext'
 import { api } from '../api'
 import './LibraryList.css'
@@ -83,8 +84,12 @@ const HeaderContextMenu: React.FC<{
 const ListThumbnail: React.FC<{ media: MediaFile, thumbnailMode: 'speed' | 'quality' }> = ({ media, thumbnailMode }) => {
     const [src, setSrc] = useState<string | null>(null);
     const [isLoaded, setIsLoaded] = useState(false);
+    const pendingThumbnailLoadRef = useRef<{ release: () => void, cancel: () => void } | null>(null);
 
     useEffect(() => {
+        pendingThumbnailLoadRef.current?.cancel()
+        pendingThumbnailLoadRef.current = null
+
         const cacheKey = `${media.id}|${thumbnailMode}|${media.thumbnail_path || ''}`
         const cached = listThumbnailUrlCache.get(cacheKey)
         if (cached) {
@@ -100,7 +105,15 @@ const ListThumbnail: React.FC<{ media: MediaFile, thumbnailMode: 'speed' | 'qual
         // Use pre-generated thumbnail directly. Avoid runtime resize query.
         const resolved = toMediaUrl(media.thumbnail_path)
         listThumbnailUrlCache.set(cacheKey, resolved)
-        setSrc(resolved)
+
+        pendingThumbnailLoadRef.current = enqueueThumbnailLoad(() => {
+            setSrc(resolved)
+        })
+
+        return () => {
+            pendingThumbnailLoadRef.current?.cancel()
+            pendingThumbnailLoadRef.current = null
+        }
     }, [media.id, media.thumbnail_path, thumbnailMode]);
 
     if (!media.thumbnail_path) return null;
@@ -130,7 +143,15 @@ const ListThumbnail: React.FC<{ media: MediaFile, thumbnailMode: 'speed' | 'qual
                         transition: 'opacity 0.2s ease',
                         objectFit: 'cover'
                     }}
-                    onLoad={() => setIsLoaded(true)}
+                    onLoad={() => {
+                        setIsLoaded(true)
+                        pendingThumbnailLoadRef.current?.release()
+                        pendingThumbnailLoadRef.current = null
+                    }}
+                    onError={() => {
+                        pendingThumbnailLoadRef.current?.release()
+                        pendingThumbnailLoadRef.current = null
+                    }}
                 />
             )}
         </div>

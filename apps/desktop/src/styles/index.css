@@ -25,6 +25,7 @@
   --layout-main-bg: var(--bg-dark);
   --layout-panel-bg: var(--bg-sidebar);
   --player-controls-bg: var(--layout-main-bg);
+  --media-card-bg: color-mix(in srgb, var(--layout-main-bg) 88%, white 12%);
 }
 
 * {

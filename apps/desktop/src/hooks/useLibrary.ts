@@ -15,6 +15,7 @@ export function useLibrary() {
     const [loadingProgress, setLoadingProgress] = useState(0)
     const isInitialLoadDone = useRef(false)
     const previousLibraryLoadKey = useRef<string | null>(null)
+    const startupRefreshAttemptedKey = useRef<string | null>(null)
     const startupLoadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const [startupLoading, setStartupLoading] = useState(true)
     const [initialLibraryResolved, setInitialLibraryResolved] = useState(false)
@@ -298,10 +299,10 @@ export function useLibrary() {
         silent = false,
         requestFilters: Record<string, any> | null = null,
     ) => {
-        if (loadingRef.current) return
+        if (loadingRef.current) return 0
 
         // In full-fetch compatibility mode, incremental paging is disabled.
-        if (!reset) return
+        if (!reset) return 0
 
         loadingRef.current = true
         const requestSeq = ++loadRequestSeq.current
@@ -320,7 +321,7 @@ export function useLibrary() {
                         setLoading(false)
                         setLoadingProgress(0)
                     }
-                    return
+                    return 0
                 }
                 if (!myUserToken) {
                     console.warn('[loadMediaFiles] User token is empty. Skipping request.')
@@ -329,7 +330,7 @@ export function useLibrary() {
                         setLoading(false)
                         setLoadingProgress(0)
                     }
-                    return
+                    return 0
                 }
             }
 
@@ -368,9 +369,11 @@ export function useLibrary() {
             const endTime = performance.now()
             const duration = (endTime - startTime) / 1000
             setLoadingTime(duration)
+            return newFiles.length
         } catch (error: any) {
             console.error('Failed to load media files:', error)
             // Do not re-throw if it's just a background fetch failing, but maybe notify...
+            return 0
         } finally {
             if (requestSeq === loadRequestSeq.current) {
                 loadingRef.current = false
@@ -1593,7 +1596,24 @@ export function useLibrary() {
 
                 if (isFirstLoad || isLibrarySwitchLoad) setLoadingProgress(20)
                 const shouldUseFastPreview = !activeRemoteLibrary && (isFirstLoad || isLibrarySwitchLoad)
-                await loadMediaFiles(true, false, shouldUseFastPreview ? { __fastPreview: true } : null)
+                let loadedCount = await loadMediaFiles(true, false, shouldUseFastPreview ? { __fastPreview: true } : null)
+
+                if (
+                    !activeRemoteLibrary &&
+                    currentLibraryLoadKey &&
+                    loadedCount === 0 &&
+                    startupRefreshAttemptedKey.current !== currentLibraryLoadKey
+                ) {
+                    startupRefreshAttemptedKey.current = currentLibraryLoadKey
+                    try {
+                        setLoadingProgress(30)
+                        await api.refreshLibrary()
+                        loadedCount = await loadMediaFiles(true, false)
+                    } catch (e) {
+                        console.error('Failed to refresh empty startup library:', e)
+                    }
+                }
+
                 previousLibraryLoadKey.current = currentLibraryLoadKey
                 if (isFirstLoad || isLibrarySwitchLoad) {
                     setLoadingProgress(100)
@@ -1601,7 +1621,7 @@ export function useLibrary() {
                         isInitialLoadDone.current = true
                     }
                     void metadataTask
-                    if (shouldUseFastPreview) {
+                    if (shouldUseFastPreview && loadedCount > 0) {
                         void loadMediaFiles(true, true).catch((e) => {
                             console.error('Failed to load full media list after preview:', e)
                         })

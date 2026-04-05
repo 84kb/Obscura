@@ -78,6 +78,17 @@ function normalizeClientConfig(config: any) {
     const autoImport = config?.autoImport && typeof config.autoImport === 'object'
         ? config.autoImport
         : {}
+    const libraryViewSettings =
+        config?.libraryViewSettings && typeof config.libraryViewSettings === 'object'
+            ? config.libraryViewSettings
+            : fallback.libraryViewSettings
+    const watchPaths = Array.isArray(autoImport?.watchPaths) ? autoImport.watchPaths : fallback.autoImport.watchPaths
+    const normalizedLocalLibraries = Array.isArray(config?.localLibraries)
+        ? config.localLibraries
+            .map((entry: any) => toLibraryEntry(entry?.path))
+            .filter(Boolean)
+        : []
+    const normalizedActiveLibraryPath = toLibraryEntry(config?.activeLibraryPath)?.path || null
 
     return {
         ...fallback,
@@ -86,12 +97,11 @@ function normalizeClientConfig(config: any) {
         autoImport: {
             ...fallback.autoImport,
             ...autoImport,
-            watchPaths: Array.isArray(autoImport?.watchPaths) ? autoImport.watchPaths : fallback.autoImport.watchPaths,
+            watchPaths,
         },
-        libraryViewSettings:
-            config?.libraryViewSettings && typeof config.libraryViewSettings === 'object'
-                ? config.libraryViewSettings
-                : fallback.libraryViewSettings,
+        libraryViewSettings,
+        localLibraries: normalizedLocalLibraries,
+        activeLibraryPath: normalizedActiveLibraryPath,
     }
 }
 
@@ -400,6 +410,22 @@ function mergeLocalLibraries(config: any) {
     }
     const active = toLibraryEntry(config?.activeLibraryPath)
     if (active) map.set(active.path, active)
+    return Array.from(map.values())
+}
+
+function getAutoImportLibraryCandidates(config: any) {
+    const autoImport = config?.autoImport && typeof config.autoImport === 'object'
+        ? config.autoImport
+        : {}
+    const watchPaths = Array.isArray(autoImport?.watchPaths) ? autoImport.watchPaths : []
+    const map = new Map<string, { name: string, path: string }>()
+
+    for (const watch of watchPaths) {
+        const lib = toLibraryEntry(watch?.targetLibraryId)
+        if (!lib) continue
+        map.set(lib.path, lib)
+    }
+
     return Array.from(map.values())
 }
 
@@ -724,17 +750,47 @@ export function initTauriDesktopBridge(): void {
             })
         },
         getActiveLibrary: async () => {
+            let sidecarResult: any = null
             try {
-                const result = await invokeSidecarWithRetry<any>('get_active_library', null)
-                if (result && typeof result === 'object' && result.path) return result
+                sidecarResult = await invokeSidecarWithRetry<any>('get_active_library', null)
+                if (sidecarResult && typeof sidecarResult === 'object' && sidecarResult.path) return sidecarResult
             } catch (error) {
                 console.error('[TauriBridge] getActiveLibrary failed, falling back to config:', error)
             }
 
             const config = await getStoredClientConfig()
-            const fallback = toLibraryEntry(config?.activeLibraryPath)
+            let fallback = toLibraryEntry(config?.activeLibraryPath)
+            if (!fallback) {
+                const autoImportCandidates = getAutoImportLibraryCandidates(config)
+                if (autoImportCandidates.length === 1) {
+                    fallback = autoImportCandidates[0]
+                }
+            }
             if (!fallback) return null
-            await invokeSidecarWithRetry('set_active_library', { libraryPath: fallback.path })
+
+            if (!sidecarResult) {
+                console.warn('[TauriBridge] getActiveLibrary returned empty result, restoring from config:', fallback.path)
+            }
+
+            try {
+                await invokeSidecarWithRetry('set_active_library', { libraryPath: fallback.path })
+            } catch (error) {
+                console.error('[TauriBridge] Failed to restore active library in sidecar from config:', error)
+            }
+
+            try {
+                const merged = mergeLocalLibraries({
+                    ...config,
+                    activeLibraryPath: fallback.path,
+                    localLibraries: [...(config?.localLibraries || []), fallback],
+                })
+                await tauriDesktopApi.updateClientConfig({
+                    activeLibraryPath: fallback.path,
+                    localLibraries: merged,
+                })
+            } catch (error) {
+                console.error('[TauriBridge] Failed to persist restored active library:', error)
+            }
             return fallback
         },
         refreshLibrary: async () => {

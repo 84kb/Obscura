@@ -71,6 +71,12 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
         )
     }, [groupOverrideByTagId, tags])
 
+    const selectedGroupName = useMemo(() => {
+        if (selectedGroupId === 'all') return 'すべてのタグ'
+        if (selectedGroupId === null) return '未分類のタグ'
+        return tagGroups.find((group) => group.id === selectedGroupId)?.name || 'タグ'
+    }, [selectedGroupId, tagGroups])
+
     // グループ一覧を取得
     useEffect(() => {
         if (propTagGroups) {
@@ -177,15 +183,48 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
     // タグの使用回数を事前計算
     const tagUsageCount = useMemo(() => {
         const counts = new Map<number, number>()
-        allMediaFiles.forEach(file => {
-            if (file.tags) {
-                file.tags.forEach(t => {
-                    counts.set(t.id, (counts.get(t.id) || 0) + 1)
-                })
-            }
+        const tagIdByName = new Map<string, number>(
+            displayedTags
+                .filter((tag) => typeof tag?.name === 'string' && tag.name.trim())
+                .map((tag) => [tag.name.trim().toLowerCase(), tag.id]),
+        )
+        allMediaFiles.forEach((file) => {
+            const fileTags = Array.isArray((file as any)?.tags) ? (file as any).tags : []
+            const seenTagIds = new Set<number>()
+            fileTags.forEach((rawTag: any) => {
+                let resolvedId: number | undefined
+
+                if (typeof rawTag === 'number' || (typeof rawTag === 'string' && /^\d+$/.test(rawTag.trim()))) {
+                    const parsedId = Number(rawTag)
+                    if (Number.isFinite(parsedId)) {
+                        resolvedId = parsedId
+                    }
+                } else if (rawTag && typeof rawTag === 'object') {
+                    const parsedId = Number(rawTag.id)
+                    if (Number.isFinite(parsedId)) {
+                        resolvedId = parsedId
+                    }
+                }
+
+                if (resolvedId === undefined) {
+                    const rawName = typeof rawTag === 'string'
+                        ? rawTag
+                        : (typeof rawTag?.name === 'string' ? rawTag.name : '')
+                    const normalizedName = rawName.trim().toLowerCase()
+                    if (!normalizedName) return
+                    const mappedId = tagIdByName.get(normalizedName)
+                    if (mappedId !== undefined) {
+                        resolvedId = mappedId
+                    }
+                }
+
+                if (resolvedId === undefined || seenTagIds.has(resolvedId)) return
+                seenTagIds.add(resolvedId)
+                counts.set(resolvedId, (counts.get(resolvedId) || 0) + 1)
+            })
         })
         return counts
-    }, [allMediaFiles])
+    }, [allMediaFiles, displayedTags])
 
     // グループ右クリックメニュー
     const handleGroupContextMenu = (e: React.MouseEvent, group: TagGroup) => {
@@ -630,11 +669,23 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
                 onClick={(e) => handleTagClick(e, tag.id)}
                 onContextMenu={(e) => handleTagContextMenu(e, tag.id)}
             >
+                <div className="tag-item-icon" aria-hidden="true">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M20.59 13.41 11 3.83A2 2 0 0 0 9.59 3H4a1 1 0 0 0-1 1v5.59A2 2 0 0 0 3.59 11l9.58 9.59a2 2 0 0 0 2.83 0l4.59-4.59a2 2 0 0 0 0-2.83Z"></path>
+                        <circle cx="7.5" cy="7.5" r="1.5" fill="currentColor" stroke="none"></circle>
+                    </svg>
+                </div>
                 <span className="tag-manager-name">{tag.name}</span>
-                <span className="tag-usage-count">{count}</span>
+                <span className="tag-usage-count">({count.toLocaleString()})</span>
             </div>
         )
     }
+
+    const renderTagList = (items: Tag[]) => (
+        <div className="tag-manager-list">
+            {items.map((tag) => renderTagItem(tag))}
+        </div>
+    )
 
     // グローバルクリックでコンテキストメニューを閉じる
     useEffect(() => {
@@ -664,6 +715,28 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
                 </div>
             )}
             {/* グループサイドバー */}
+            <div className="tag-manager-topbar">
+                <div className="tag-manager-topbar-title">
+                    <span className="tag-manager-topbar-title-main">{selectedGroupName}</span>
+                    <span className="tag-manager-topbar-title-sub">
+                        {selectedGroupId === 'all'
+                            ? `${displayedTags.length.toLocaleString()} 件のタグ`
+                            : `${filteredTags.length.toLocaleString()} 件のタグ`}
+                    </span>
+                </div>
+                <form onSubmit={handleSubmit} className="tag-manager-form">
+                    <input
+                        type="text"
+                        value={newTagName}
+                        onChange={(e) => setNewTagName(e.target.value)}
+                        placeholder={disabled ? "ライブラリが選択されていません" : "新しいタグ名..."}
+                        className="tag-manager-input"
+                        disabled={disabled}
+                    />
+                    <button type="submit" className="btn btn-primary btn-small" disabled={disabled}>追加</button>
+                </form>
+            </div>
+            <div className="tag-manager-content">
             <div className="tag-group-sidebar">
                 {/* すべて */}
                 <div
@@ -745,7 +818,7 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
                             ) : (
                                 <span className="folder-name">{group.name}</span>
                             )}
-                            <span className="tag-count">{displayedTags.filter(t => t.groupId === group.id).length}</span>
+                            <span className="tag-count">{displayedTags.filter(t => t.groupId === group.id).length.toLocaleString()}</span>
                         </div>
                     ))}
                 </div>
@@ -753,25 +826,6 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
 
             {/* タグ一覧 */}
             <div className="tag-manager">
-                <div className="tag-manager-header">
-                    <h2 className="tag-manager-title">
-                        {selectedGroupId === 'all' ? 'すべてのタグ' :
-                            selectedGroupId === null ? '未分類のタグ' :
-                                tagGroups.find(g => g.id === selectedGroupId)?.name || 'タグ'}
-                    </h2>
-                    <form onSubmit={handleSubmit} className="tag-manager-form">
-                        <input
-                            type="text"
-                            value={newTagName}
-                            onChange={(e) => setNewTagName(e.target.value)}
-                            placeholder={disabled ? "ライブラリが選択されていません" : "新しいタグ名..."}
-                            className="tag-manager-input"
-                            disabled={disabled}
-                        />
-                        <button type="submit" className="btn btn-primary btn-small" disabled={disabled}>追加</button>
-                    </form>
-                </div>
-
                 <div
                     className="tag-manager-grid"
                     ref={containerRef}
@@ -784,19 +838,13 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
                                 const groupTags = displayedTags.filter(t => t.groupId === group.id)
                                 if (groupTags.length === 0) return null
 
-                                const totalUsage = groupTags.reduce((sum, tag) => sum + (tagUsageCount.get(tag.id) || 0), 0)
-
                                 return (
                                     <div key={group.id} className="tag-manager-section">
                                         <div className="tag-manager-section-title">
                                             {group.name}
-                                            <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: 'normal', color: 'var(--text-muted)' }}>
-                                                (計 {totalUsage} 件)
-                                            </span>
+                                            <span className="tag-manager-section-count">({groupTags.length.toLocaleString()})</span>
                                         </div>
-                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 'var(--spacing-sm)' }}>
-                                            {groupTags.map(tag => renderTagItem(tag))}
-                                        </div>
+                                        {renderTagList(groupTags)}
                                     </div>
                                 )
                             })}
@@ -807,19 +855,13 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
                                 const unclassifiedTags = displayedTags.filter(t => !t.groupId || !existingGroupIds.has(t.groupId))
                                 if (unclassifiedTags.length === 0) return null
 
-                                const totalUsage = unclassifiedTags.reduce((sum, tag) => sum + (tagUsageCount.get(tag.id) || 0), 0)
-
                                 return (
                                     <div className="tag-manager-section">
                                         <div className="tag-manager-section-title">
                                             未分類
-                                            <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: 'normal', color: 'var(--text-muted)' }}>
-                                                (計 {totalUsage} 件)
-                                            </span>
+                                            <span className="tag-manager-section-count">({unclassifiedTags.length.toLocaleString()})</span>
                                         </div>
-                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 'var(--spacing-sm)' }}>
-                                            {unclassifiedTags.map(tag => renderTagItem(tag))}
-                                        </div>
+                                        {renderTagList(unclassifiedTags)}
                                     </div>
                                 )
                             })()}
@@ -831,9 +873,7 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
                         </p>
                     ) : (
                         // 通常のフラット表示
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 'var(--spacing-sm)' }}>
-                            {filteredTags.map((tag) => renderTagItem(tag))}
-                        </div>
+                        renderTagList(filteredTags)
                     )}
                     {selectionBoxStart && selectionBoxEnd && (
                         <SelectionBox
@@ -847,6 +887,7 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
                 </div>
 
 
+            </div>
             </div>
 
             {/* コンテキストメニュー */}

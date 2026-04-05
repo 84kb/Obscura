@@ -1,6 +1,6 @@
 /* メディアカード全体 */
 .media-card {
-    background: color-mix(in srgb, var(--bg-card) 84%, var(--layout-panel-bg) 16%);
+    background: var(--media-card-bg);
     border-radius: var(--radius-md);
     overflow: hidden;
     transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);

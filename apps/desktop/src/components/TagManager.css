@@ -1,20 +1,63 @@
 /* タグマネージャーコンテナ（フォルダーサイドバー + タグ一覧） */
 .tag-manager-container {
     display: flex;
-    gap: var(--spacing-lg);
-    padding: var(--spacing-xl);
-    padding-bottom: 0;
-    /* Remove bottom padding effectively */
+    flex-direction: column;
+    gap: 10px;
+    padding: 0 12px 12px;
     width: 100%;
     margin: 0 auto;
     height: 100%;
-    /* Fill parent */
     overflow: hidden;
-    /* Prevent body scroll if content overflows, use internal scroll */
 }
 
 .tag-manager-container.pointer-dragging {
     cursor: grabbing;
+}
+
+.tag-manager-topbar {
+    min-height: calc(var(--window-chrome-height) + 14px);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: calc(6px + var(--window-chrome-height)) 0 0;
+    border-bottom: 1px solid var(--border);
+    -webkit-app-region: drag;
+    flex-shrink: 0;
+}
+
+.tag-manager-topbar-title {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.tag-manager-topbar-title-main,
+.tag-manager-topbar-title-sub {
+    -webkit-app-region: no-drag;
+}
+
+.tag-manager-topbar-title-main {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-main);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tag-manager-topbar-title-sub {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.tag-manager-content {
+    display: flex;
+    gap: 12px;
+    min-height: 0;
+    flex: 1;
+    overflow: hidden;
 }
 
 .tag-drag-preview {
@@ -56,25 +99,27 @@
 
 /* フォルダーサイドバー */
 .tag-group-sidebar {
-    width: 200px;
+    width: 198px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
     gap: 2px;
     border-right: 1px solid var(--border);
-    padding-right: var(--spacing-md);
+    padding-right: 10px;
+    min-height: 0;
 }
 
 .tag-group-item {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 12px;
-    border-radius: var(--radius-sm);
+    min-height: 29px;
+    padding: 5px 8px;
+    border-radius: 6px;
     cursor: pointer;
-    transition: all 0.15s;
+    transition: background 0.15s ease, color 0.15s ease;
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: 12px;
 }
 
 .tag-group-item:hover {
@@ -108,14 +153,20 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;
 }
 
 .tag-count {
-    font-size: 12px;
+    font-size: 13px;
+    line-height: 1;
     color: var(--text-muted);
+    font-family: "SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     flex-shrink: 0;
-    min-width: 24px;
+    min-width: 28px;
     text-align: right;
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
 }
 
 /* タグ グループ ヘッダー */
@@ -123,8 +174,8 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 12px 12px 6px 12px;
-    margin-top: 8px;
+    padding: 8px 10px 4px 10px;
+    margin-top: 4px;
     font-size: 12px;
     color: var(--text-muted);
     text-transform: uppercase;
@@ -205,18 +256,19 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
+    min-height: 0;
 }
 
 .tag-manager-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: var(--spacing-xl);
-    gap: var(--spacing-lg);
+    margin-bottom: var(--spacing-md);
+    gap: var(--spacing-md);
 }
 
 .tag-manager-title {
-    font-size: 20px;
+    font-size: 18px;
     font-weight: 700;
     background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
     -webkit-background-clip: text;
@@ -226,20 +278,24 @@
 
 .tag-manager-form {
     display: flex;
-    gap: var(--spacing-sm);
+    gap: 8px;
     flex: 1;
-    max-width: 400px;
+    max-width: 420px;
+    justify-content: flex-end;
+    -webkit-app-region: no-drag;
 }
 
 .tag-manager-input {
     flex: 1;
-    padding: 10px 14px;
+    min-width: 160px;
+    padding: 7px 10px;
     background: var(--bg-card);
     border: 1.5px solid var(--border);
-    border-radius: var(--radius-md);
+    border-radius: 8px;
     color: var(--text-main);
     outline: none;
     transition: all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+    font-size: 12px;
 }
 
 .tag-manager-input:focus {
@@ -249,49 +305,67 @@
 }
 
 .tag-manager-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: var(--spacing-sm);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
     padding: 0;
-    align-content: flex-start;
     position: relative;
-    /* Critical for SelectionBox positioning */
     overflow-y: auto;
     user-select: none;
-    /* Prevent text selection */
     flex: 1;
-    /* Fill remaining vertical space */
-    padding: 10px 4px;
-    /* Vertical padding is fine, horizontal padding cause shifting */
+    padding: 4px 2px;
+    min-height: 0;
+}
+
+.tag-manager-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px 18px;
+    justify-items: start;
 }
 
 .tag-manager-section {
-    margin-bottom: var(--spacing-xl);
+    margin-bottom: var(--spacing-md);
 }
 
 .tag-manager-section-title {
-    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
     font-weight: 600;
     color: var(--text-muted);
-    margin-bottom: var(--spacing-sm);
+    margin-bottom: 6px;
     padding-left: 4px;
     border-bottom: 1px solid var(--border);
-    padding-bottom: 4px;
+    padding-bottom: 3px;
+}
+
+.tag-manager-section-count {
+    font-family: "SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 12px;
+    line-height: 1;
+    font-weight: 500;
+    color: var(--text-muted);
+    display: inline-flex;
+    align-items: center;
 }
 
 .tag-manager-item {
-    background: var(--bg-card);
-    padding: 8px 12px;
-    border-radius: var(--radius-sm);
+    background: transparent;
+    padding: 5px 8px;
+    border-radius: 6px;
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    border: 1px solid var(--border);
-    transition: all 0.1s ease-out;
-    box-shadow: var(--shadow-sm);
+    gap: 8px;
+    border: 1px solid transparent;
+    transition: background 0.1s ease-out, border-color 0.1s ease-out, color 0.1s ease-out;
     cursor: default;
-    height: 40px;
+    min-height: 29px;
     overflow: hidden;
+    width: fit-content;
+    max-width: 100%;
+    justify-self: start;
 }
 
 .tag-manager-item:hover {
@@ -300,22 +374,52 @@
 }
 
 .tag-manager-item.selected {
-    background: color-mix(in srgb, var(--primary), transparent 75%);
+    background: color-mix(in srgb, var(--primary), transparent 84%);
     border-color: var(--primary);
-    box-shadow: 0 0 0 1px var(--primary);
 }
 
 .tag-manager-item:active {
     background: color-mix(in srgb, var(--primary), transparent 65%);
 }
 
+.tag-item-icon {
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
 .tag-manager-name {
-    font-size: 14px;
+    flex: 0 1 auto;
+    min-width: 0;
+    font-size: 13px;
     color: var(--text-main);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     font-weight: 500;
+}
+
+.tag-usage-count {
+    flex-shrink: 0;
+    margin-left: 0;
+    color: var(--text-muted);
+    font-family: "SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 12px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
+}
+
+@media (max-width: 900px) {
+    .tag-manager-list {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }
 
 .tag-manager-delete {
@@ -339,7 +443,7 @@
     grid-column: 1 / -1;
     text-align: center;
     color: var(--text-muted);
-    padding: var(--spacing-xl);
+    padding: var(--spacing-md);
     font-size: 16px;
 }
 
@@ -416,12 +520,4 @@
 
 .folder-context-menu .menu-item.disabled:hover {
     background: transparent;
-}
-
-.tag-usage-count {
-    font-size: 11px;
-    color: var(--text-muted);
-    font-variant-numeric: tabular-nums;
-    margin-left: 8px;
-    opacity: 0.7;
 }

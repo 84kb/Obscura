@@ -66,7 +66,9 @@
     border-radius: 6px;
     color: var(--text-muted);
     cursor: pointer;
-    transition: background 0.2s ease, color 0.2s ease;
+    transition:
+        background 0.2s ease,
+        color 0.2s ease;
 }
 
 .sidebar-topbar-btn:hover {
@@ -81,16 +83,24 @@
     width: 100%;
 }
 
+.sidebar-section-header > span {
+    color: color-mix(in srgb, var(--text-main), transparent 40%);
+}
+
 .sidebar-title {
     font-size: 14px;
     font-weight: 700;
-    color: var(--text-main);
+    color: color-mix(in srgb, var(--text-main), transparent 28%);
     letter-spacing: 0;
 }
 
 .sidebar-create-library-btn {
     padding: 8px 12px;
-    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+    background: linear-gradient(
+        135deg,
+        var(--primary) 0%,
+        var(--primary-light) 100%
+    );
     color: white;
     border: none;
     border-radius: var(--radius-md);
@@ -349,7 +359,6 @@
     color: var(--primary) !important;
 }
 
-
 .sidebar-section {
     display: flex;
     flex-direction: column;
@@ -399,7 +408,9 @@
     align-items: center;
     gap: 4px;
     color: var(--text-main);
-    transition: all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1), border 0.1s linear;
+    transition:
+        all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1),
+        border 0.1s linear;
     font-weight: 500;
     font-size: 13px;
     box-shadow: none;
@@ -420,7 +431,6 @@
     box-shadow: none;
 }
 
-
 .sidebar-nav-item.drop-top {
     box-shadow: 0 -2px 0 0 var(--primary);
     position: relative;
@@ -428,7 +438,7 @@
 }
 
 .sidebar-nav-item.drop-top::before {
-    content: '';
+    content: "";
     position: absolute;
     top: -2px;
     left: 0;
@@ -445,7 +455,7 @@
 }
 
 .sidebar-nav-item.drop-bottom::after {
-    content: '';
+    content: "";
     position: absolute;
     bottom: -2px;
     left: 0;
@@ -458,7 +468,8 @@
 .sidebar-nav-item.drop-middle {
     background: color-mix(in srgb, var(--primary) 12%, var(--bg-hover));
     border-color: color-mix(in srgb, var(--primary) 78%, var(--border));
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 24%, transparent);
+    box-shadow: inset 0 0 0 1px
+        color-mix(in srgb, var(--primary) 24%, transparent);
     color: var(--text-main);
 }
 
@@ -471,7 +482,8 @@
 .sidebar-nav-item.active.external-drop-target {
     background: color-mix(in srgb, var(--primary) 18%, var(--bg-hover));
     border-color: color-mix(in srgb, var(--primary) 92%, white 8%);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 36%, transparent);
+    box-shadow: inset 0 0 0 1px
+        color-mix(in srgb, var(--primary) 36%, transparent);
     color: var(--text-main);
     transform: none;
 }
@@ -505,8 +517,8 @@
 }
 
 /* 縦線（兄弟間） - サブフォルダー内のみ */
-.sidebar-sub-folders>.folder-tree-container::before {
-    content: '';
+.sidebar-sub-folders > .folder-tree-container::before {
+    content: "";
     position: absolute;
     left: -8px;
     /* 位置調整 */
@@ -518,7 +530,7 @@
 }
 
 /* 最後の要素は線を中心で止める（L字） */
-.sidebar-sub-folders>.folder-tree-container:last-child::before {
+.sidebar-sub-folders > .folder-tree-container:last-child::before {
     height: 15px;
     /* folder-tree-nodeの中心（高さ約44pxの半分） */
     bottom: auto;
@@ -534,8 +546,8 @@
 }
 
 /* 横線（分岐） - サブフォルダー内のみ */
-.sidebar-sub-folders>.folder-tree-container>.folder-tree-node::after {
-    content: '';
+.sidebar-sub-folders > .folder-tree-container > .folder-tree-node::after {
+    content: "";
     position: absolute;
     left: -8px;
     /* 縦線から開始 */
@@ -675,7 +687,6 @@
     margin-bottom: 4px;
 }
 
-
 /* サイドバーのスクロール可能領域 */
 .sidebar-content {
     flex: 1;
@@ -767,16 +778,19 @@
     box-shadow: none;
 }
 
-
-
 /* Sidebar Item Counts */
 .sidebar-count {
-    font-family: 'SF Mono', 'Consolas', monospace;
-    font-size: 11px;
+    font-family:
+        "SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo,
+        monospace;
+    font-size: 12px;
+    line-height: 1;
     color: color-mix(in srgb, var(--text-main), transparent 28%);
     margin-left: auto;
     padding-left: 6px;
     font-weight: 500;
+    display: inline-flex;
+    align-items: center;
 }
 
 .sidebar-nav-item.active .sidebar-count {

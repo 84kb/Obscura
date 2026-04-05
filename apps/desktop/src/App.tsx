@@ -837,6 +837,7 @@ function AppContent() {
         setRefreshProgress({ current: 0, total: 0 })
         try {
             await api.refreshLibrary()
+            await refreshLibrary()
         } catch (error) {
             console.error('Refresh failed:', error)
             alert(tr('Failed to refresh the library', 'Failed to refresh the library'))

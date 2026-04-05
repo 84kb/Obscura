@@ -70,6 +70,15 @@ const getPlayerControlsBg = (layoutMainBg: string) => {
     return layoutMainBg;
 };
 
+const getMediaCardBg = (layoutMainBg: string) => {
+    const mainLum = getRelativeLuminance(layoutMainBg);
+    if (mainLum < 0.35) {
+        return `color-mix(in srgb, ${layoutMainBg} 92%, white 8%)`;
+    }
+
+    return `color-mix(in srgb, ${layoutMainBg} 94%, black 6%)`;
+};
+
 export const defaultDarkTheme: Theme = {
     id: 'default-dark',
     name: 'Default Dark',
@@ -246,6 +255,7 @@ export const applyTheme = (theme: Theme) => {
     const colors = theme.colors;
     const layoutSurfaces = getLayoutSurfaceColors(colors);
     const playerControlsBg = getPlayerControlsBg(layoutSurfaces.layoutMainBg);
+    const mediaCardBg = getMediaCardBg(layoutSurfaces.layoutMainBg);
 
     root.style.setProperty('--bg-dark', colors.bgDark);
     root.style.setProperty('--bg-card', colors.bgCard);
@@ -261,11 +271,13 @@ export const applyTheme = (theme: Theme) => {
     root.style.setProperty('--layout-main-bg', layoutSurfaces.layoutMainBg);
     root.style.setProperty('--layout-panel-bg', layoutSurfaces.layoutPanelBg);
     root.style.setProperty('--player-controls-bg', playerControlsBg);
+    root.style.setProperty('--media-card-bg', mediaCardBg);
 };
 
 export const createCssVariablesObject = (colors: ThemeColors) => {
     const layoutSurfaces = getLayoutSurfaceColors(colors);
     const playerControlsBg = getPlayerControlsBg(layoutSurfaces.layoutMainBg);
+    const mediaCardBg = getMediaCardBg(layoutSurfaces.layoutMainBg);
     return {
         '--bg-dark': colors.bgDark,
         '--bg-card': colors.bgCard,
@@ -280,7 +292,8 @@ export const createCssVariablesObject = (colors: ThemeColors) => {
         '--border': colors.border,
         '--layout-main-bg': layoutSurfaces.layoutMainBg,
         '--layout-panel-bg': layoutSurfaces.layoutPanelBg,
-        '--player-controls-bg': playerControlsBg
+        '--player-controls-bg': playerControlsBg,
+        '--media-card-bg': mediaCardBg
     };
 };
 

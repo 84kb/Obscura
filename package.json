@@ -1,6 +1,6 @@
 {
     "name": "obscura",
-    "version": "0.8.16",
+    "version": "0.8.17",
     "description": "ライブラリ型メディアプレイヤー",
     "main": "dist-tauri/index.html",
     "workspaces": [

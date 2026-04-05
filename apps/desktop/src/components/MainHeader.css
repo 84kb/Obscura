@@ -389,12 +389,21 @@ body.dragging-file .main-header {
     left: calc(100% + 6px);
     right: auto;
     min-width: 120px;
-    background: var(--bg-secondary);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 8px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
     padding: 4px;
-    z-index: 1200;
+    z-index: 1600;
+    opacity: 1;
+}
+
+.filter-preset-floating-menu {
+    position: fixed;
+    left: 0;
+    top: 0;
+    background: var(--bg-card);
+    z-index: 3000;
 }
 
 .filter-preset-row-action {

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { FilterOptions, ViewSettings, Tag, TagGroup, MediaFile, Folder, ItemInfoType } from '@obscura/core'
 import { api } from '../api'
 import { useDelayUnmount } from '../hooks/useDelayUnmount'
@@ -86,7 +87,7 @@ export function MainHeader({
     const [selectedFilterPresetId, setSelectedFilterPresetId] = useState('')
     const [isPresetMenuOpen, setIsPresetMenuOpen] = useState(false)
     const [presetSearchQuery, setPresetSearchQuery] = useState('')
-    const [activePresetActionMenu, setActivePresetActionMenu] = useState<{ id: string; top: number } | null>(null)
+    const [activePresetActionMenu, setActivePresetActionMenu] = useState<{ id: string; top: number; left: number } | null>(null)
 
     const shouldRenderFolderFilter = useDelayUnmount(isFolderFilterOpen, 150)
     const shouldRenderTagFilter = useDelayUnmount(isTagFilterOpen, 150)
@@ -344,15 +345,19 @@ export function MainHeader({
 
     const handleTogglePresetActionMenu = (presetId: string, event: React.MouseEvent<HTMLButtonElement>) => {
         const buttonRect = event.currentTarget.getBoundingClientRect()
-        const menuRect = presetMenuRef.current?.getBoundingClientRect()
-        const relativeTop = menuRect
-            ? Math.max(8, Math.min(buttonRect.top - menuRect.top - 2, menuRect.height - 80))
-            : 8
+        const viewportPadding = 8
+        const menuWidth = 136
+        const menuHeight = 76
+        const left = Math.min(buttonRect.right + 8, window.innerWidth - menuWidth - viewportPadding)
+        const top = Math.min(
+            Math.max(viewportPadding, buttonRect.top - 2),
+            window.innerHeight - menuHeight - viewportPadding
+        )
 
         setActivePresetActionMenu((current) => (
             current?.id === presetId
                 ? null
-                : { id: presetId, top: relativeTop }
+                : { id: presetId, top, left }
         ))
     }
 
@@ -930,7 +935,7 @@ export function MainHeader({
                                                         <button
                                                             className="filter-preset-more-btn"
                                                             onClick={(event) => handleTogglePresetActionMenu(preset.id, event)}
-                                                            title="操作"
+                                                            title="詳細"
                                                         >
                                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                                                                 <circle cx="12" cy="5" r="1.8"></circle>
@@ -938,29 +943,6 @@ export function MainHeader({
                                                                 <circle cx="12" cy="19" r="1.8"></circle>
                                                             </svg>
                                                         </button>
-                                                        {activePresetActionMenu?.id === preset.id && (
-                                                            <div className="filter-preset-row-menu" style={{ top: activePresetActionMenu?.top ?? -4 }}>
-                                                                <button
-                                                                    className="filter-preset-row-action"
-                                                                    onClick={() => {
-                                                                        handleRenamePreset(preset.id, preset.name)
-                                                                        setActivePresetActionMenu(null)
-                                                                    }}
-                                                                >
-                                                                    名前を変更
-                                                                </button>
-                                                                <button
-                                                                    className="filter-preset-row-action danger"
-                                                                    onClick={() => {
-                                                                        onDeleteFilterPreset(preset.id)
-                                                                        if (selectedFilterPresetId === preset.id) setSelectedFilterPresetId('')
-                                                                        setActivePresetActionMenu(null)
-                                                                    }}
-                                                                >
-                                                                    削除
-                                                                </button>
-                                                            </div>
-                                                        )}
                                                     </div>
                                                 </div>
                                             ))
@@ -972,6 +954,35 @@ export function MainHeader({
                                         </button>
                                     </div>
                                 </div>
+                            )}
+                            {activePresetActionMenu && createPortal(
+                                <div
+                                    className="filter-preset-row-menu filter-preset-floating-menu"
+                                    style={{ top: activePresetActionMenu.top, left: activePresetActionMenu.left }}
+                                >
+                                    <button
+                                        className="filter-preset-row-action"
+                                        onClick={() => {
+                                            const preset = filterPresets.find((item) => item.id === activePresetActionMenu.id)
+                                            if (!preset) return
+                                            handleRenamePreset(preset.id, preset.name)
+                                            setActivePresetActionMenu(null)
+                                        }}
+                                    >
+                                        名前を変更
+                                    </button>
+                                    <button
+                                        className="filter-preset-row-action danger"
+                                        onClick={() => {
+                                            onDeleteFilterPreset(activePresetActionMenu.id)
+                                            if (selectedFilterPresetId === activePresetActionMenu.id) setSelectedFilterPresetId('')
+                                            setActivePresetActionMenu(null)
+                                        }}
+                                    >
+                                        削除
+                                    </button>
+                                </div>,
+                                document.body
                             )}
                         </div>
                         <button className="filter-bar-btn filter-action-btn filter-reset-btn" onClick={onResetFilters} title="リセット">
