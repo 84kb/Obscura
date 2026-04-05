@@ -4,7 +4,7 @@ import { useNotification } from '../contexts/NotificationContext'
 import { api } from '../api'
 import { getAuthQuery } from '../utils/auth'
 
-export function useLibrary() {
+export function useLibrary(options?: { showSubfolderContent?: boolean }) {
     const MEDIA_LOAD_TIMEOUT_MS = 60000
     const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([])
     const [tags, setTags] = useState<Tag[]>([])
@@ -1034,8 +1034,39 @@ export function useLibrary() {
         }
 
         let result = [...mediaFiles]
-        const selectedFolderSet = new Set(filterOptions.selectedFolders)
-        const excludedFolderSet = new Set(filterOptions.excludedFolders)
+        const childFolderIdsByParentId = new Map<number, number[]>()
+        folders.forEach((folder) => {
+            const parentId = Number(folder.parentId)
+            if (!Number.isFinite(parentId)) return
+            const children = childFolderIdsByParentId.get(parentId) || []
+            children.push(folder.id)
+            childFolderIdsByParentId.set(parentId, children)
+        })
+
+        const collectFolderIds = (rootFolderId: number) => {
+            const collected = new Set<number>([rootFolderId])
+            if (!options?.showSubfolderContent) {
+                return collected
+            }
+
+            const queue = [rootFolderId]
+            while (queue.length > 0) {
+                const currentId = queue.shift()
+                if (currentId === undefined) continue
+                const childIds = childFolderIdsByParentId.get(currentId) || []
+                childIds.forEach((childId) => {
+                    if (collected.has(childId)) return
+                    collected.add(childId)
+                    queue.push(childId)
+                })
+            }
+
+            return collected
+        }
+
+        const selectedFolderGroups = filterOptions.selectedFolders.map((folderId) => collectFolderIds(folderId))
+        const selectedFolderSet = new Set<number>(selectedFolderGroups.flatMap((group) => Array.from(group)))
+        const excludedFolderSet = new Set<number>(filterOptions.excludedFolders.flatMap((folderId) => Array.from(collectFolderIds(folderId))))
         const selectedRatingSet = new Set(filterOptions.selectedRatings)
         const excludedRatingSet = new Set(filterOptions.excludedRatings)
         const selectedExtensionSet = new Set(filterOptions.selectedExtensions)
@@ -1145,8 +1176,8 @@ export function useLibrary() {
             if (filterOptions.folderFilterMode === 'and') {
                 // AND: すべてのフォルダーを含む
                 result = result.filter(m =>
-                    filterOptions.selectedFolders.every(folderId =>
-                        m.folders?.some(g => g.id === folderId)
+                    selectedFolderGroups.every((folderGroup) =>
+                        m.folders?.some(g => folderGroup.has(g.id))
                     )
                 )
             } else {
@@ -1370,7 +1401,7 @@ export function useLibrary() {
         result = decorated.map(entry => entry.item)
 
         return result
-    }, [mediaFiles, filterOptions, randomSeed])
+    }, [mediaFiles, filterOptions, randomSeed, folders, options?.showSubfolderContent])
 
     // ランダムフィルター選択時にシードを更新（毎回違う順序にするため）
     const prevFilterType = useRef(filterOptions.filterType)

@@ -315,6 +315,14 @@ export default function App() {
 }
 
 function AppContent() {
+    const [viewSettings, setViewSettings] = useState<ViewSettings>(() => {
+        const saved = localStorage.getItem('view_settings')
+        if (saved) {
+            return { ...defaultViewSettings, ...JSON.parse(saved) }
+        }
+        return defaultViewSettings
+    })
+
     const {
         mediaFiles,
         allMediaFiles,
@@ -366,7 +374,7 @@ function AppContent() {
         startupLoading,
         loadMore,
         hasMore
-    } = useLibrary()
+    } = useLibrary({ showSubfolderContent: viewSettings.showSubfolderContent })
     const isStartupOverlayVisible = startupLoading && loadingProgress < 100
 
     const getSearchScopeKey = useCallback((options: Pick<FilterOptions, 'filterType' | 'selectedFolders'>) => {
@@ -1586,14 +1594,6 @@ function AppContent() {
     }, [importMedia, refreshLibrary, addNotification, endInternalMediaDrag, applyExternalDropZone, clearExternalDragState, resolveExternalDropZoneFromNativePosition])
 
     // 表示設定
-    const [viewSettings, setViewSettings] = useState<ViewSettings>(() => {
-        const saved = localStorage.getItem('view_settings')
-        if (saved) {
-            return { ...defaultViewSettings, ...JSON.parse(saved) }
-        }
-        return defaultViewSettings
-    })
-
     // viewSettings保存
     useEffect(() => {
         localStorage.setItem('view_settings', JSON.stringify(viewSettings))

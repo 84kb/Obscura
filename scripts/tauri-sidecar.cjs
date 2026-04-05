@@ -769,6 +769,15 @@ function spawnVisibleDetached(command, args) {
   child.unref()
 }
 
+function spawnPowerShellDetached(command) {
+  const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: false,
+  })
+  child.unref()
+}
+
 function toPowerShellLiteral(value) {
   return `'${String(value || '').replace(/'/g, "''")}'`
 }
@@ -804,10 +813,12 @@ function launchInstaller(installerPath) {
   const ext = path.extname(target).toLowerCase()
   if (isWindows()) {
     if (ext === '.msi') {
-      spawnVisibleDetached('msiexec.exe', ['/i', target])
+      const command = `Start-Process -FilePath 'msiexec.exe' -ArgumentList '/i', ${toPowerShellLiteral(target)}`
+      spawnPowerShellDetached(command)
       return
     }
-    spawnVisibleDetached(target, [])
+    const command = `Start-Process -FilePath ${toPowerShellLiteral(target)} -WorkingDirectory ${toPowerShellLiteral(path.dirname(target))}`
+    spawnPowerShellDetached(command)
     return
   }
   spawnDetached('xdg-open', [target])
