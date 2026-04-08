@@ -6,6 +6,7 @@ import { getAuthQuery } from '../utils/auth'
 
 export function useLibrary(options?: { showSubfolderContent?: boolean }) {
     const MEDIA_LOAD_TIMEOUT_MS = 60000
+    const STARTUP_METADATA_TIMEOUT_MS = 15000
     const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([])
     const [tags, setTags] = useState<Tag[]>([])
     const [tagGroups, setTagGroups] = useState<TagGroup[]>([])
@@ -338,16 +339,14 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
             const mergedFilters = requestFilters && typeof requestFilters === 'object'
                 ? { ...requestFilters }
                 : null
-            const result = activeRemoteLibrary
-                ? await Promise.race([
-                    api.getMediaFiles(targetPage, FULL_FETCH_LIMIT, mergedFilters),
-                    new Promise((_, reject) => {
-                        setTimeout(() => {
-                            reject(new Error(`getMediaFiles timed out after ${MEDIA_LOAD_TIMEOUT_MS}ms`))
-                        }, MEDIA_LOAD_TIMEOUT_MS)
-                    }),
-                ])
-                : await api.getMediaFiles(targetPage, FULL_FETCH_LIMIT, mergedFilters)
+            const result = await Promise.race([
+                api.getMediaFiles(targetPage, FULL_FETCH_LIMIT, mergedFilters),
+                new Promise((_, reject) => {
+                    setTimeout(() => {
+                        reject(new Error(`getMediaFiles timed out after ${MEDIA_LOAD_TIMEOUT_MS}ms`))
+                    }, MEDIA_LOAD_TIMEOUT_MS)
+                }),
+            ])
             if (requestSeq !== loadRequestSeq.current) return
 
             let newFiles = Array.isArray(result) ? result : (result.media || [])
@@ -500,6 +499,15 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
             console.error('Failed to load tag groups:', error)
         }
     }, [])
+
+    const loadStartupMetadata = useCallback(async () => {
+        await Promise.race([
+            Promise.all([loadTags(), loadTagGroups(), loadFolders()]),
+            new Promise<void>((resolve) => {
+                setTimeout(resolve, STARTUP_METADATA_TIMEOUT_MS)
+            }),
+        ])
+    }, [loadTags, loadTagGroups, loadFolders])
 
 
     // フォルダー選択とスキャン
@@ -1126,7 +1134,7 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
 
                 // 拡張子
                 if (targets.extension) {
-                    const ext = m.file_name.split('.').pop()?.toLowerCase() || ''
+                    const ext = m.file_name.includes('.') ? m.file_name.slice(m.file_name.lastIndexOf('.') + 1).toLowerCase() : ''
                     if (ext.includes(query)) match = true
                 }
                 if (match) return true
@@ -1221,7 +1229,7 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
         if ((filterOptions.selectedExtensions && filterOptions.selectedExtensions.length > 0) ||
             (filterOptions.excludedExtensions && filterOptions.excludedExtensions.length > 0)) {
             result = result.filter(m => {
-                const ext = m.file_name.split('.').pop()?.toLowerCase() || ''
+                const ext = m.file_name.includes('.') ? m.file_name.slice(m.file_name.lastIndexOf('.') + 1).toLowerCase() : ''
 
                 // 除外チェック
                 if (excludedExtensionSet.has(ext)) {
@@ -1621,10 +1629,6 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
             }
 
             try {
-                const metadataTask = Promise.all([loadTags(), loadTagGroups(), loadFolders()]).catch((e) => {
-                    console.error('Failed to load metadata in background:', e)
-                })
-
                 if (isFirstLoad || isLibrarySwitchLoad) setLoadingProgress(20)
                 const shouldUseFastPreview = !activeRemoteLibrary && (isFirstLoad || isLibrarySwitchLoad)
                 let loadedCount = await loadMediaFiles(true, false, shouldUseFastPreview ? { __fastPreview: true } : null)
@@ -1651,14 +1655,16 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
                     if (isFirstLoad) {
                         isInitialLoadDone.current = true
                     }
-                    void metadataTask
+                    void loadStartupMetadata().catch((e) => {
+                        console.error('Failed to load startup metadata in background:', e)
+                    })
                     if (shouldUseFastPreview && loadedCount > 0) {
                         void loadMediaFiles(true, true).catch((e) => {
                             console.error('Failed to load full media list after preview:', e)
                         })
                     }
                 } else {
-                    await metadataTask
+                    await loadStartupMetadata()
                 }
             } finally {
                 if (isFirstLoad || isLibrarySwitchLoad) {
@@ -1667,7 +1673,7 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
             }
         }
         initialLoad()
-    }, [initialLibraryResolved, activeLibrary, activeRemoteLibrary, loadMediaFiles, loadTags, loadTagGroups, loadFolders, finalizeStartupLoading])
+    }, [initialLibraryResolved, activeLibrary, activeRemoteLibrary, loadMediaFiles, loadStartupMetadata, finalizeStartupLoading])
 
     useEffect(() => {
         return () => {

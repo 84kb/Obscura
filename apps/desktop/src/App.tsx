@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, type MouseEvent as ReactMouseEvent } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { useNotification } from './contexts/NotificationContext'
 import { LibraryGrid } from './components/LibraryGrid'
@@ -27,9 +27,21 @@ import { toMediaUrl } from './utils/fileUrl'
 import { api } from './api'
 import { initializePluginSystem, loadPluginScripts } from './api/plugin-system'
 import { t as i18nT, AppLanguage } from './i18n'
+import { getBundledReleaseNotes } from './releaseNotes'
 
 const ENABLE_RANDOM_THUMB_PREFETCH = false
 const FILTER_PRESETS_STORAGE_KEY = 'obscura_filter_presets'
+const LAST_LAUNCHED_VERSION_STORAGE_KEY = 'obscura_last_launched_version'
+const SIDEBAR_WIDTH_STORAGE_KEY = 'obscura_sidebar_width'
+const INSPECTOR_WIDTH_STORAGE_KEY = 'obscura_inspector_width'
+const DEFAULT_SIDEBAR_WIDTH = 208
+const DEFAULT_INSPECTOR_WIDTH = 300
+const SIDEBAR_MIN_WIDTH = 180
+const SIDEBAR_MAX_WIDTH = 360
+const INSPECTOR_MIN_WIDTH = 260
+const INSPECTOR_MAX_WIDTH = 520
+const MAIN_CONTENT_MIN_WIDTH = 560
+const PANEL_RESIZE_HANDLE_WIDTH = 8
 const DEFAULT_SEARCH_TARGETS = {
     name: true,
     folder: true,
@@ -46,6 +58,23 @@ type FilterPreset = {
     name: string
     options: FilterOptions
     createdAt: string
+}
+
+type ReleaseNotesModalState = {
+    version: string
+    releaseNotes: string
+}
+
+const clampNumber = (value: number, min: number, max: number): number => {
+    if (!Number.isFinite(value)) return min
+    return Math.min(Math.max(value, min), max)
+}
+
+const readStoredWidth = (storageKey: string, fallback: number, min: number, max: number): number => {
+    if (typeof window === 'undefined') return fallback
+    const raw = Number(localStorage.getItem(storageKey))
+    if (!Number.isFinite(raw)) return fallback
+    return clampNumber(raw, min, max)
 }
 
 const createDefaultFilterOptions = (): FilterOptions => ({
@@ -322,6 +351,19 @@ function AppContent() {
         }
         return defaultViewSettings
     })
+    const [sidebarWidth, setSidebarWidth] = useState(() => readStoredWidth(SIDEBAR_WIDTH_STORAGE_KEY, DEFAULT_SIDEBAR_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH))
+    const [inspectorWidth, setInspectorWidth] = useState(() => readStoredWidth(INSPECTOR_WIDTH_STORAGE_KEY, DEFAULT_INSPECTOR_WIDTH, INSPECTOR_MIN_WIDTH, INSPECTOR_MAX_WIDTH))
+    const [activeResizePanel, setActiveResizePanel] = useState<'sidebar' | 'inspector' | null>(null)
+    const sidebarWidthRef = useRef(sidebarWidth)
+    const inspectorWidthRef = useRef(inspectorWidth)
+    const sidebarShellRef = useRef<HTMLDivElement | null>(null)
+    const inspectorShellRef = useRef<HTMLDivElement | null>(null)
+    const resizeGuideRef = useRef<HTMLDivElement | null>(null)
+    const resizeStartXRef = useRef(0)
+    const resizeStartWidthRef = useRef(0)
+    const resizeCommitStartedAtRef = useRef<number | null>(null)
+    const resizeCommitPanelRef = useRef<'sidebar' | 'inspector' | null>(null)
+    const resizeCommitTimerRefs = useRef<number[]>([])
 
     const {
         mediaFiles,
@@ -377,6 +419,315 @@ function AppContent() {
     } = useLibrary({ showSubfolderContent: viewSettings.showSubfolderContent })
     const isStartupOverlayVisible = startupLoading && loadingProgress < 100
 
+    const reconcilePanelWidths = useCallback((nextSidebarWidth: number, nextInspectorWidth: number, viewportWidth = window.innerWidth) => {
+        let resolvedSidebarWidth = clampNumber(nextSidebarWidth, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH)
+        let resolvedInspectorWidth = clampNumber(nextInspectorWidth, INSPECTOR_MIN_WIDTH, INSPECTOR_MAX_WIDTH)
+        const visibleSidebar = viewSettings.showSidebar
+        const visibleInspector = viewSettings.showInspector
+        const visibleHandleWidth =
+            (visibleSidebar ? PANEL_RESIZE_HANDLE_WIDTH : 0) +
+            (visibleInspector ? PANEL_RESIZE_HANDLE_WIDTH : 0)
+        const availableForPanels = viewportWidth - MAIN_CONTENT_MIN_WIDTH - visibleHandleWidth
+
+        if (availableForPanels <= 0) {
+            return {
+                sidebarWidth: resolvedSidebarWidth,
+                inspectorWidth: resolvedInspectorWidth
+            }
+        }
+
+        let totalVisibleWidth = (visibleSidebar ? resolvedSidebarWidth : 0) + (visibleInspector ? resolvedInspectorWidth : 0)
+        let overflow = totalVisibleWidth - availableForPanels
+
+        if (overflow > 0 && visibleInspector) {
+            const reducibleInspectorWidth = resolvedInspectorWidth - INSPECTOR_MIN_WIDTH
+            const reduction = Math.min(overflow, Math.max(0, reducibleInspectorWidth))
+            resolvedInspectorWidth -= reduction
+            overflow -= reduction
+        }
+
+        if (overflow > 0 && visibleSidebar) {
+            const reducibleSidebarWidth = resolvedSidebarWidth - SIDEBAR_MIN_WIDTH
+            const reduction = Math.min(overflow, Math.max(0, reducibleSidebarWidth))
+            resolvedSidebarWidth -= reduction
+        }
+
+        return {
+            sidebarWidth: resolvedSidebarWidth,
+            inspectorWidth: resolvedInspectorWidth
+        }
+    }, [viewSettings.showInspector, viewSettings.showSidebar])
+
+    useEffect(() => {
+        sidebarWidthRef.current = sidebarWidth
+    }, [sidebarWidth])
+
+    useEffect(() => {
+        inspectorWidthRef.current = inspectorWidth
+    }, [inspectorWidth])
+
+    useEffect(() => {
+        return () => {
+            resizeCommitTimerRefs.current.forEach((timerId) => window.clearTimeout(timerId))
+            resizeCommitTimerRefs.current = []
+        }
+    }, [])
+
+    useEffect(() => {
+        if (typeof window === 'undefined' || typeof PerformanceObserver === 'undefined') {
+            return
+        }
+
+        let observer: PerformanceObserver | null = null
+        try {
+            observer = new PerformanceObserver((list) => {
+                for (const entry of list.getEntries()) {
+                    console.warn('[Perf] longtask', {
+                        name: entry.name,
+                        startTime: Math.round(entry.startTime),
+                        duration: Math.round(entry.duration)
+                    })
+                }
+            })
+            observer.observe({ entryTypes: ['longtask'] as any })
+        } catch {
+            observer = null
+        }
+
+        let expected = performance.now() + 1000
+        const intervalId = window.setInterval(() => {
+            const now = performance.now()
+            const drift = now - expected
+            if (drift > 250) {
+                console.warn('[Perf] timer drift', {
+                    driftMs: Math.round(drift),
+                    now: Math.round(now)
+                })
+            }
+            expected = now + 1000
+        }, 1000)
+
+        return () => {
+            window.clearInterval(intervalId)
+            observer?.disconnect()
+        }
+    }, [])
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+
+        let rafId = 0
+        let lastFrameTime = performance.now()
+
+        const tick = (now: number) => {
+            const delta = now - lastFrameTime
+            if (delta > 250) {
+                console.warn('[Perf] raf gap', {
+                    gapMs: Math.round(delta),
+                    now: Math.round(now)
+                })
+            }
+            lastFrameTime = now
+            rafId = window.requestAnimationFrame(tick)
+        }
+
+        rafId = window.requestAnimationFrame(tick)
+        return () => {
+            window.cancelAnimationFrame(rafId)
+        }
+    }, [])
+
+    useEffect(() => {
+        if (resizeCommitStartedAtRef.current == null) return
+        console.log('[PanelResize] sidebar state applied', {
+            width: sidebarWidth,
+            elapsedMs: Math.round(performance.now() - resizeCommitStartedAtRef.current),
+            panel: resizeCommitPanelRef.current
+        })
+    }, [sidebarWidth])
+
+    useEffect(() => {
+        if (resizeCommitStartedAtRef.current == null) return
+        console.log('[PanelResize] inspector state applied', {
+            width: inspectorWidth,
+            elapsedMs: Math.round(performance.now() - resizeCommitStartedAtRef.current),
+            panel: resizeCommitPanelRef.current
+        })
+    }, [inspectorWidth])
+
+    const applyPanelWidthsToDom = useCallback((nextSidebarWidth: number, nextInspectorWidth: number) => {
+        if (sidebarShellRef.current) {
+            const cssWidth = `${nextSidebarWidth}px`
+            sidebarShellRef.current.style.width = cssWidth
+            sidebarShellRef.current.style.flexBasis = cssWidth
+            sidebarShellRef.current.style.setProperty('--sidebar-width', cssWidth)
+        }
+        if (inspectorShellRef.current) {
+            const cssWidth = `${nextInspectorWidth}px`
+            inspectorShellRef.current.style.width = cssWidth
+            inspectorShellRef.current.style.flexBasis = cssWidth
+            inspectorShellRef.current.style.setProperty('--right-sidebar-width', cssWidth)
+        }
+    }, [])
+
+    const showResizeGuide = useCallback((clientX: number) => {
+        if (!resizeGuideRef.current) return
+        resizeGuideRef.current.style.opacity = '1'
+        resizeGuideRef.current.style.transform = `translateX(${Math.round(clientX)}px)`
+    }, [])
+
+    const hideResizeGuide = useCallback(() => {
+        if (!resizeGuideRef.current) return
+        resizeGuideRef.current.style.opacity = '0'
+    }, [])
+
+    useEffect(() => {
+        applyPanelWidthsToDom(sidebarWidth, inspectorWidth)
+    }, [applyPanelWidthsToDom, inspectorWidth, sidebarWidth])
+
+    useEffect(() => {
+        const startedAt = performance.now()
+        localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth))
+        console.log('[PanelResize] sidebar width persisted', {
+            width: sidebarWidth,
+            elapsedMs: Math.round(performance.now() - startedAt),
+            sinceCommitMs: resizeCommitStartedAtRef.current == null
+                ? null
+                : Math.round(performance.now() - resizeCommitStartedAtRef.current)
+        })
+    }, [sidebarWidth])
+
+    useEffect(() => {
+        const startedAt = performance.now()
+        localStorage.setItem(INSPECTOR_WIDTH_STORAGE_KEY, String(inspectorWidth))
+        console.log('[PanelResize] inspector width persisted', {
+            width: inspectorWidth,
+            elapsedMs: Math.round(performance.now() - startedAt),
+            sinceCommitMs: resizeCommitStartedAtRef.current == null
+                ? null
+                : Math.round(performance.now() - resizeCommitStartedAtRef.current)
+        })
+    }, [inspectorWidth])
+
+    useEffect(() => {
+        const handleWindowResize = () => {
+            const reconciled = reconcilePanelWidths(sidebarWidthRef.current, inspectorWidthRef.current)
+            if (reconciled.sidebarWidth !== sidebarWidthRef.current) {
+                setSidebarWidth(reconciled.sidebarWidth)
+            }
+            if (reconciled.inspectorWidth !== inspectorWidthRef.current) {
+                setInspectorWidth(reconciled.inspectorWidth)
+            }
+        }
+
+        handleWindowResize()
+        window.addEventListener('resize', handleWindowResize)
+        return () => {
+            window.removeEventListener('resize', handleWindowResize)
+        }
+    }, [reconcilePanelWidths])
+
+    useEffect(() => {
+        const reconciled = reconcilePanelWidths(sidebarWidthRef.current, inspectorWidthRef.current)
+        if (reconciled.sidebarWidth !== sidebarWidthRef.current) {
+            setSidebarWidth(reconciled.sidebarWidth)
+        }
+        if (reconciled.inspectorWidth !== inspectorWidthRef.current) {
+            setInspectorWidth(reconciled.inspectorWidth)
+        }
+    }, [reconcilePanelWidths])
+
+    useEffect(() => {
+        if (!activeResizePanel) return
+
+        const handlePointerMove = (event: MouseEvent) => {
+            if (activeResizePanel === 'sidebar') {
+                const nextWidth = resizeStartWidthRef.current + (event.clientX - resizeStartXRef.current)
+                const reconciled = reconcilePanelWidths(nextWidth, inspectorWidthRef.current)
+                sidebarWidthRef.current = reconciled.sidebarWidth
+                inspectorWidthRef.current = reconciled.inspectorWidth
+                showResizeGuide(reconciled.sidebarWidth + PANEL_RESIZE_HANDLE_WIDTH / 2)
+                return
+            }
+
+            const nextWidth = resizeStartWidthRef.current + (resizeStartXRef.current - event.clientX)
+            const reconciled = reconcilePanelWidths(sidebarWidthRef.current, nextWidth)
+            sidebarWidthRef.current = reconciled.sidebarWidth
+            inspectorWidthRef.current = reconciled.inspectorWidth
+            showResizeGuide(window.innerWidth - reconciled.inspectorWidth - PANEL_RESIZE_HANDLE_WIDTH / 2)
+        }
+
+        const handlePointerUp = () => {
+            const commitStartedAt = performance.now()
+            resizeCommitStartedAtRef.current = commitStartedAt
+            resizeCommitPanelRef.current = activeResizePanel
+            resizeCommitTimerRefs.current.forEach((timerId) => window.clearTimeout(timerId))
+            resizeCommitTimerRefs.current = [250, 1000, 2000, 4000, 8000].map((delayMs) => (
+                window.setTimeout(() => {
+                    console.log('[PanelResize] post-commit checkpoint', {
+                        delayMs,
+                        elapsedMs: Math.round(performance.now() - commitStartedAt),
+                        panel: activeResizePanel,
+                        sidebarWidth: sidebarWidthRef.current,
+                        inspectorWidth: inspectorWidthRef.current,
+                        activeFilterType: filterOptions.filterType,
+                        mediaCount: mediaFiles.length,
+                        showSidebar: viewSettings.showSidebar,
+                        showInspector: viewSettings.showInspector
+                    })
+                }, delayMs)
+            ))
+
+            console.log('[PanelResize] commit start', {
+                panel: activeResizePanel,
+                sidebarWidth: sidebarWidthRef.current,
+                inspectorWidth: inspectorWidthRef.current,
+                activeFilterType: filterOptions.filterType,
+                mediaCount: mediaFiles.length,
+                showSidebar: viewSettings.showSidebar,
+                showInspector: viewSettings.showInspector
+            })
+
+            const stateApplyStartedAt = performance.now()
+            setSidebarWidth(sidebarWidthRef.current)
+            setInspectorWidth(inspectorWidthRef.current)
+            console.log('[PanelResize] state setters queued', {
+                panel: activeResizePanel,
+                elapsedMs: Math.round(performance.now() - stateApplyStartedAt),
+                sidebarWidth: sidebarWidthRef.current,
+                inspectorWidth: inspectorWidthRef.current
+            })
+            setActiveResizePanel(null)
+            document.body.classList.remove('panel-resize-active')
+            hideResizeGuide()
+        }
+
+        window.addEventListener('mousemove', handlePointerMove)
+        window.addEventListener('mouseup', handlePointerUp)
+        window.addEventListener('mouseleave', handlePointerUp)
+        document.body.classList.add('panel-resize-active')
+
+        return () => {
+            window.removeEventListener('mousemove', handlePointerMove)
+            window.removeEventListener('mouseup', handlePointerUp)
+            window.removeEventListener('mouseleave', handlePointerUp)
+            document.body.classList.remove('panel-resize-active')
+            hideResizeGuide()
+        }
+    }, [activeResizePanel, filterOptions.filterType, hideResizeGuide, mediaFiles.length, reconcilePanelWidths, showResizeGuide, viewSettings.showInspector, viewSettings.showSidebar])
+
+    const startPanelResize = useCallback((panel: 'sidebar' | 'inspector', event: ReactMouseEvent<HTMLDivElement>) => {
+        event.preventDefault()
+        resizeStartXRef.current = event.clientX
+        resizeStartWidthRef.current = panel === 'sidebar' ? sidebarWidthRef.current : inspectorWidthRef.current
+        setActiveResizePanel(panel)
+        if (panel === 'sidebar') {
+            showResizeGuide(sidebarWidthRef.current + PANEL_RESIZE_HANDLE_WIDTH / 2)
+        } else {
+            showResizeGuide(window.innerWidth - inspectorWidthRef.current - PANEL_RESIZE_HANDLE_WIDTH / 2)
+        }
+    }, [showResizeGuide])
+
     const getSearchScopeKey = useCallback((options: Pick<FilterOptions, 'filterType' | 'selectedFolders'>) => {
         const selectedFolders = Array.isArray(options.selectedFolders) ? options.selectedFolders : []
         if (selectedFolders.length > 0) {
@@ -420,6 +771,13 @@ function AppContent() {
     }, [clientConfig?.language])
     const uiLanguage: AppLanguage = clientConfig?.language === 'en' ? 'en' : 'ja'
     const tr = useCallback((ja: string, en: string) => (uiLanguage === 'en' ? en : ja), [uiLanguage])
+    const dragDropImportOptions = useMemo(
+        () => ({
+            deleteSource: Boolean(clientConfig?.dragDropImportMoveSource),
+            importSource: 'drag-drop',
+        }),
+        [clientConfig?.dragDropImportMoveSource],
+    )
     useEffect(() => {
         const suppressContextMenu = (e: MouseEvent) => {
             e.preventDefault()
@@ -874,6 +1232,7 @@ function AppContent() {
     })
     const [showLibraryModal, setShowLibraryModal] = useState(false)
     const [isDragging, setIsDragging] = useState(false)
+    const [releaseNotesModal, setReleaseNotesModal] = useState<ReleaseNotesModalState | null>(null)
     const [externalDropFolderId, setExternalDropFolderId] = useState<number | null>(null)
     const isInternalDrag = useRef(false)
     const internalDraggedMediaIdsRef = useRef<number[]>([])
@@ -885,6 +1244,10 @@ function AppContent() {
     const lastDragActivityAt = useRef(0)
     const [gridSize, setGridSize] = useState<number>(settings.gridSize)
     const [viewMode, setViewMode] = useState<'grid' | 'list'>(settings.viewMode)
+    const scrollTopByScopeRef = useRef<Record<string, number>>({})
+    const currentLibraryScrollTopRef = useRef(0)
+    const [libraryScrollRestoreTop, setLibraryScrollRestoreTop] = useState(0)
+    const [libraryScrollRestoreKey, setLibraryScrollRestoreKey] = useState('initial')
 
     useEffect(() => {
         localStorage.setItem(FILTER_PRESETS_STORAGE_KEY, JSON.stringify(filterPresets))
@@ -1394,11 +1757,12 @@ function AppContent() {
                     const targetFolder = currentDropZone.type === 'folder' && typeof currentDropZone.folderId === 'number'
                         ? folders.find((folder) => Number(folder.id) === Number(currentDropZone.folderId)) || null
                         : null
+                    const effectiveImportOptions = { ...dragDropImportOptions, ...(options ?? {}) }
                     const importTask = currentDropZone.type === 'folder' && typeof currentDropZone.folderId === 'number'
                         ? handleSmartImport(newFilePaths, async (media) => {
                             await addFolderToMedia(media.id, currentDropZone.folderId!, targetFolder)
-                        }, options)
-                        : handleSmartImport(newFilePaths, undefined, options)
+                        }, effectiveImportOptions)
+                        : handleSmartImport(newFilePaths, undefined, effectiveImportOptions)
                     importTask.catch(e => console.error('Import failed via trigger:', e))
                 } else {
                     console.log('[App] All files filtered out as existing in library')
@@ -1514,6 +1878,7 @@ function AppContent() {
         let unsubscribeNativeDragOver: (() => void) | undefined
         let unsubscribeNativeDragCancel: (() => void) | undefined
         let unsubscribeNativeDragDrop: (() => void) | undefined
+        let unsubscribeMetadataRefreshDebug: (() => void) | undefined
 
         if (api && api.on) {
             unsubscribeTrigger = api.on('trigger-import', (_e: any, payload: any) => handleTriggerImport(null, payload))
@@ -1578,6 +1943,9 @@ function AppContent() {
                     }
                 }
             })
+            unsubscribeMetadataRefreshDebug = api.on('metadata-refresh-debug', (_e: any, payload: any) => {
+                console.log('[MetadataRefresh][Sidecar]', payload)
+            })
         }
 
         // クリーンアップ
@@ -1590,8 +1958,9 @@ function AppContent() {
             if (unsubscribeNativeDragOver) unsubscribeNativeDragOver()
             if (unsubscribeNativeDragCancel) unsubscribeNativeDragCancel()
             if (unsubscribeNativeDragDrop) unsubscribeNativeDragDrop()
+            if (unsubscribeMetadataRefreshDebug) unsubscribeMetadataRefreshDebug()
         }
-    }, [importMedia, refreshLibrary, addNotification, endInternalMediaDrag, applyExternalDropZone, clearExternalDragState, resolveExternalDropZoneFromNativePosition])
+    }, [importMedia, refreshLibrary, addNotification, endInternalMediaDrag, applyExternalDropZone, clearExternalDragState, resolveExternalDropZoneFromNativePosition, dragDropImportOptions])
 
     // 表示設定
     // viewSettings保存
@@ -1607,6 +1976,36 @@ function AppContent() {
         setSettings(prev => ({ ...prev, gridSize, viewMode }))
     }, [gridSize, viewMode])
 
+    const currentScrollScopeKey = getSearchScopeKey({
+        filterType: filterOptions.filterType,
+        selectedFolders: filterOptions.selectedFolders,
+    })
+    const previousScrollScopeKeyRef = useRef(currentScrollScopeKey)
+
+    const saveCurrentLibraryScrollPosition = useCallback(() => {
+        scrollTopByScopeRef.current[currentScrollScopeKey] = currentLibraryScrollTopRef.current
+    }, [currentScrollScopeKey])
+
+    const restoreCurrentLibraryScrollPosition = useCallback(() => {
+        const nextTop = scrollTopByScopeRef.current[currentScrollScopeKey] ?? 0
+        currentLibraryScrollTopRef.current = nextTop
+        setLibraryScrollRestoreTop(nextTop)
+        setLibraryScrollRestoreKey(`${currentScrollScopeKey}:${Date.now()}`)
+    }, [currentScrollScopeKey])
+
+    useEffect(() => {
+        const previousScopeKey = previousScrollScopeKeyRef.current
+        if (previousScopeKey === currentScrollScopeKey) return
+
+        scrollTopByScopeRef.current[previousScopeKey] = currentLibraryScrollTopRef.current
+
+        const nextTop = scrollTopByScopeRef.current[currentScrollScopeKey] ?? 0
+        currentLibraryScrollTopRef.current = nextTop
+        setLibraryScrollRestoreTop(nextTop)
+        setLibraryScrollRestoreKey(`${currentScrollScopeKey}:${Date.now()}`)
+        previousScrollScopeKeyRef.current = currentScrollScopeKey
+    }, [currentScrollScopeKey])
+
     // 設定保存
     useEffect(() => {
         localStorage.setItem('app_settings', JSON.stringify(settings))
@@ -1616,6 +2015,40 @@ function AppContent() {
         if (startupLoading) return
         reloadSettings()
     }, [startupLoading, reloadSettings])
+
+    useEffect(() => {
+        let cancelled = false
+
+        const maybeShowReleaseNotes = async () => {
+            try {
+                const currentVersion = String(await api.getAppVersion()).trim()
+                if (!currentVersion) return
+
+                const previousVersion = localStorage.getItem(LAST_LAUNCHED_VERSION_STORAGE_KEY)?.trim() || ''
+                localStorage.setItem(LAST_LAUNCHED_VERSION_STORAGE_KEY, currentVersion)
+
+                if (!previousVersion || previousVersion === currentVersion) {
+                    return
+                }
+
+                const releaseNotes = getBundledReleaseNotes(currentVersion, uiLanguage).trim()
+                if (cancelled) return
+
+                setReleaseNotesModal({
+                    version: currentVersion,
+                    releaseNotes,
+                })
+            } catch (error) {
+                console.warn('Failed to prepare release notes modal:', error)
+            }
+        }
+
+        void maybeShowReleaseNotes()
+
+        return () => {
+            cancelled = true
+        }
+    }, [uiLanguage])
 
     // 重複検知・解決用ステート
     const [duplicateQueue, setDuplicateQueue] = useState<{ newMedia: MediaFile; existingMedia: MediaFile; onResolve?: (media: MediaFile) => void }[]>([])
@@ -1836,15 +2269,17 @@ function AppContent() {
     }, [mediaFiles, lastSelectedId])
 
     const handleMediaDoubleClick = useCallback((media: MediaFile) => {
+        saveCurrentLibraryScrollPosition()
         setPlayingMedia(media)
         setSelectedMediaIds([media.id]) // 再生時も単一選択に
         setLastSelectedId(media.id)
         updateLastPlayed(media.id)
-    }, [updateLastPlayed])
+    }, [saveCurrentLibraryScrollPosition, updateLastPlayed])
 
     const handleClosePlayer = useCallback(() => {
         setPlayingMedia(null)
-    }, [])
+        restoreCurrentLibraryScrollPosition()
+    }, [restoreCurrentLibraryScrollPosition])
 
     const handleCloseInspector = () => {
         setSelectedMediaIds([])
@@ -2160,7 +2595,7 @@ function AppContent() {
             // 外部ドラッグ：Smartインポートを使用して解決
             await handleSmartImport(filePaths, async (media) => {
                 await addFolderToMedia(media.id, folderId, targetFolder)
-            })
+            }, dragDropImportOptions)
             // ライブラリをリフレッシュ (addFolderToMedia内でloadMediaFilesしていれば不要だが念のため)
             await refreshLibrary()
         }
@@ -2207,6 +2642,12 @@ function AppContent() {
             duration: 0
         })
 
+        const startedAt = performance.now()
+        console.log('[MetadataRefresh] request start', {
+            count: targetIds.length,
+            ids: targetIds,
+        })
+
         try {
             if (activeRemoteLibrary) {
                 // Future: Remote API call
@@ -2222,8 +2663,17 @@ function AppContent() {
                 message: tr('Metadata updated', 'Metadata updated'),
                 duration: 3000
             })
-            refreshLibrary()
+            await reloadLibrary()
+            console.log('[MetadataRefresh] request complete', {
+                count: targetIds.length,
+                elapsedMs: Math.round(performance.now() - startedAt),
+            })
         } catch (e: any) {
+            console.error('[MetadataRefresh] request failed', {
+                count: targetIds.length,
+                elapsedMs: Math.round(performance.now() - startedAt),
+                error: e?.message || String(e),
+            })
             removeNotification(notificationId)
             addNotification({
                 type: 'error',
@@ -2397,6 +2847,9 @@ function AppContent() {
                         folders={folders}
                         onRefreshLibrary={handleRefreshLibrary}
                         onReload={reloadLibrary}
+                        showSidebar={viewSettings.showSidebar}
+                        onToggleSidebar={() => handleUpdateViewSettings({ showSidebar: !viewSettings.showSidebar })}
+                        onOpenSettings={() => setShowSettingsModal(true)}
                     />
                     <div className={`library-drop-zone ${isDragging ? 'dragging' : ''}`} data-library-drop-zone="true">
                     {/* サブフォルダー表示 */}
@@ -2408,7 +2861,7 @@ function AppContent() {
                             }}
                             getMediaCount={(folderId) => {
                                 // TODO: 実際のメディアカウントを計算
-                                return mediaFiles.filter(m => m.folders?.some(f => f.id === folderId)).length
+                                return allMediaFiles.filter(m => !m.is_deleted && m.folders?.some(f => f.id === folderId)).length
                             }}
                         />
                     )}
@@ -2456,6 +2909,12 @@ function AppContent() {
                             onRenameCancel={() => setRenamingMediaId(null)}
                             onLoadMore={loadMore}
                             hasMore={hasMore}
+                            initialScrollTop={libraryScrollRestoreTop}
+                            scrollRestoreKey={libraryScrollRestoreKey}
+                            onScrollPositionChange={(scrollTop) => {
+                                currentLibraryScrollTopRef.current = scrollTop
+                                scrollTopByScopeRef.current[currentScrollScopeKey] = scrollTop
+                            }}
                         />
                     ) : (
                         <LibraryList
@@ -2476,6 +2935,12 @@ function AppContent() {
                             hasMore={hasMore}
                             onInternalDragStart={beginInternalMediaDrag}
                             onInternalDragEnd={endInternalMediaDrag}
+                            initialScrollTop={libraryScrollRestoreTop}
+                            scrollRestoreKey={libraryScrollRestoreKey}
+                            onScrollPositionChange={(scrollTop) => {
+                                currentLibraryScrollTopRef.current = scrollTop
+                                scrollTopByScopeRef.current[currentScrollScopeKey] = scrollTop
+                            }}
                         />
                     )}
                     </div>
@@ -2502,9 +2967,25 @@ function AppContent() {
             .filter(Boolean) as MediaFile[]
     }, [selectedMediaIds, mediaFiles])
 
+    const sidebarShellStyle = useMemo(() => ({
+        width: `${sidebarWidth}px`,
+        flexBasis: `${sidebarWidth}px`,
+        ['--sidebar-width' as any]: `${sidebarWidth}px`
+    }), [sidebarWidth])
+
+    const inspectorShellStyle = useMemo(() => ({
+        width: `${inspectorWidth}px`,
+        flexBasis: `${inspectorWidth}px`,
+        ['--right-sidebar-width' as any]: `${inspectorWidth}px`
+    }), [inspectorWidth])
+
     return (
         <div className="app">
-            <Sidebar
+            <div ref={resizeGuideRef} className="panel-resize-guide" aria-hidden="true" />
+            {viewSettings.showSidebar && (
+                <>
+                    <div ref={sidebarShellRef} className="panel-shell sidebar-shell" style={sidebarShellStyle}>
+                        <Sidebar
                 language={clientConfig?.language === 'en' ? 'en' : 'ja'}
                 filterOptions={filterOptions}
                 onFilterChange={(options) => {
@@ -2531,6 +3012,7 @@ function AppContent() {
                     switchToRemoteLibrary(lib)
                 }}
                 onOpenSettings={() => setShowSettingsModal(true)}
+                onToggleSidebar={() => handleUpdateViewSettings({ showSidebar: false })}
                 hasActiveLibrary={hasActiveLibrary}
                 onRefreshFolders={loadFolders}
                 onDropFileOnFolder={handleDropOnFolder}
@@ -2541,8 +3023,18 @@ function AppContent() {
                     // 少し遅延させてクリア（ドロップ処理との競合を防ぐ）
                     endInternalMediaDrag()
                 }}
-                itemCounts={sidebarCounts}
-            />
+                            itemCounts={sidebarCounts}
+                        />
+                    </div>
+                    <div
+                        className={`panel-resize-handle sidebar-resize-handle ${activeResizePanel === 'sidebar' ? 'active' : ''}`}
+                        onMouseDown={(event) => startPanelResize('sidebar', event)}
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label="Resize sidebar"
+                    />
+                </>
+            )}
 
             <main className={`main-content ${playingMedia ? 'is-playing' : ''}`} onClick={(e) => {
                 // グリッドの空きスペースをクリックしたら選択解除
@@ -2571,7 +3063,16 @@ function AppContent() {
             </main>
 
             {viewSettings.showInspector && (
-                <Inspector
+                <>
+                    <div
+                        className={`panel-resize-handle inspector-resize-handle ${activeResizePanel === 'inspector' ? 'active' : ''}`}
+                        onMouseDown={(event) => startPanelResize('inspector', event)}
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label="Resize inspector"
+                    />
+                    <div ref={inspectorShellRef} className="panel-shell inspector-shell" style={inspectorShellStyle}>
+                        <Inspector
                     language={uiLanguage}
                     media={inspectorMedia}
                     playingMedia={playingMedia}
@@ -2599,6 +3100,7 @@ function AppContent() {
                     contextTitle={getHeaderTitle()}
                     enableRichText={settings.enableRichText}
                     onPlay={(media) => {
+                        saveCurrentLibraryScrollPosition()
                         setPlayingMedia(media)
                         setSelectedMediaIds([media.id])
                         setLastSelectedId(media.id)
@@ -2613,8 +3115,10 @@ function AppContent() {
                     onClose={handleCloseInspector}
                     onRenameMedia={renameMedia}
                     onUpdateRating={updateRating}
-                    sharedUsers={sharedUsers}
-                />
+                            sharedUsers={sharedUsers}
+                        />
+                    </div>
+                </>
             )}
 
             {showLibraryModal && (
@@ -2636,6 +3140,27 @@ function AppContent() {
                     }}
                     onClose={() => setShowSettingsModal(false)}
                 />
+            )}
+
+            {releaseNotesModal && (
+                <div className="app-modal-overlay" onClick={() => setReleaseNotesModal(null)}>
+                    <div className="app-modal release-notes-modal" onClick={(e) => e.stopPropagation()}>
+                        <div className="app-modal-header">
+                            <h3>{tr('アップデート完了', 'Update Complete')}</h3>
+                        </div>
+                        <div className="app-modal-body">
+                            <p>{tr(`バージョン ${releaseNotesModal.version} に更新されました。`, `Updated to version ${releaseNotesModal.version}.`)}</p>
+                            <div className="release-notes-content">
+                                {releaseNotesModal.releaseNotes || tr('変更履歴は取得できませんでした。', 'Release notes could not be loaded.')}
+                            </div>
+                        </div>
+                        <div className="app-modal-footer">
+                            <button className="btn btn-primary" onClick={() => setReleaseNotesModal(null)}>
+                                {tr('閉じる', 'Close')}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
 
             {/* コンテキストメニュー */}

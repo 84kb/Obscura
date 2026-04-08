@@ -59,6 +59,7 @@
 
 .context-menu-item.checked {
     color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
 }
 
 .context-menu-item svg {
@@ -101,4 +102,27 @@
     opacity: 1;
     visibility: visible;
     transform: translateX(0);
+}
+
+.context-menu-folder-item {
+    gap: 10px;
+}
+
+.context-menu-checkbox {
+    width: 14px;
+    height: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    color: transparent;
+    flex: 0 0 14px;
+}
+
+.context-menu-checkbox.checked {
+    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 18%, transparent);
+    color: var(--primary);
 }

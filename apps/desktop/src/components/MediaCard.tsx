@@ -63,12 +63,12 @@ export function MediaCard({
         pendingThumbnailLoadRef.current?.cancel()
         pendingThumbnailLoadRef.current = null
 
-        const cacheKey = `${media.id}|${thumbnailMode}|${width}|${media.thumbnail_path || ''}`
+        const cacheKey = `${media.id}|${thumbnailMode}|${media.thumbnail_path || ''}`
         const cachedUrl = thumbnailUrlCache.get(cacheKey)
 
         if (cachedUrl) {
             setThumbnailUrl(cachedUrl)
-            setIsLoaded(true)
+            setIsLoaded(false)
             return
         }
 
@@ -100,7 +100,7 @@ export function MediaCard({
             pendingThumbnailLoadRef.current?.cancel()
             pendingThumbnailLoadRef.current = null
         }
-    }, [media.id, media.thumbnail_path, thumbnailMode, width, priorityLoad])
+    }, [media.id, media.thumbnail_path, thumbnailMode, priorityLoad])
 
     // 繝輔ぃ繧､繝ｫ繧ｿ繧､繝励↓蠢懊§縺溘い繧､繧ｳ繝ｳ
     const getIcon = () => {
@@ -328,14 +328,11 @@ export function MediaCard({
                         {...imgPriorityProps}
                         onLoad={handleThumbnailLoad}
                         onError={handleThumbnailError}
-                        onDragStart={(e) => e.preventDefault()}
-                        style={{
-                            opacity: 1,
-                            transition: 'opacity 0.3s ease'
-                        }}
+                    onDragStart={(e) => e.preventDefault()}
+                        className={`media-card-thumbnail-image ${isLoaded ? 'loaded' : ''}`}
                     />
                 ) : (
-                    <div className="media-card-placeholder" style={{ opacity: 1 }}>
+                    <div className="media-card-placeholder">
                         {!media.thumbnail_path && getIcon()}
                     </div>
                 )}
@@ -395,11 +392,10 @@ export function MediaCard({
                                     }
 
                                     // 諡｡蠑ｵ蟄舌ｒ蠕ｩ蜈・＠縺ｦ菫晏ｭ・
-                                    const displayValue = media.title || media.file_name
-                                    const lastDotIndex = displayValue.lastIndexOf('.')
+                                    const lastDotIndex = media.file_name.lastIndexOf('.')
                                     let newName = baseName
                                     if (lastDotIndex > 0) {
-                                        const ext = displayValue.substring(lastDotIndex)
+                                        const ext = media.file_name.substring(lastDotIndex)
                                         newName = baseName + ext
                                     }
 

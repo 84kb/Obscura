@@ -30,6 +30,44 @@ body.dragging-file .main-header {
     gap: 4px;
 }
 
+.header-sidebar-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-right: 2px;
+}
+
+.header-sidebar-btn {
+    width: 28px;
+    height: 28px;
+    justify-content: center;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--bg-card), transparent 10%);
+    border: 1px solid var(--border);
+}
+
+.header-window-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 6px;
+}
+
+.header-window-btn {
+    width: 28px;
+    height: 28px;
+    justify-content: center;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--bg-card), transparent 10%);
+    border: 1px solid var(--border);
+}
+
+.header-window-btn.close-btn:hover {
+    background: #e81123;
+    border-color: #e81123;
+    color: #fff;
+}
+
 .icon-btn {
     background: transparent;
     border: none;

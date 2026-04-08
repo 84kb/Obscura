@@ -65,10 +65,15 @@ function getFallbackConfig() {
         remoteLibraries: [],
         myUserToken: undefined,
         autoImport: { enabled: false, watchPaths: [] },
+        dragDropImportMoveSource: false,
         thumbnailMode: 'speed' as const,
         discordRichPresenceEnabled: false,
         libraryBackupRetention: 5,
         enableF12DeveloperTools: false,
+        audioDevice: 'auto',
+        exclusiveMode: false,
+        useMpvAudio: false,
+        enableMpvForVideo: false,
         libraryViewSettings: {},
     }
 }
@@ -99,6 +104,9 @@ function normalizeClientConfig(config: any) {
             ...autoImport,
             watchPaths,
         },
+        dragDropImportMoveSource: typeof config?.dragDropImportMoveSource === 'boolean'
+            ? config.dragDropImportMoveSource
+            : fallback.dragDropImportMoveSource,
         libraryViewSettings,
         localLibraries: normalizedLocalLibraries,
         activeLibraryPath: normalizedActiveLibraryPath,
@@ -1544,6 +1552,23 @@ export function initTauriDesktopBridge(): void {
                 return { available: false, message: error?.message || 'update check failed' }
             }
         },
+        getReleaseNotes: async (version?: string) => {
+            try {
+                const result = await invoke<any>('sidecar_request', {
+                    method: 'get_release_notes',
+                    params: { version: version || '' },
+                })
+                return {
+                    version: typeof result?.version === 'string' ? result.version : (version || ''),
+                    releaseNotes: typeof result?.releaseNotes === 'string' ? result.releaseNotes : '',
+                }
+            } catch {
+                return {
+                    version: version || '',
+                    releaseNotes: '',
+                }
+            }
+        },
         downloadUpdate: async () => {
             try {
                 const result = await invoke<any>('sidecar_request', {
@@ -1689,20 +1714,20 @@ export function initTauriDesktopBridge(): void {
             }
 
             try {
-                const list = await browserDevices()
-                if (list.length > 0) {
-                    return list
-                }
-            } catch {
-                // Fallback to sidecar below.
-            }
-
-            try {
                 const result = await invoke<any>('sidecar_request', {
                     method: 'audio_get_devices',
                     params: null,
                 })
                 const list = normalizeAudioDevices(Array.isArray(result) ? result : [])
+                if (list.length > 0) {
+                    return list
+                }
+            } catch {
+                // Fallback below.
+            }
+
+            try {
+                const list = await browserDevices()
                 if (list.length > 0) {
                     return list
                 }

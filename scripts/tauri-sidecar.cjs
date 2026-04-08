@@ -34,6 +34,7 @@ let pendingUpdateInstallerPath = null
 let discordRpcModule = null
 let discordClient = null
 let discordReady = false
+let discordLoginPromise = null
 let ffmpegHwaccelAvailable = true
 let networkServer = null
 let networkServerPort = null
@@ -666,24 +667,39 @@ async function ensureDiscordClient() {
       discordClient = new discordRpcModule.Client({ transport: 'ipc' })
       discordClient.on('ready', () => {
         discordReady = true
+        discordLoginPromise = null
       })
       discordClient.on('disconnected', () => {
         discordReady = false
+        discordLoginPromise = null
         discordClient = null
       })
     }
 
     if (!discordReady) {
-      const loginPromise = discordClient.login({ clientId: DISCORD_CLIENT_ID })
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('discord login timeout')), 5000)
-      })
-      await Promise.race([loginPromise, timeoutPromise])
+      if (!discordLoginPromise) {
+        const loginPromise = discordClient.login({ clientId: DISCORD_CLIENT_ID })
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('discord login timeout')), 5000)
+        })
+        discordLoginPromise = Promise.race([loginPromise, timeoutPromise])
+      }
+      await discordLoginPromise
       discordReady = true
+      discordLoginPromise = null
     }
     return true
   } catch {
     discordReady = false
+    discordLoginPromise = null
+    if (discordClient) {
+      try {
+        await discordClient.destroy()
+      } catch {
+        // ignore
+      }
+    }
+    discordClient = null
     return false
   }
 }
@@ -705,6 +721,7 @@ async function destroyDiscordClient() {
   } catch {
     // ignore
   } finally {
+    discordLoginPromise = null
     discordClient = null
     discordReady = false
   }
@@ -1070,6 +1087,36 @@ function extractThumbnailWithFfmpeg(filePath, outputPath) {
   return false
 }
 
+function rgbToHex(r, g, b) {
+  const clamp = (v) => Math.max(0, Math.min(255, Number(v) || 0))
+  return `#${[clamp(r), clamp(g), clamp(b)].map((v) => v.toString(16).padStart(2, '0')).join('')}`
+}
+
+function extractDominantColorFromMedia(filePath) {
+  const sourcePath = String(filePath || '').trim()
+  if (!sourcePath || !fs.existsSync(sourcePath)) return ''
+  const ffmpegPath = getFfmpegExecutablePath()
+  try {
+    const proc = spawnSync(ffmpegPath, [
+      '-i', sourcePath,
+      '-vf', 'scale=1:1',
+      '-frames:v', '1',
+      '-f', 'rawvideo',
+      '-pix_fmt', 'rgb24',
+      'pipe:1',
+    ], {
+      windowsHide: true,
+      timeout: 30000,
+    })
+    if (proc.status !== 0) return ''
+    const bytes = Buffer.isBuffer(proc.stdout) ? proc.stdout : Buffer.from(proc.stdout || '')
+    if (!bytes || bytes.length < 3) return ''
+    return rgbToHex(bytes[0], bytes[1], bytes[2])
+  } catch {
+    return ''
+  }
+}
+
 function getEmbeddedArtworkStreamSpecifier(filePath) {
   if (!filePath || !fs.existsSync(filePath)) return ''
   const ffprobePath = getFfprobeExecutablePath()
@@ -1231,6 +1278,34 @@ async function fetchLatestGithubRelease(owner, repo) {
   const latest = asArray(releases).find((release) => !release?.draft)
   if (!latest) throw new Error('No release found')
   return latest
+}
+
+async function fetchGithubReleases(owner, repo) {
+  const url = `https://api.github.com/repos/${owner}/${repo}/releases?per_page=20`
+  const response = await fetch(url, {
+    headers: { 'User-Agent': 'obscura-tauri-sidecar' },
+    signal: AbortSignal.timeout(15000),
+  })
+  if (!response.ok) {
+    throw new Error(`GitHub API error: ${response.status}`)
+  }
+  return asArray(await response.json()).filter((release) => !release?.draft)
+}
+
+async function fetchGithubReleaseByVersion(owner, repo, version) {
+  const normalizedTarget = normalizeVersion(version)
+  if (!normalizedTarget) {
+    throw new Error('version is required')
+  }
+  const releases = await fetchGithubReleases(owner, repo)
+  const matched = releases.find((release) => {
+    const releaseVersion = normalizeVersion(release?.tag_name || release?.name || '')
+    return releaseVersion === normalizedTarget
+  })
+  if (!matched) {
+    throw new Error(`Release not found for version ${normalizedTarget}`)
+  }
+  return matched
 }
 
 function chooseInstallerAsset(release) {
@@ -1510,6 +1585,9 @@ const INDEX_PACKED_FIELDS = [
   'video_codec',
   'artist',
   'artists',
+  'tags',
+  'folders',
+  'dominant_color',
   'description',
   'url',
   'is_deleted',
@@ -1788,9 +1866,11 @@ function readLibraryMediaIndex(libraryPath) {
   return []
 }
 
-function writeLibraryMediaIndex(libraryPath, media) {
+function writeLibraryMediaIndex(libraryPath, media, options = {}) {
   const normalized = String(libraryPath || '').trim()
   if (!normalized) return
+  const skipLegacyCache = Boolean(options?.skipLegacyCache)
+  const skipBackup = Boolean(options?.skipBackup)
   const items = normalizeIndexedMediaList(media)
   const packedItems = packIndexItems(items)
   const payload = {
@@ -1806,7 +1886,7 @@ function writeLibraryMediaIndex(libraryPath, media) {
   if (indexPath) {
     const tmpPath = `${indexPath}.tmp`
     try {
-      if (backupPath && fs.existsSync(indexPath)) {
+      if (!skipBackup && backupPath && fs.existsSync(indexPath)) {
         try {
           fs.copyFileSync(indexPath, backupPath)
         } catch {
@@ -1824,15 +1904,19 @@ function writeLibraryMediaIndex(libraryPath, media) {
     }
   }
   // Backward-compatible cache for existing versions/tools.
-  try {
-    fs.writeFileSync(path.join(normalized, LEGACY_MEDIA_CACHE_FILE), JSON.stringify(items), 'utf8')
-  } catch {
-    // ignore legacy cache write failure
+  if (!skipLegacyCache) {
+    try {
+      fs.writeFileSync(path.join(normalized, LEGACY_MEDIA_CACHE_FILE), JSON.stringify(items), 'utf8')
+    } catch {
+      // ignore legacy cache write failure
+    }
   }
-  try {
-    createLibraryBackup(normalized, 'auto')
-  } catch {
-    // ignore backup failures
+  if (!skipBackup) {
+    try {
+      createLibraryBackup(normalized, 'auto')
+    } catch {
+      // ignore backup failures
+    }
   }
 }
 
@@ -1977,6 +2061,7 @@ function scanLocalMediaFiles(rootDir, limit = DEFAULT_SCAN_LIMIT) {
         file_type: fileType,
         file_path: fullPath,
         thumbnail_path: siblingThumb || (isImage ? fullPath : ''),
+        dominant_color: '',
         file_size: stat?.size || 0,
         created_at: stat?.ctime ? new Date(stat.ctime).toISOString() : '',
         modified_date: stat?.mtime ? new Date(stat.mtime).toISOString() : '',
@@ -2019,6 +2104,9 @@ function scanLocalMediaFiles(rootDir, limit = DEFAULT_SCAN_LIMIT) {
         if (codecId) item.codec_id = codecId
         if (typeof metadataEntry.thumbnail_path === 'string' && metadataEntry.thumbnail_path.trim()) {
           item.thumbnail_path = metadataEntry.thumbnail_path.trim()
+        }
+        if (typeof metadataEntry.dominant_color === 'string' && metadataEntry.dominant_color.trim()) {
+          item.dominant_color = metadataEntry.dominant_color.trim()
         }
         if (Array.isArray(metadataEntry.tags)) {
           item.tags = metadataEntry.tags
@@ -2096,6 +2184,7 @@ async function scanLocalMediaFilesAsync(rootDir, limit = DEFAULT_SCAN_LIMIT, onP
         file_type: fileType,
         file_path: fullPath,
         thumbnail_path: siblingThumb || (isImage ? fullPath : ''),
+        dominant_color: '',
         file_size: stat?.size || 0,
         created_at: stat?.ctime ? new Date(stat.ctime).toISOString() : '',
         modified_date: stat?.mtime ? new Date(stat.mtime).toISOString() : '',
@@ -2137,6 +2226,9 @@ async function scanLocalMediaFilesAsync(rootDir, limit = DEFAULT_SCAN_LIMIT, onP
         if (codecId) item.codec_id = codecId
         if (typeof metadataEntry.thumbnail_path === 'string' && metadataEntry.thumbnail_path.trim()) {
           item.thumbnail_path = metadataEntry.thumbnail_path.trim()
+        }
+        if (typeof metadataEntry.dominant_color === 'string' && metadataEntry.dominant_color.trim()) {
+          item.dominant_color = metadataEntry.dominant_color.trim()
         }
         if (Array.isArray(metadataEntry.tags)) item.tags = metadataEntry.tags
         if (Array.isArray(metadataEntry.folders)) item.folders = metadataEntry.folders
@@ -2323,6 +2415,9 @@ function applyMetadataOverlayFromEntry(item, overlay, entry) {
     stringOrEmpty(entry.audioCodec)
   const audioCodec = stringOrEmpty(entry.audio_codec) || stringOrEmpty(entry.audioCodec)
   const videoCodec = stringOrEmpty(entry.video_codec) || stringOrEmpty(entry.videoCodec)
+  const dominantColor =
+    stringOrEmpty(entry.dominant_color) ||
+    stringOrEmpty(entry.dominantColor)
   const parentIds = [...new Set(
     asArray(entry.parentIds ?? entry.parent_ids)
       .map((value) => Number(value))
@@ -2374,6 +2469,10 @@ function applyMetadataOverlayFromEntry(item, overlay, entry) {
   if (videoCodec) {
     overlay.video_codec = videoCodec
     item.video_codec = videoCodec
+  }
+  if (dominantColor) {
+    overlay.dominant_color = dominantColor
+    item.dominant_color = dominantColor
   }
   if (parentIds.length > 0) {
     overlay.parentIds = parentIds
@@ -2525,12 +2624,14 @@ function loadLocalMeta() {
   return loadLocalMetaFromPath(localMetaPath())
 }
 
-function saveLocalMetaForLibrary(libraryPath, meta) {
+function saveLocalMetaForLibrary(libraryPath, meta, options = {}) {
   const normalized = String(libraryPath || '').trim()
   const target = localMetaPathForLibrary(normalized)
   if (!target) return
+  const skipBackup = Boolean(options?.skipBackup)
+  const compact = Boolean(options?.compact)
   const normalizedMeta = loadLocalMetaFromObject(meta)
-  fs.writeFileSync(target, JSON.stringify(normalizedMeta, null, 2), 'utf8')
+  fs.writeFileSync(target, JSON.stringify(normalizedMeta, null, compact ? 0 : 2), 'utf8')
   if (normalized) {
     cachedLocalMetaByLibrary.set(normalized, normalizedMeta)
   }
@@ -2546,15 +2647,17 @@ function saveLocalMetaForLibrary(libraryPath, meta) {
     cachedResolvedTfRevision = -1
     cachedResolvedTf = { tags: [], folders: [] }
   }
-  try {
-    createLibraryBackup(normalized, 'auto')
-  } catch {
-    // ignore backup failures
+  if (!skipBackup) {
+    try {
+      createLibraryBackup(normalized, 'auto')
+    } catch {
+      // ignore backup failures
+    }
   }
 }
 
-function saveLocalMeta(meta) {
-  saveLocalMetaForLibrary(activeLibraryPath, meta)
+function saveLocalMeta(meta, options) {
+  saveLocalMetaForLibrary(activeLibraryPath, meta, options)
 }
 
 function appendAuditLog(entry) {
@@ -2613,26 +2716,41 @@ function getResolvedTagsAndFolders(meta, libraryPath) {
   const deletedFolderIds = new Set(asArray(meta?.deletedFolderIds).map((v) => Number(v)).filter(Number.isFinite))
   const baseFolders = asArray(readJsonIfExists(resolvedLibraryPath ? path.join(resolvedLibraryPath, 'folders.json') : null, []))
     .filter((f) => !deletedFolderIds.has(Number(f?.id)))
+  const metaTags = normalizeStoredTagList(meta?.tags)
+  const metaFolders = asArray(meta?.folders).filter((f) => !deletedFolderIds.has(Number(f?.id)))
+  const knownFolderById = new Map(
+    [...baseFolders, ...metaFolders]
+      .map((folder) => [Number(folder?.id), folder])
+      .filter(([id]) => Number.isFinite(id)),
+  )
   const libraryMedia =
     resolvedLibraryPath && cachedLibraryPath === resolvedLibraryPath
       ? asArray(cachedScannedMedia)
       : asArray(readLibraryMediaIndex(resolvedLibraryPath))
   const discoveredTags = collectNamedEntitiesFromMedia(libraryMedia, 'tag')
   const discoveredFolders = collectNamedEntitiesFromMedia(libraryMedia, 'folder')
-  const fallbackTags = collectNamedEntitiesFromLibraryMetadata(resolvedLibraryPath, 'tag')
-  const fallbackFolders = collectNamedEntitiesFromLibraryMetadata(resolvedLibraryPath, 'folder')
+  const overlayTags = collectNamedEntitiesFromOverlayMeta(meta, 'tag')
+  const overlayFolders = collectNamedEntitiesFromOverlayMeta(meta, 'folder', knownFolderById)
   const tags = [
     ...baseTags,
-    ...normalizeStoredTagList(meta?.tags),
+    ...metaTags,
+    ...overlayTags,
     ...normalizeStoredTagList(discoveredTags),
-    ...normalizeStoredTagList(fallbackTags),
   ]
   const folders = [
     ...baseFolders,
-    ...asArray(meta?.folders).filter((f) => !deletedFolderIds.has(Number(f?.id))),
+    ...metaFolders,
+    ...overlayFolders.filter((f) => !deletedFolderIds.has(Number(f?.id))),
     ...discoveredFolders.filter((f) => !deletedFolderIds.has(Number(f?.id))),
-    ...fallbackFolders.filter((f) => !deletedFolderIds.has(Number(f?.id))),
   ]
+  const fallbackTags = tags.length === 0 ? collectNamedEntitiesFromLibraryMetadata(resolvedLibraryPath, 'tag') : []
+  const fallbackFolders = folders.length === 0 ? collectNamedEntitiesFromLibraryMetadata(resolvedLibraryPath, 'folder') : []
+  if (fallbackTags.length > 0) {
+    tags.push(...normalizeStoredTagList(fallbackTags))
+  }
+  if (fallbackFolders.length > 0) {
+    folders.push(...fallbackFolders.filter((f) => !deletedFolderIds.has(Number(f?.id))))
+  }
 
   const uniqueById = (arr) => {
     const map = new Map()
@@ -2765,6 +2883,39 @@ function collectNamedEntitiesFromLibraryMetadata(libraryPath, kind) {
       } else {
         out.push({ id: toSyntheticNamedId(kind, name), name })
       }
+    }
+  }
+
+  return out
+}
+
+function collectNamedEntitiesFromOverlayMeta(meta, kind, knownById = new Map()) {
+  const byFilePath = meta?.byFilePath && typeof meta.byFilePath === 'object' ? meta.byFilePath : {}
+  const out = []
+  const seen = new Set()
+
+  for (const entry of Object.values(byFilePath)) {
+    if (!entry || typeof entry !== 'object') continue
+
+    if (kind === 'folder') {
+      for (const rawId of asArray(entry.folder_ids)) {
+        const folderId = Number(rawId)
+        if (!Number.isFinite(folderId) || seen.has(folderId)) continue
+        const folder = knownById.get(folderId)
+        if (!folder || typeof folder.name !== 'string' || !folder.name.trim()) continue
+        seen.add(folderId)
+        out.push(folder)
+      }
+      continue
+    }
+
+    for (const rawName of asArray(entry.tag_names)) {
+      const name = normalizeTagName(rawName)
+      if (!name) continue
+      const key = tagNameKey(name)
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      out.push({ id: toSyntheticNamedId(kind, name), name })
     }
   }
 
@@ -3144,7 +3295,14 @@ function buildTransferredOverlay(media, settings, targetMeta, targetLibraryPath)
   return overlay
 }
 
-function refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache) {
+function refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache, options = {}) {
+  const logPerf = Boolean(options?.logPerf)
+  const emitPerf = typeof options?.emitPerf === 'function' ? options.emitPerf : null
+  const perfStartedAt = Date.now()
+  const perfMark = {}
+  const markPerf = (name) => {
+    perfMark[name] = Date.now() - perfStartedAt
+  }
   const source = media && typeof media === 'object' ? media : {}
   const filePath = String(source?.file_path || '').trim()
   if (!filePath || !fs.existsSync(filePath)) return null
@@ -3156,6 +3314,7 @@ function refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache) {
     stat = null
   }
   if (!stat || !stat.isFile()) return null
+  markPerf('stat')
 
   const ext = path.extname(filePath).toLowerCase()
   if (!MEDIA_EXTENSIONS.has(ext)) return null
@@ -3164,6 +3323,16 @@ function refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache) {
   const isAudio = ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a'].includes(ext)
   const fileType = isImage ? 'image' : isAudio ? 'audio' : 'video'
   const fileName = String(source?.file_name || path.basename(filePath)).replace(/[\\/:*?"<>|]/g, '_')
+  const derivedTitle = path.basename(fileName, path.extname(fileName))
+  const existingTitle = typeof source?.title === 'string' ? source.title.trim() : ''
+  const existingCreatedAt = typeof source?.created_at === 'string' ? source.created_at.trim() : ''
+  const existingAddedDate = typeof source?.added_date === 'string' ? source.added_date.trim() : ''
+  const existingCreatedDate = typeof source?.created_date === 'string' ? source.created_date.trim() : ''
+  const existingModifiedDate = typeof source?.modified_date === 'string' ? source.modified_date.trim() : ''
+  const shouldUseDerivedTitle =
+    !existingTitle ||
+    existingTitle === String(source?.file_name || '').trim() ||
+    `${existingTitle}${path.extname(fileName)}` !== fileName
   const fileDir = path.dirname(filePath)
   const fileBaseName = path.basename(fileName, path.extname(fileName))
 
@@ -3172,35 +3341,32 @@ function refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache) {
   if (isImage) {
     thumbnailPath = filePath
   } else if (fileType === 'video') {
-    const generatedThumbPath = siblingThumb && fs.existsSync(siblingThumb)
-      ? siblingThumb
-      : path.join(fileDir, `${fileBaseName}_thumbnail.png`)
-    try {
-      if (extractThumbnailWithFfmpeg(filePath, generatedThumbPath)) {
-        thumbnailPath = generatedThumbPath
-      }
-    } catch {
-      // Keep metadata refresh working even if thumbnail extraction fails.
+    const existingThumbPath = typeof source?.thumbnail_path === 'string' ? source.thumbnail_path.trim() : ''
+    if (existingThumbPath && fs.existsSync(existingThumbPath)) {
+      thumbnailPath = existingThumbPath
     }
     if (!thumbnailPath && siblingThumb && fs.existsSync(siblingThumb)) {
       thumbnailPath = siblingThumb
     }
   }
+  markPerf('thumbnail')
 
   const probed = probeMediaMetadata(filePath)
+  markPerf('probe')
   const item = {
     ...source,
     id: Number.isFinite(Number(source?.id)) ? Number(source.id) : toMediaId(filePath),
     uniqueId: source?.uniqueId ?? path.basename(fileDir),
     file_name: fileName,
-    title: String(source?.title || path.basename(fileName, path.extname(fileName))),
+    title: shouldUseDerivedTitle ? derivedTitle : existingTitle,
     file_type: fileType,
     file_path: filePath,
     thumbnail_path: thumbnailPath,
     file_size: stat.size || 0,
-    created_date: stat.birthtime ? new Date(stat.birthtime).toISOString() : String(source?.created_date || ''),
-    created_at: stat.ctime ? new Date(stat.ctime).toISOString() : String(source?.created_at || ''),
-    modified_date: stat.mtime ? new Date(stat.mtime).toISOString() : String(source?.modified_date || ''),
+    created_date: existingCreatedDate || (stat.birthtime ? new Date(stat.birthtime).toISOString() : ''),
+    created_at: existingCreatedAt || existingAddedDate || (stat.birthtime ? new Date(stat.birthtime).toISOString() : ''),
+    added_date: existingAddedDate || existingCreatedAt || (stat.birthtime ? new Date(stat.birthtime).toISOString() : ''),
+    modified_date: stat.mtime ? new Date(stat.mtime).toISOString() : existingModifiedDate,
     rating: Number.isFinite(Number(source?.rating)) ? Number(source.rating) : 0,
     duration: Number.isFinite(Number(probed?.duration)) ? Number(probed.duration) : null,
     width: Number.isFinite(Number(probed?.width)) ? Number(probed.width) : undefined,
@@ -3221,6 +3387,7 @@ function refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache) {
     folders: Array.isArray(source?.folders) ? source.folders : [],
     comments: Array.isArray(source?.comments) ? source.comments : [],
     import_source_path: source?.import_source_path || filePath,
+    dominant_color: typeof source?.dominant_color === 'string' ? source.dominant_color : '',
   }
 
   const overlay = meta.byFilePath[filePath] && typeof meta.byFilePath[filePath] === 'object'
@@ -3240,8 +3407,10 @@ function refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache) {
   if (typeof probed?.artist === 'string' && probed.artist.trim()) overlay.artist = probed.artist.trim()
   if (typeof probed?.description === 'string' && probed.description.trim()) overlay.description = probed.description.trim()
   if (typeof probed?.url === 'string' && probed.url.trim()) overlay.url = probed.url.trim()
+  if (item.dominant_color) overlay.dominant_color = item.dominant_color
 
   const metadataEntry = resolveMetadataEntryForFile(filePath, metadataJsonCache)
+  markPerf('metadataLookup')
   if (metadataEntry) {
     applyMetadataOverlayFromEntry(item, overlay, metadataEntry)
     if (Array.isArray(metadataEntry.tags)) {
@@ -3287,12 +3456,26 @@ function refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache) {
   if (resolvedFolderIds.length > 0) {
     overlay.folder_ids = resolvedFolderIds
   }
+  markPerf('relations')
 
   meta.byFilePath[filePath] = overlay
   try {
     fs.writeFileSync(path.join(fileDir, 'metadata.json'), JSON.stringify(item, null, 2), 'utf8')
   } catch {
     // metadata.json write errors should not abort refresh
+  }
+  markPerf('writeMetadata')
+
+  if (logPerf && emitPerf) {
+    emitPerf('file', {
+      filePath,
+      fileType,
+      elapsedMs: Date.now() - perfStartedAt,
+      marks: perfMark,
+      hasMetadataJson: Boolean(metadataEntry),
+      hasThumbnail: Boolean(thumbnailPath),
+      hasProbe: Boolean(probed),
+    })
   }
 
   return { item, overlay }
@@ -4059,12 +4242,31 @@ function handleRequest(req) {
         if (activeLibraryPath) {
           const imagesRoot = path.join(activeLibraryPath, 'images')
           const scanRoot = fs.existsSync(imagesRoot) ? imagesRoot : activeLibraryPath
+          const existingIndexedMedia = activeLibraryPath
+            ? readLibraryMediaIndex(activeLibraryPath)
+            : []
+          const existingByFilePath = new Map(
+            asArray(existingIndexedMedia)
+              .map((item) => [String(item?.file_path || '').trim(), item])
+              .filter(([filePath]) => Boolean(filePath)),
+          )
           const scannedRaw = await scanLocalMediaFilesAsync(scanRoot, DEFAULT_SCAN_LIMIT, (pulse) => {
             const progress = Math.min(30, Math.floor((Number(pulse?.processed || 0) / 25000) * 30))
             send({ id: null, ok: true, event: 'refresh-progress', payload: { current: progress, total: 100 } })
           })
           send({ id: null, ok: true, event: 'refresh-progress', payload: { current: 30, total: 100 } })
-          writeLibraryMediaIndex(activeLibraryPath, scannedRaw)
+          const seededScan = scannedRaw.map((item) => {
+            const filePath = String(item?.file_path || '').trim()
+            const existing = existingByFilePath.get(filePath)
+            if (!existing) return item
+            return {
+              ...item,
+              created_at: existing.created_at || existing.added_date || item.created_at,
+              added_date: existing.added_date || existing.created_at || item.added_date,
+              created_date: existing.created_date || item.created_date,
+            }
+          })
+          writeLibraryMediaIndex(activeLibraryPath, seededScan)
 
           const meta = loadLocalMeta()
           const metadataJsonCache = new Map()
@@ -4072,10 +4274,10 @@ function handleRequest(req) {
             meta.byFilePath = {}
           }
           const refreshed = []
-          const total = Math.max(scannedRaw.length, 1)
+          const total = Math.max(seededScan.length, 1)
 
-          for (let i = 0; i < scannedRaw.length; i += 1) {
-            const media = scannedRaw[i]
+          for (let i = 0; i < seededScan.length; i += 1) {
+            const media = seededScan[i]
             const rebuilt = refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache)
             refreshed.push(rebuilt?.item || media)
             const progress = 30 + Math.floor(((i + 1) / total) * 70)
@@ -5174,7 +5376,7 @@ function handleRequest(req) {
         send({ id, ok: true, result: [{ name: 'default', description: 'Default audio output' }] })
         return
       }
-      const ps = spawnSync('powershell', [
+      const ps = spawnSync('powershell.exe', [
         '-NoProfile',
         '-Command',
         "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $base='HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Render'; if (!(Test-Path $base)) { @() | ConvertTo-Json -Depth 3; exit 0 }; Get-ChildItem $base | ForEach-Object { $endpoint = Get-ItemProperty $_.PSPath; $propsPath = Join-Path $_.PSPath 'Properties'; $props = if (Test-Path $propsPath) { Get-ItemProperty $propsPath } else { $null }; $desc = if ($props) { [string]$props.'{a45c254e-df1c-4efd-8020-67d146a850e0},2' } else { '' }; [PSCustomObject]@{ name = [string]$_.PSChildName; description = $desc; state = [int]($endpoint.DeviceState) } } | Where-Object { $_.state -eq 1 -or $_.state -eq 4 -or $_.state -eq 5 } | ConvertTo-Json -Depth 3",
@@ -5183,31 +5385,52 @@ function handleRequest(req) {
         windowsHide: true,
         timeout: 10000,
       })
-      if (ps.status !== 0) {
-        send({ id, ok: true, result: [{ name: 'default', description: 'Default audio output' }] })
-        return
+      const normalizeDeviceList = (parsed) => {
+        const rawList = (Array.isArray(parsed) ? parsed : [parsed])
+          .filter(Boolean)
+          .map((item, index) => ({
+            name: String(item?.name || `device-${index}`),
+            description: String(item?.description || item?.name || '').trim() || `Audio Output ${index + 1}`,
+          }))
+        const seen = new Set()
+        const list = []
+        for (const item of rawList) {
+          const key = `${String(item.name || '').toLowerCase()}|${String(item.description || '').toLowerCase()}`
+          if (seen.has(key)) continue
+          seen.add(key)
+          list.push(item)
+        }
+        return list
       }
 
+      let list = []
       const payload = String(ps.stdout || '').trim()
-      if (!payload) {
-        send({ id, ok: true, result: [{ name: 'default', description: 'Default audio output' }] })
-        return
+      if (ps.status === 0 && payload) {
+        try {
+          list = normalizeDeviceList(JSON.parse(payload))
+        } catch {
+          list = []
+        }
       }
 
-      const parsed = JSON.parse(payload)
-      const rawList = (Array.isArray(parsed) ? parsed : [parsed])
-        .filter(Boolean)
-        .map((item, index) => ({
-          name: String(item?.name || `device-${index}`),
-          description: String(item?.description || '').trim() || `Audio Output ${index + 1}`,
-        }))
-      const seen = new Set()
-      const list = []
-      for (const item of rawList) {
-        const key = String(item.description || '').toLowerCase()
-        if (seen.has(key)) continue
-        seen.add(key)
-        list.push(item)
+      if (list.length === 0) {
+        const fallback = spawnSync('powershell.exe', [
+          '-NoProfile',
+          '-Command',
+          "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Get-CimInstance Win32_SoundDevice | Select-Object @{Name='name';Expression={$_.DeviceID}}, @{Name='description';Expression={$_.Name}} | ConvertTo-Json -Depth 3",
+        ], {
+          encoding: 'utf8',
+          windowsHide: true,
+          timeout: 10000,
+        })
+        const fallbackPayload = String(fallback.stdout || '').trim()
+        if (fallback.status === 0 && fallbackPayload) {
+          try {
+            list = normalizeDeviceList(JSON.parse(fallbackPayload))
+          } catch {
+            list = []
+          }
+        }
       }
 
       if (list.length === 0) {
@@ -5691,6 +5914,37 @@ function handleRequest(req) {
           ok: true,
           result: {
             available: false,
+            message: err?.message || String(err),
+          },
+        })
+      }
+    })()
+    return
+  }
+
+  if (method === 'get_release_notes') {
+    ; (async () => {
+      try {
+        const version = normalizeVersion(params?.version || '')
+        const release = version
+          ? await fetchGithubReleaseByVersion('84kb', 'Obscura', version)
+          : await fetchLatestGithubRelease('84kb', 'Obscura')
+        const releaseVersion = normalizeVersion(release?.tag_name || release?.name || '') || version
+        send({
+          id,
+          ok: true,
+          result: {
+            version: releaseVersion,
+            releaseNotes: String(release?.body || ''),
+          },
+        })
+      } catch (err) {
+        send({
+          id,
+          ok: true,
+          result: {
+            version: normalizeVersion(params?.version || '') || '',
+            releaseNotes: '',
             message: err?.message || String(err),
           },
         })
@@ -6259,6 +6513,18 @@ function handleRequest(req) {
 
   if (method === 'refresh_media_metadata') {
     try {
+      const requestStartedAt = Date.now()
+      const emitPerf = (stage, payload) => {
+        send({
+          id: null,
+          ok: true,
+          event: 'metadata-refresh-debug',
+          payload: {
+            stage,
+            ...(payload && typeof payload === 'object' ? payload : {}),
+          },
+        })
+      }
       const targetIds = new Set(asArray(params?.ids).map((v) => Number(v)).filter(Number.isFinite))
       const allMedia = getAllMediaForActiveLibrary()
       const meta = loadLocalMeta()
@@ -6273,26 +6539,49 @@ function handleRequest(req) {
         ? allMedia.filter((m) => targetIds.has(Number(m?.id)))
         : allMedia
 
+      emitPerf('start', {
+        count: targets.length,
+        activeLibraryPath,
+      })
+
       for (const media of targets) {
-        const rebuilt = refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache)
+        const rebuilt = refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache, { logPerf: true, emitPerf })
         if (rebuilt) {
           processed += 1
           refreshedById.set(Number(rebuilt.item?.id), rebuilt.item)
         }
       }
 
-      saveLocalMeta(meta)
+      const saveStartedAt = Date.now()
+      saveLocalMeta(meta, { skipBackup: true, compact: true })
+      const saveLocalMetaMs = Date.now() - saveStartedAt
       if (activeLibraryPath) {
-        const currentMedia = readLibraryMediaIndex(activeLibraryPath)
+        const indexStartedAt = Date.now()
+        const currentMedia =
+          cachedLibraryPath === activeLibraryPath
+            ? asArray(cachedScannedMedia)
+            : readLibraryMediaIndex(activeLibraryPath)
         const refreshedItems = currentMedia.map((item) => (
           refreshedById.has(Number(item?.id))
             ? (refreshedById.get(Number(item?.id)) || item)
             : item
         ))
-        writeLibraryMediaIndex(activeLibraryPath, refreshedItems)
+        writeLibraryMediaIndex(activeLibraryPath, refreshedItems, {
+          skipBackup: true,
+          skipLegacyCache: true,
+        })
         setCachedScannedMedia(activeLibraryPath, refreshedItems)
-        mediaIndexById = new Map(asArray(mergeMediaWithMeta(refreshedItems, activeLibraryPath)).map((m) => [Number(m?.id), m]))
+        mediaIndexById = new Map(asArray(refreshedItems).map((m) => [Number(m?.id), m]))
+        emitPerf('index', {
+          count: refreshedItems.length,
+          elapsedMs: Date.now() - indexStartedAt,
+        })
       }
+      emitPerf('complete', {
+        processed,
+        elapsedMs: Date.now() - requestStartedAt,
+        saveLocalMetaMs,
+      })
       send({ id, ok: true, result: processed })
     } catch (err) {
       send({ id, ok: false, error: `refresh_media_metadata failed: ${err?.message || String(err)}` })
@@ -6444,6 +6733,7 @@ function handleRequest(req) {
         }
 
         const probed = probeMediaMetadata(destPath)
+        const importedAtIso = new Date().toISOString()
         const item = {
           id: toMediaId(destPath),
           uniqueId: uniqueId,
@@ -6454,7 +6744,8 @@ function handleRequest(req) {
           thumbnail_path: thumbnailPath,
           file_size: stat?.size || 0,
           created_date: stat?.birthtime ? new Date(stat.birthtime).toISOString() : '',
-          created_at: stat?.ctime ? new Date(stat.ctime).toISOString() : '',
+          created_at: importedAtIso,
+          added_date: importedAtIso,
           modified_date: stat?.mtime ? new Date(stat.mtime).toISOString() : '',
           rating: 0,
           duration: Number.isFinite(Number(probed?.duration)) ? Number(probed.duration) : null,
@@ -6476,6 +6767,7 @@ function handleRequest(req) {
           folders: [],
           comments: [],
           import_source_path: sourcePath,
+          dominant_color: '',
         }
 
         const overlay = meta.byFilePath[destPath] && typeof meta.byFilePath[destPath] === 'object'
@@ -6495,6 +6787,7 @@ function handleRequest(req) {
         if (typeof probed?.artist === 'string' && probed.artist.trim()) overlay.artist = probed.artist.trim()
         if (typeof probed?.description === 'string' && probed.description.trim()) overlay.description = probed.description.trim()
         if (typeof probed?.url === 'string' && probed.url.trim()) overlay.url = probed.url.trim()
+        if (item.dominant_color) overlay.dominant_color = item.dominant_color
         const metadataEntry = resolveMetadataEntryForFile(sourcePath, metadataJsonCache)
         if (metadataEntry) {
           applyMetadataOverlayFromEntry(item, overlay, metadataEntry)

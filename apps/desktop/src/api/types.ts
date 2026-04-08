@@ -156,6 +156,7 @@ export interface IMediaLibraryAPI {
 
     // === 自動アップデート ===
     checkForUpdates(): Promise<any>;
+    getReleaseNotes(version?: string): Promise<{ version: string; releaseNotes: string }>;
     downloadUpdate(): Promise<any>;
     quitAndInstall(): Promise<void>;
     onUpdateStatus(callback: (data: { status: string; info?: any }) => void): () => void;

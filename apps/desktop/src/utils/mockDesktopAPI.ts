@@ -245,10 +245,15 @@ export const mockDesktopAPI = {
         remoteLibraries: [],
         myUserToken: undefined,
         autoImport: { enabled: false, watchPaths: [] },
+        dragDropImportMoveSource: false,
         thumbnailMode: 'speed' as const,
         discordRichPresenceEnabled: false,
         libraryBackupRetention: 5,
         enableF12DeveloperTools: false,
+        audioDevice: 'auto',
+        exclusiveMode: false,
+        useMpvAudio: false,
+        enableMpvForVideo: false,
         libraryViewSettings: {}
     }),
     updateClientConfig: async (_updates: Partial<ClientConfig>): Promise<ClientConfig> => ({
@@ -258,10 +263,15 @@ export const mockDesktopAPI = {
         remoteLibraries: [],
         myUserToken: undefined,
         autoImport: { enabled: false, watchPaths: [] },
+        dragDropImportMoveSource: false,
         thumbnailMode: 'speed' as const,
         discordRichPresenceEnabled: false,
         libraryBackupRetention: 5,
         enableF12DeveloperTools: false,
+        audioDevice: 'auto',
+        exclusiveMode: false,
+        useMpvAudio: false,
+        enableMpvForVideo: false,
         libraryViewSettings: {}
     }),
     selectDownloadDirectory: async () => null,
@@ -280,6 +290,7 @@ export const mockDesktopAPI = {
 
     // Update
     checkForUpdates: async () => null,
+    getReleaseNotes: async (version?: string) => ({ version: version || '0.0.0-mock', releaseNotes: '' }),
     downloadUpdate: async () => null,
     quitAndInstall: async () => { },
     onUpdateStatus: (_callback: (data: { status: string; info?: any }) => void) => () => { },

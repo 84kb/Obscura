@@ -294,21 +294,24 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
         changeVolume(Math.max(0, volume - 0.1))
     }
 
+    const getNativeAudioVolume = (nextVolume: number, muted: boolean) => {
+        if (muted) return 0
+        return nextVolume * nextVolume * 100
+    }
+
     // 音量変更
     const changeVolume = (newVolume: number) => {
         setVolume(newVolume)
+        const nextMuted = newVolume > 0 ? false : isMuted
         if (newVolume > 0 && isMuted) {
             setIsMuted(false)
-            if (usesNativeAudio) {
-                // MPV unMute is complicated, setting volume is easier
-            }
         }
 
         // 人間の聴感特性に合わせて2乗のスケーリングを適用
         const scaledVolume = newVolume * newVolume
 
         if (usesNativeAudio) {
-            api.setAudioVolume(scaledVolume * 100) // MPV uses 0-100
+            api.setAudioVolume(getNativeAudioVolume(newVolume, nextMuted))
         } else {
             const media = videoRef.current || audioRef.current
             if (media) {
@@ -321,13 +324,9 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
     // ミュート切り替え
     const toggleMute = () => {
         if (usesNativeAudio) {
-            // MPV doesn't expose mute easy toggle via IPC without property get/set, or we track state.
-            // We track state in isMuted.
-            // Mute behavior is currently represented by setting volume to 0.
-            // For now just toggle UI state, actual volume control handles it via changeVolume?
-            // Or set volume to 0?
-            // Let's assume user just wants UI update for now, or use setVolume(0) if muted.
-            setIsMuted(!isMuted)
+            const nextMuted = !isMuted
+            setIsMuted(nextMuted)
+            api.setAudioVolume(getNativeAudioVolume(volume, nextMuted))
             return
         }
 
@@ -517,9 +516,6 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
     useEffect(() => {
         if (!usesNativeAudio) return
 
-        // 初期化時にボリューム設定 (聴感補正を適用)
-        api.setAudioVolume(volume * volume * 100)
-
         // イベント購読
         const cleanupTime = api.on('audio:time-update', (_: any, time: number) => {
             setCurrentTime(time)
@@ -593,6 +589,11 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
             }
         }
     }, [usesNativeAudio, useNativeVideoAudio, media?.id])
+
+    useEffect(() => {
+        if (!usesNativeAudio) return
+        api.setAudioVolume(getNativeAudioVolume(volume, isMuted))
+    }, [usesNativeAudio, volume, isMuted])
 
     // コンポーネントアンマウント時にメディアを確実に停止
     useEffect(() => {
@@ -780,8 +781,13 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
     const [buffered, setBuffered] = useState(0)
 
     useEffect(() => {
-        const media = videoRef.current || audioRef.current
-        if (!media || usesNativeAudio) return
+        const media = useNativeVideoAudio
+            ? videoRef.current
+            : (videoRef.current || audioRef.current)
+        if (!media || isMpv) {
+            setBuffered(0)
+            return
+        }
 
         const updateBuffered = () => {
             if (media.buffered.length > 0) {
@@ -818,6 +824,7 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
             }
         }
 
+        updateBuffered()
         media.addEventListener('progress', updateBuffered)
         media.addEventListener('timeupdate', updateBuffered) // スムーズな更新のため
 
@@ -825,7 +832,7 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
             media.removeEventListener('progress', updateBuffered)
             media.removeEventListener('timeupdate', updateBuffered)
         }
-    }, [videoRef.current, audioRef.current, usesNativeAudio])
+    }, [videoRef.current, audioRef.current, isMpv, useNativeVideoAudio, media?.id])
 
     useEffect(() => {
         // Guard against accidental fullscreen trigger while switching from library to player.

@@ -140,6 +140,7 @@ export class AndroidAdapter implements IMediaLibraryAPI {
     async getSelectedMedia(): Promise<MediaFile[]> { return []; }
 
     async checkForUpdates(): Promise<any> { return { available: false }; }
+    async getReleaseNotes(version?: string): Promise<{ version: string; releaseNotes: string }> { return { version: version || '1.0.0', releaseNotes: '' }; }
     async downloadUpdate(): Promise<any> { }
     async quitAndInstall(): Promise<void> { }
     onUpdateStatus(_callback: (data: any) => void): (() => void) { return () => { }; }

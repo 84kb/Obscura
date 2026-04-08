@@ -617,6 +617,7 @@ export interface ClientConfig {
     remoteLibraries: RemoteLibrary[]
     myUserToken?: string
     autoImport: AutoImportConfig
+    dragDropImportMoveSource?: boolean
     libraryViewSettings: { [libraryId: string]: LibraryViewSettings }
     thumbnailMode: 'speed' | 'quality'
     discordRichPresenceEnabled: boolean

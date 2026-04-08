@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useContext, useCallback, useMemo, useState } from 'react'
+import React, { useEffect, useRef, useContext, useCallback, useMemo, useState, useLayoutEffect } from 'react'
 import { TableVirtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { MediaFile, ViewSettings, FilterOptions } from '@obscura/core'
 import { formatSize, formatDate } from '../utils/format'
@@ -25,6 +25,9 @@ interface LibraryListProps {
     hasMore?: boolean
     onInternalDragStart?: (mediaIds?: number[]) => void
     onInternalDragEnd?: () => void
+    initialScrollTop?: number
+    scrollRestoreKey?: string
+    onScrollPositionChange?: (scrollTop: number) => void
 }
 
 interface LibraryListContext {
@@ -94,7 +97,7 @@ const ListThumbnail: React.FC<{ media: MediaFile, thumbnailMode: 'speed' | 'qual
         const cached = listThumbnailUrlCache.get(cacheKey)
         if (cached) {
             setSrc(cached)
-            setIsLoaded(true)
+            setIsLoaded(false)
             return
         }
 
@@ -172,7 +175,10 @@ export const LibraryList: React.FC<LibraryListProps> = ({
     onLoadMore,
     hasMore,
     onInternalDragStart,
-    onInternalDragEnd
+    onInternalDragEnd,
+    initialScrollTop = 0,
+    scrollRestoreKey,
+    onScrollPositionChange,
 }) => {
     const [headerMenu, setHeaderMenu] = useState<{ x: number, y: number } | null>(null)
     const listColumns = _viewSettings.listColumns || {
@@ -184,6 +190,7 @@ export const LibraryList: React.FC<LibraryListProps> = ({
     const { pushScope, popScope } = useContext(ShortcutContext)!;
     const virtuosoRef = useRef<VirtuosoHandle>(null);
     const visibleRangeRef = useRef({ startIndex: 0, endIndex: 0 });
+    const scrollerRef = useRef<HTMLDivElement | null>(null);
 
     // Register Scope
     useEffect(() => {
@@ -360,6 +367,23 @@ export const LibraryList: React.FC<LibraryListProps> = ({
     }, [listColumns, renderIcon, renderRating])
 
     const virtuosoComponents = useMemo(() => ({
+        Scroller: React.forwardRef<HTMLDivElement, React.ComponentProps<'div'>>((props, ref) => (
+            <div
+                {...props}
+                ref={(node) => {
+                    scrollerRef.current = node;
+                    if (typeof ref === 'function') {
+                        ref(node);
+                    } else if (ref) {
+                        (ref as React.MutableRefObject<HTMLDivElement | null>).current = node;
+                    }
+                }}
+                onScroll={(e) => {
+                    props.onScroll?.(e);
+                    onScrollPositionChange?.((e.currentTarget as HTMLDivElement).scrollTop);
+                }}
+            />
+        )),
         Table: React.forwardRef<HTMLTableElement, React.ComponentProps<'table'>>((props, ref) => (
             <table {...props} ref={ref} className="list-view-table" style={{ ...props.style, borderCollapse: 'collapse' }} />
         )),
@@ -402,7 +426,12 @@ export const LibraryList: React.FC<LibraryListProps> = ({
                 />
             )
         })
-    }), [onInternalDragEnd, onInternalDragStart])
+    }), [onInternalDragEnd, onInternalDragStart, onScrollPositionChange])
+
+    useLayoutEffect(() => {
+        if (!scrollerRef.current) return;
+        scrollerRef.current.scrollTop = Math.max(0, Number(initialScrollTop) || 0);
+    }, [scrollRestoreKey, initialScrollTop]);
 
     const virtuosoContext = useMemo<LibraryListContext>(() => ({
         mediaFiles,

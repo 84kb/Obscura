@@ -5,6 +5,7 @@ dist-mobile
 dist-tauri
 build
 release
+Release
 src-tauri/target
 src-tauri/gen
 .vscode
@@ -68,6 +69,23 @@ Thumbs.db
 temp_player.css
 tsc_output*.txt
 debug_metadata.json
+tasks.md
+AGENTS.md
+
+# Android / Capacitor local artifacts
+apps/android/.gradle/
+apps/android/.kotlin/
+apps/android/build/
+apps/android/app/build/
+apps/android/app/src/main/assets/public/
+apps/android/app/src/main/assets/capacitor.config.json
+apps/android/app/src/main/assets/capacitor.plugins.json
+apps/android/app/src/main/res/xml/config.xml
+apps/android/capacitor-cordova-android-plugins/
+apps/android/captures/
+apps/android/local.properties
+apps/android/jdk*/
+apps/android/jdk*.zip
 
 # Security - NEVER commit these
 .cert/

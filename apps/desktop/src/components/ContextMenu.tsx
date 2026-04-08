@@ -126,20 +126,25 @@ export function ContextMenu({
                             <span>フォルダがありません</span>
                         </div>
                     ) : (
-                        folders.map(folder => (
-                            <div
-                                key={folder.id}
-                                className={`context-menu-item ${mediaFolderIds.includes(folder.id) ? 'checked' : ''}`}
-                                onClick={() => onAddToFolder(folder.id)}
-                            >
-                                {mediaFolderIds.includes(folder.id) && (
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <polyline points="20 6 9 17 4 12" />
-                                    </svg>
-                                )}
-                                <span>{folder.name}</span>
-                            </div>
-                        ))
+                        folders.map(folder => {
+                            const isChecked = mediaFolderIds.includes(folder.id)
+                            return (
+                                <div
+                                    key={folder.id}
+                                    className={`context-menu-item context-menu-folder-item ${isChecked ? 'checked' : ''}`}
+                                    onClick={() => onAddToFolder(folder.id)}
+                                >
+                                    <span className={`context-menu-checkbox ${isChecked ? 'checked' : ''}`} aria-hidden="true">
+                                        {isChecked && (
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                                <polyline points="20 6 9 17 4 12" />
+                                            </svg>
+                                        )}
+                                    </span>
+                                    <span>{folder.name}</span>
+                                </div>
+                            )
+                        })
                     )}
                 </div>
             </div>

@@ -11,6 +11,7 @@ import { ArtistFilterDropdown } from './ArtistFilterDropdown'
 import { DurationFilterDropdown } from './DurationFilterDropdown'
 import { DateFilterDropdown } from './DateFilterDropdown'
 import { ConfirmModal } from './ConfirmModal'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import './MainHeader.css'
 
 interface MainHeaderProps {
@@ -35,6 +36,9 @@ interface MainHeaderProps {
     folders: Folder[]
     onRefreshLibrary: () => void
     onReload: () => void
+    showSidebar: boolean
+    onToggleSidebar: () => void
+    onOpenSettings: () => void
 }
 
 import { FileSystemCleanupModal } from './FileSystemCleanupModal'
@@ -62,7 +66,10 @@ export function MainHeader({
     onViewSettingsChange,
     folders,
     onRefreshLibrary,
-    onReload
+    onReload,
+    showSidebar,
+    onToggleSidebar,
+    onOpenSettings,
 }: MainHeaderProps) {
     const [isFilterBarOpen, setIsFilterBarOpen] = useState(false)
     const [isTagFilterOpen, setIsTagFilterOpen] = useState(false)
@@ -106,10 +113,37 @@ export function MainHeader({
     // File System Cleanup
     const [isFileSystemCleanupOpen, setIsFileSystemCleanupOpen] = useState(false)
     const [filesystemOrphans, setFilesystemOrphans] = useState<any[]>([])
+    const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(false)
 
     const handleConfirmRefresh = () => {
         setIsRefreshModalOpen(false)
         onRefreshLibrary()
+    }
+
+    useEffect(() => {
+        let mounted = true
+        const syncAlwaysOnTop = async () => {
+            try {
+                const current = await getCurrentWindow().isAlwaysOnTop()
+                if (mounted) setIsAlwaysOnTop(Boolean(current))
+            } catch {
+                if (mounted) setIsAlwaysOnTop(false)
+            }
+        }
+        void syncAlwaysOnTop()
+        return () => {
+            mounted = false
+        }
+    }, [])
+
+    const toggleAlwaysOnTop = async () => {
+        try {
+            const nextValue = !isAlwaysOnTop
+            await getCurrentWindow().setAlwaysOnTop(nextValue)
+            setIsAlwaysOnTop(nextValue)
+        } catch (error) {
+            console.error('Failed to toggle always on top:', error)
+        }
     }
 
     const handleFileSystemScan = async () => {
@@ -371,6 +405,32 @@ export function MainHeader({
         <div className="main-header-container">
             <header className="main-header">
                 <div className="header-left">
+                    {!showSidebar && (
+                        <div className="header-sidebar-actions">
+                            <button
+                                className="icon-btn header-sidebar-btn"
+                                title="設定"
+                                onClick={onOpenSettings}
+                            >
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82L4.21 7.2a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01A1.65 1.65 0 0 0 10 3.25V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                                </svg>
+                            </button>
+                            <button
+                                className="icon-btn header-sidebar-btn"
+                                title="サイドバーを表示"
+                                onClick={onToggleSidebar}
+                            >
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+                                    <path d="M9 4v16"></path>
+                                    <path d="M13 12h5"></path>
+                                    <path d="M15 10l-2 2 2 2"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    )}
                     <div className="history-buttons">
                         <button className="icon-btn" title="戻る">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
@@ -399,7 +459,6 @@ export function MainHeader({
                 </div>
 
                 <div className="header-right">
-
                     {/* リロードボタン */}
                     <button
                         className="icon-btn"
@@ -718,6 +777,48 @@ export function MainHeader({
                         )}
                     </div>
 
+                    {!viewSettings.showInspector && (
+                        <div className="header-window-controls">
+                            <button
+                                className={`icon-btn header-window-btn ${isAlwaysOnTop ? 'active' : ''}`}
+                                title="ピン留め"
+                                onClick={toggleAlwaysOnTop}
+                            >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <line x1="12" y1="17" x2="12" y2="22"></line>
+                                    <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17z"></path>
+                                </svg>
+                            </button>
+                            <button
+                                className="icon-btn header-window-btn"
+                                title="最小化"
+                                onClick={() => api.minimizeWindow()}
+                            >
+                                <svg viewBox="0 0 10 1" fill="currentColor" width="10" height="10">
+                                    <rect width="10" height="1" y="4.5" />
+                                </svg>
+                            </button>
+                            <button
+                                className="icon-btn header-window-btn"
+                                title="最大化"
+                                onClick={() => api.maximizeWindow()}
+                            >
+                                <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1" width="10" height="10">
+                                    <rect x="0.5" y="0.5" width="9" height="9" />
+                                </svg>
+                            </button>
+                            <button
+                                className="icon-btn header-window-btn close-btn"
+                                title="閉じる"
+                                onClick={() => api.closeWindow()}
+                            >
+                                <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1" width="10" height="10">
+                                    <path d="M1,1 L9,9 M9,1 L1,9" />
+                                </svg>
+                            </button>
+                        </div>
+                    )}
+
 
                 </div>
             </header>
@@ -998,7 +1099,7 @@ export function MainHeader({
             {isRefreshModalOpen && (
                 <ConfirmModal
                     title="ライブラリの更新"
-                    message="すべてのライブラリファイルのサムネイルとメタデータを再取得します。ファイル数によっては時間がかかる可能性がありますが、実行しますか？"
+                    message="すべてのライブラリファイルのサムネイルとメタデータを再取得します。更新中は動作が不安定になる可能性がありますが、続行しますか？"
                     confirmLabel="更新を開始"
                     isDestructive={true}
                     onConfirm={handleConfirmRefresh}

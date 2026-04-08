@@ -83,6 +83,13 @@
     width: 100%;
 }
 
+.sidebar-section-title-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
 .sidebar-section-header > span {
     color: color-mix(in srgb, var(--text-main), transparent 40%);
 }
@@ -795,4 +802,9 @@
 
 .sidebar-nav-item.active .sidebar-count {
     color: var(--primary);
+}
+
+.sidebar-section-count {
+    margin-left: 0;
+    padding-left: 0;
 }

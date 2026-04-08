@@ -8,7 +8,9 @@
     overflow: hidden;
     flex-shrink: 0;
     transition: transform 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
-    font-family: 'Yu Gothic UI', 'Yu Gothic', YuGothic, Meiryo, 'BIZ UDPGothic', sans-serif;
+    font-family:
+        "Yu Gothic UI", "Yu Gothic", YuGothic, Meiryo, "BIZ UDPGothic",
+        sans-serif;
 }
 
 .inspector-header {
@@ -45,7 +47,9 @@
     justify-content: center;
     border-radius: 4px;
     cursor: pointer;
-    transition: background 0.2s, color 0.2s;
+    transition:
+        background 0.2s,
+        color 0.2s;
 }
 
 .control-btn:hover {
@@ -145,7 +149,9 @@
 .section-toggle-icon {
     opacity: 0;
     transform: translateY(-1px);
-    transition: opacity 0.18s ease, transform 0.18s ease;
+    transition:
+        opacity 0.18s ease,
+        transform 0.18s ease;
 }
 
 .inspector-section:hover .section-toggle-icon {
@@ -163,7 +169,9 @@
     cursor: pointer;
     color: inherit;
     font: inherit;
-    transition: color 0.2s ease, opacity 0.2s ease;
+    transition:
+        color 0.2s ease,
+        opacity 0.2s ease;
 }
 
 .section-title-toggle:hover h3 {
@@ -228,7 +236,7 @@
     background: transparent;
     border: 1.5px dashed var(--border);
     border-radius: 6px;
-    padding: 1px 7px;
+    padding: 4px 4px;
     color: var(--text-muted);
     cursor: pointer;
     display: flex;
@@ -392,7 +400,9 @@
     align-items: center;
     gap: 6px;
     cursor: pointer;
-    transition: background 0.2s, border-color 0.2s;
+    transition:
+        background 0.2s,
+        border-color 0.2s;
     font-size: 11px;
     border-radius: 6px;
     border: 1px solid transparent;
@@ -500,7 +510,9 @@
     padding: 5px 10px;
     color: var(--text-main);
     font-size: 12px;
-    font-family: 'Yu Gothic UI', 'Yu Gothic', YuGothic, Meiryo, 'BIZ UDPGothic', sans-serif;
+    font-family:
+        "Yu Gothic UI", "Yu Gothic", YuGothic, Meiryo, "BIZ UDPGothic",
+        sans-serif;
     outline: none;
     transition: all 0.2s;
     box-sizing: border-box;
@@ -764,7 +776,6 @@
     color: var(--text-secondary);
 }
 
-
 .preview-filename-input {
     width: 100%;
     background: transparent;
@@ -773,7 +784,9 @@
     color: var(--text-main);
     font-size: 16px;
     font-weight: 600;
-    font-family: 'Yu Gothic UI', 'Yu Gothic', YuGothic, Meiryo, 'BIZ UDPGothic', sans-serif;
+    font-family:
+        "Yu Gothic UI", "Yu Gothic", YuGothic, Meiryo, "BIZ UDPGothic",
+        sans-serif;
     line-height: 1.4;
     padding: 8px;
     resize: none;
@@ -790,7 +803,6 @@
 .preview-filename-input:hover {
     background: var(--bg-hover);
 }
-
 
 /* Spacing Overrides */
 .section-header {
@@ -811,6 +823,9 @@
     padding: 6px 12px;
     color: var(--text-main);
     font-size: 13px;
+    font-family:
+        "Yu Gothic UI", "Yu Gothic", YuGothic, Meiryo, "BIZ UDPGothic",
+        sans-serif;
     outline: none;
     transition: all 0.2s;
 }
@@ -831,7 +846,7 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
-    padding: 8px;
+    padding: 4px;
     background: var(--bg-hover);
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -896,14 +911,16 @@
 .simple-stats .stat-label {
     color: var(--text-main);
     font-weight: 500;
-    font-family: 'Yu Gothic UI', 'Yu Gothic', YuGothic, Meiryo, 'BIZ UDPGothic', sans-serif;
+    font-family:
+        "Yu Gothic UI", "Yu Gothic", YuGothic, Meiryo, "BIZ UDPGothic",
+        sans-serif;
 }
 
 .simple-stats .stat-value {
     color: var(--text-muted);
     /* Gray color as requested */
     font-weight: 500;
-    font-family: 'Consolas', 'Monaco', monospace;
+    font-family: "Consolas", "Monaco", monospace;
     /* Keep numbers monospaced */
 }
 
@@ -1026,7 +1043,9 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background 0.2s, color 0.2s;
+    transition:
+        background 0.2s,
+        color 0.2s;
 }
 
 .relation-remove-btn:hover {

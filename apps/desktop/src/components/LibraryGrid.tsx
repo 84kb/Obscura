@@ -6,6 +6,10 @@ import { experimental_VGrid as VGrid, VGridHandle } from 'virtua'
 import { ShortcutContext, useShortcut } from '../contexts/ShortcutContext'
 import './LibraryGrid.css'
 
+const logLibraryGridDebug = (label: string, payload: Record<string, unknown>) => {
+    console.log(`[LibraryGrid] ${label}`, payload)
+}
+
 interface LibraryGridProps {
     mediaFiles: MediaFile[]
     onMediaClick: (media: MediaFile, e: React.MouseEvent) => void
@@ -24,6 +28,9 @@ interface LibraryGridProps {
     onRenameCancel?: () => void
     onLoadMore?: () => void
     hasMore?: boolean
+    initialScrollTop?: number
+    scrollRestoreKey?: string
+    onScrollPositionChange?: (scrollTop: number) => void
 }
 
 export function LibraryGrid({
@@ -43,7 +50,10 @@ export function LibraryGrid({
     onRenameSubmit,
     onRenameCancel,
     onLoadMore,
-    hasMore = false
+    hasMore = false,
+    initialScrollTop = 0,
+    scrollRestoreKey,
+    onScrollPositionChange,
 }: LibraryGridProps) {
     const [dragStart, setDragStart] = useState<{ x: number, y: number } | null>(null);
     const [dragEnd, setDragEnd] = useState<{ x: number, y: number } | null>(null);
@@ -51,6 +61,11 @@ export function LibraryGrid({
     const gridRef = useRef<VGridHandle>(null);
     const dragCurrentPosRef = useRef<{ x: number, y: number } | null>(null);
     const scrollPosRef = useRef(0);
+    const lastLayoutScrollTopRef = useRef<number | null>(null);
+    const lastRestoreScrollTopRef = useRef<number | null>(null);
+    const resizeObserverEventCountRef = useRef(0);
+    const layoutEffectCountRef = useRef(0);
+    const restoreEffectCountRef = useRef(0);
 
     // Shortcut Context
     const { pushScope, popScope } = React.useContext(ShortcutContext)!;
@@ -62,14 +77,55 @@ export function LibraryGrid({
 
     // Track container size for math-based selection
     const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+    const pendingContainerSizeRef = useRef<{ width: number, height: number } | null>(null);
+    const containerSizeFrameRef = useRef<number | null>(null);
+    const committedContainerSizeRef = useRef({ width: 0, height: 0 });
+    const lastObservedContainerSizeRef = useRef<{ width: number, height: number } | null>(null);
 
     // Use a callback ref to ensure we observe the element as soon as it mounts
     const observerRef = useRef<ResizeObserver | null>(null);
+
+    const scheduleContainerSizeUpdate = useCallback((nextSize: { width: number, height: number }) => {
+        const committed = committedContainerSizeRef.current;
+        const pending = pendingContainerSizeRef.current;
+        const isSameAsCommitted =
+            Math.abs(committed.width - nextSize.width) < 0.5 &&
+            Math.abs(committed.height - nextSize.height) < 0.5;
+        const isSameAsPending = pending != null &&
+            Math.abs(pending.width - nextSize.width) < 0.5 &&
+            Math.abs(pending.height - nextSize.height) < 0.5;
+
+        if (isSameAsCommitted || isSameAsPending) {
+            return;
+        }
+
+        pendingContainerSizeRef.current = nextSize;
+        if (containerSizeFrameRef.current != null) return;
+
+        containerSizeFrameRef.current = window.requestAnimationFrame(() => {
+            containerSizeFrameRef.current = null;
+            const pending = pendingContainerSizeRef.current;
+            if (!pending) return;
+            setContainerSize(prev => {
+                if (prev.width === pending.width && prev.height === pending.height) return prev;
+                committedContainerSizeRef.current = pending;
+                return pending;
+            });
+        });
+    }, []);
+
+    useEffect(() => {
+        committedContainerSizeRef.current = containerSize;
+    }, [containerSize]);
 
     useEffect(() => {
         return () => {
             if (observerRef.current) {
                 observerRef.current.disconnect();
+            }
+            if (containerSizeFrameRef.current != null) {
+                window.cancelAnimationFrame(containerSizeFrameRef.current);
+                containerSizeFrameRef.current = null;
             }
         };
     }, []);
@@ -87,10 +143,28 @@ export function LibraryGrid({
             observerRef.current = new ResizeObserver((entries) => {
                 const entry = entries[0];
                 if (entry) {
-                    setContainerSize({
+                    const nextObservedSize = {
                         width: entry.contentRect.width,
                         height: entry.contentRect.height
-                    });
+                    };
+                    const lastObserved = lastObservedContainerSizeRef.current;
+                    if (
+                        lastObserved &&
+                        Math.abs(lastObserved.width - nextObservedSize.width) < 0.5 &&
+                        Math.abs(lastObserved.height - nextObservedSize.height) < 0.5
+                    ) {
+                        return;
+                    }
+                    lastObservedContainerSizeRef.current = nextObservedSize;
+                    resizeObserverEventCountRef.current += 1;
+                    const nextWidth = Math.round(nextObservedSize.width);
+                    const nextHeight = Math.round(nextObservedSize.height);
+                    logLibraryGridDebug('resize-observer', {
+                        count: resizeObserverEventCountRef.current,
+                        width: nextWidth,
+                        height: nextHeight
+                    })
+                    scheduleContainerSizeUpdate(nextObservedSize);
                 }
             });
             observerRef.current.observe(node);
@@ -102,16 +176,12 @@ export function LibraryGrid({
         const handleResize = () => {
             if (containerRef.current) {
                 const rect = containerRef.current.getBoundingClientRect();
-                setContainerSize(prev => {
-                    // Only update if actually changed to avoid render loop
-                    if (prev.width === rect.width && prev.height === rect.height) return prev;
-                    return { width: rect.width, height: rect.height };
-                });
+                scheduleContainerSizeUpdate({ width: rect.width, height: rect.height });
             }
         };
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
-    }, []);
+    }, [scheduleContainerSizeUpdate]);
 
 
 
@@ -195,16 +265,61 @@ export function LibraryGrid({
     // When the layout changes (re-mount due to key change), we recalculate the pixel position so that the same item index remains visible.
     const { columnCount: currentColumnCount, itemHeight: currentItemHeight } = getLayoutInfo();
     useLayoutEffect(() => {
+        layoutEffectCountRef.current += 1;
         const GAP = getGap();
+        logLibraryGridDebug('layout-effect', {
+            count: layoutEffectCountRef.current,
+            containerWidth: Math.round(containerSize.width),
+            columnCount: currentColumnCount,
+            itemHeight: currentItemHeight,
+            storedScrollIndex: scrollPosRef.current
+        })
         if (gridRef.current && scrollPosRef.current > 0) {
             // Recalculate scrollTop based on the stored item index and new layout parameters
             // Formula: NewScrollTop = PADDING + (RowIndex * (ItemHeight + GAP))
             const rowIndex = Math.floor(scrollPosRef.current / currentColumnCount);
             const newScrollTop = PADDING_Y + rowIndex * (currentItemHeight + GAP);
+            if (lastLayoutScrollTopRef.current != null && Math.abs(lastLayoutScrollTopRef.current - newScrollTop) < 1) {
+                logLibraryGridDebug('layout-effect-scrollTo-skipped', {
+                    rowIndex,
+                    newScrollTop
+                })
+                return
+            }
 
+            logLibraryGridDebug('layout-effect-scrollTo', {
+                rowIndex,
+                newScrollTop
+            })
+            lastLayoutScrollTopRef.current = newScrollTop
             gridRef.current.scrollTo(newScrollTop);
         }
     }, [containerSize.width, currentColumnCount, gridSize, currentItemHeight, viewSettings?.showName, viewSettings?.showItemInfo])
+
+    useLayoutEffect(() => {
+        restoreEffectCountRef.current += 1;
+        if (!gridRef.current) return;
+        const nextScrollTop = Math.max(0, Number(initialScrollTop) || 0);
+        const rowIndex = Math.max(0, Math.floor((nextScrollTop - PADDING_Y) / (currentItemHeight + getGap())));
+        scrollPosRef.current = rowIndex * currentColumnCount;
+        logLibraryGridDebug('restore-effect', {
+            count: restoreEffectCountRef.current,
+            nextScrollTop,
+            rowIndex,
+            currentColumnCount,
+            currentItemHeight,
+            scrollRestoreKey
+        })
+        if (lastRestoreScrollTopRef.current != null && Math.abs(lastRestoreScrollTopRef.current - nextScrollTop) < 1) {
+            logLibraryGridDebug('restore-effect-scrollTo-skipped', {
+                nextScrollTop,
+                scrollRestoreKey
+            })
+            return
+        }
+        lastRestoreScrollTopRef.current = nextScrollTop
+        gridRef.current.scrollTo(nextScrollTop);
+    }, [scrollRestoreKey, initialScrollTop, currentColumnCount, currentItemHeight]);
 
     const handleNavigation = useCallback((direction: 'up' | 'down' | 'left' | 'right') => {
         if (mediaFiles.length === 0) return;
@@ -498,6 +613,7 @@ export function LibraryGrid({
                     // index = rowIndex * columnCount
                     const rowIndex = Math.max(0, Math.floor((scrollTop - PADDING_Y) / (itemHeight + GAP)));
                     scrollPosRef.current = rowIndex * columnCount;
+                    onScrollPositionChange?.(scrollTop);
 
                     // Lazy Loading Trigger
                     if (onLoadMore && hasMore) {

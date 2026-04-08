@@ -491,6 +491,10 @@ export class DesktopAdapter implements IMediaLibraryAPI {
         return this.api.checkForUpdates();
     }
 
+    async getReleaseNotes(version?: string): Promise<{ version: string; releaseNotes: string }> {
+        return this.api.getReleaseNotes(version);
+    }
+
     async downloadUpdate(): Promise<any> {
         return this.api.downloadUpdate();
     }

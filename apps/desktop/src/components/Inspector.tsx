@@ -1059,6 +1059,7 @@ export function Inspector({
                                                     className="description-preview-html artist-input"
                                                     dangerouslySetInnerHTML={{ __html: media.length === 1 ? (media[0].description || `<span style="color:var(--text-muted)">${i18nT(language, 'inspector.enterDescription')}</span>`) : '' }}
                                                     onClick={(e) => {
+                                                        if (e.button !== 0) return
                                                         const target = e.target as HTMLElement
                                                         if (target.tagName === 'A') {
                                                             e.preventDefault()

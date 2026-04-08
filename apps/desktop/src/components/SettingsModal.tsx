@@ -5,6 +5,7 @@ import { ShortcutContext, ShortcutAction } from '../contexts/ShortcutContext'
 import { useTheme } from '../hooks/useTheme'
 import { defaultDarkTheme, parseThemeCss, THEME_TEMPLATES } from '../utils/themeManager'
 import { ConfirmModal } from './ConfirmModal'
+import { getBundledReleaseNotesHistory } from '../releaseNotes'
 import './SettingsModal.css'
 
 interface SettingsModalProps {
@@ -120,6 +121,11 @@ const DEFAULT_INSPECTOR_INFO_VISIBILITY = {
 
 export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRestored, language = 'ja', initialClientConfig = null }: SettingsModalProps) {
     const tr = (ja: string, en: string) => language === 'en' ? en : ja
+    const [releaseNotesHistoryModal, setReleaseNotesHistoryModal] = useState<null | {
+        title: string
+        description: string
+        releaseNotes: string
+    }>(null)
     const [confirmState, setConfirmState] = useState<null | {
         title: string
         message: string
@@ -929,6 +935,20 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRe
     const handleQuitAndInstall = async () => {
         await api.quitAndInstall()
     }
+
+    const handleOpenReleaseNotesHistory = useCallback(() => {
+        const history = getBundledReleaseNotesHistory(language)
+        const formatted = history
+            .map((entry) => `v${entry.version}\n${entry.releaseNotes}`)
+            .join('\n\n')
+            .trim()
+
+        setReleaseNotesHistoryModal({
+            title: tr('更新履歴', 'Release Notes'),
+            description: tr('これまでの更新履歴を表示しています。', 'Showing bundled release notes history.'),
+            releaseNotes: formatted || tr('変更履歴は取得できませんでした。', 'Release notes could not be loaded.'),
+        })
+    }, [language])
 
     useEffect(() => {
         void loadNetworkData()
@@ -2340,33 +2360,78 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRe
 
                             <div className="button-group" style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
                                 {updateStatus === 'idle' && (
-                                    <button className="btn btn-primary btn-sm" onClick={handleCheckForUpdates}>
-                                        {tr('更新を確認', 'Check for updates')}
-                                    </button>
+                                    <>
+                                        <button className="btn btn-primary btn-sm" onClick={handleCheckForUpdates}>
+                                            {tr('更新を確認', 'Check for updates')}
+                                        </button>
+                                        <button
+                                            className="btn btn-secondary btn-sm"
+                                            style={{ opacity: 0.8 }}
+                                            onClick={handleOpenReleaseNotesHistory}
+                                        >
+                                            {tr('更新履歴', 'Release notes')}
+                                        </button>
+                                    </>
                                 )}
 
                                 {updateStatus === 'available' && (
-                                    <button className="btn btn-primary btn-sm" onClick={handleDownloadUpdate}>
-                                        {tr('アップデートをダウンロード', 'Download update')}
-                                    </button>
+                                    <>
+                                        <button className="btn btn-primary btn-sm" onClick={handleDownloadUpdate}>
+                                            {tr('アップデートをダウンロード', 'Download update')}
+                                        </button>
+                                        <button
+                                            className="btn btn-secondary btn-sm"
+                                            style={{ opacity: 0.8 }}
+                                            onClick={handleOpenReleaseNotesHistory}
+                                        >
+                                            {tr('更新履歴', 'Release notes')}
+                                        </button>
+                                    </>
                                 )}
 
                                 {updateStatus === 'downloaded' && (
-                                    <button className="btn btn-primary btn-sm" onClick={handleQuitAndInstall}>
-                                        {tr('再起動してインストール', 'Restart and install')}
-                                    </button>
+                                    <>
+                                        <button className="btn btn-primary btn-sm" onClick={handleQuitAndInstall}>
+                                            {tr('再起動してインストール', 'Restart and install')}
+                                        </button>
+                                        <button
+                                            className="btn btn-secondary btn-sm"
+                                            style={{ opacity: 0.8 }}
+                                            onClick={handleOpenReleaseNotesHistory}
+                                        >
+                                            {tr('更新履歴', 'Release notes')}
+                                        </button>
+                                    </>
                                 )}
 
                                 {updateStatus === 'not-available' && (
-                                    <span className="settings-description" style={{ color: 'var(--primary-light)' }}>
-                                        {tr('最新のバージョンを使用しています。', 'You are using the latest version.')}
-                                    </span>
+                                    <>
+                                        <span className="settings-description" style={{ color: 'var(--primary-light)' }}>
+                                            {tr('最新のバージョンを使用しています。', 'You are using the latest version.')}
+                                        </span>
+                                        <button
+                                            className="btn btn-secondary btn-sm"
+                                            style={{ opacity: 0.8 }}
+                                            onClick={handleOpenReleaseNotesHistory}
+                                        >
+                                            {tr('更新履歴', 'Release notes')}
+                                        </button>
+                                    </>
                                 )}
 
                                 {updateStatus === 'error' && (
-                                    <div style={{ color: 'var(--accent)', fontSize: '13px' }}>
-                                        {tr('エラーが発生しました', 'An error occurred')}: {typeof updateInfo === 'string' ? updateInfo : tr('不明なエラー', 'Unknown error')}
-                                    </div>
+                                    <>
+                                        <div style={{ color: 'var(--accent)', fontSize: '13px' }}>
+                                            {tr('エラーが発生しました', 'An error occurred')}: {typeof updateInfo === 'string' ? updateInfo : tr('不明なエラー', 'Unknown error')}
+                                        </div>
+                                        <button
+                                            className="btn btn-secondary btn-sm"
+                                            style={{ opacity: 0.8 }}
+                                            onClick={handleOpenReleaseNotesHistory}
+                                        >
+                                            {tr('更新履歴', 'Release notes')}
+                                        </button>
+                                    </>
                                 )}
                             </div>
                         </div>
@@ -2478,6 +2543,35 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRe
                             <span className="settings-description">
                                 {tr('サーバーからダウンロードするファイルのデフォルト保存先です。', 'Default save location for downloaded files.')}
                             </span>
+                        </div>
+                    </div>
+                </section>
+
+                <section className="settings-section">
+                    <h4 className="section-title">{tr('インポート', 'Import')}</h4>
+                    <div className="settings-card">
+                        <div className="settings-row">
+                            <div className="settings-info">
+                                <span className="settings-label">{tr('D&D インポート後に元ファイルを移動する', 'Move source files after drag-and-drop import')}</span>
+                                <span className="settings-description">
+                                    {tr('オンの場合、ドラッグ&ドロップで取り込んだ後に元ファイルを削除し、コピーではなく移動として扱います。', 'When enabled, drag-and-drop imports remove the original file after import so the operation behaves like a move instead of a copy.')}
+                                </span>
+                            </div>
+                            <label className="toggle-switch">
+                                <input
+                                    type="checkbox"
+                                    checked={Boolean(clientConfig.dragDropImportMoveSource)}
+                                    onChange={(e) => {
+                                        const newConfig: ClientConfig = {
+                                            ...clientConfig,
+                                            dragDropImportMoveSource: e.target.checked
+                                        }
+                                        setClientConfig(newConfig)
+                                        updateClientConfig({ dragDropImportMoveSource: e.target.checked })
+                                    }}
+                                />
+                                <span className="slider"></span>
+                            </label>
                         </div>
                     </div>
                 </section>
@@ -2632,6 +2726,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRe
         if (!clientConfig) return <div className="loading">{tr('読み込み中...', 'Loading...')}</div>
 
         return (
+            <>
             <div className="settings-page">
                 <h3 className="settings-page-title">{tr('一般設定', 'General')}</h3>
 
@@ -2771,6 +2866,27 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRe
                     </div>
                 </section>
             </div>
+            {releaseNotesHistoryModal && (
+                <div className="app-modal-overlay inner-modal" onClick={() => setReleaseNotesHistoryModal(null)}>
+                    <div className="app-modal release-notes-modal" onClick={(e) => e.stopPropagation()}>
+                        <div className="app-modal-header">
+                            <h3>{releaseNotesHistoryModal.title}</h3>
+                        </div>
+                        <div className="app-modal-body">
+                            <p>{releaseNotesHistoryModal.description}</p>
+                            <div className="release-notes-content">
+                                {releaseNotesHistoryModal.releaseNotes}
+                            </div>
+                        </div>
+                        <div className="app-modal-footer">
+                            <button className="btn btn-primary" onClick={() => setReleaseNotesHistoryModal(null)}>
+                                {tr('閉じる', 'Close')}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            </>
         )
     }
 
@@ -3244,12 +3360,18 @@ const AudioSettings = ({ language = 'ja', clientConfig, setClientConfig }: { lan
     const currentDevice = clientConfig?.audioDevice || 'auto'
 
     const updateConfig = async (update: Partial<ClientConfig>) => {
+        const previousConfig = clientConfig
+        const optimisticConfig = {
+            ...(clientConfig || {}),
+            ...update,
+        }
+        setClientConfig(optimisticConfig)
         try {
             const nextConfig = await api.updateClientConfig(update)
             setClientConfig(nextConfig)
 
             // Trigger backend updates if needed
-            if (update.audioDevice) {
+            if (update.audioDevice !== undefined) {
                 await api.setAudioDevice(update.audioDevice)
             }
             if (update.exclusiveMode !== undefined) {
@@ -3257,6 +3379,7 @@ const AudioSettings = ({ language = 'ja', clientConfig, setClientConfig }: { lan
             }
         } catch (e) {
             console.error(e)
+            setClientConfig(previousConfig)
         }
     }
 
