@@ -12,7 +12,6 @@ import { mockDesktopAPI } from './mockDesktopAPI'
 
 const STORAGE_KEY = 'tauri_client_config'
 const PLUGIN_DATA_PREFIX = 'tauri_plugin_data:'
-const PLUGIN_ASSOC_PREFIX = 'tauri_plugin_assoc:'
 let tauriAudio: HTMLAudioElement | null = null
 let tauriAudioListenersBound = false
 let selectedAudioDeviceId = 'default'
@@ -32,6 +31,8 @@ const TAURI_EVENTS = {
 } as const
 const TRANSPARENT_DRAG_ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO9WnWQAAAAASUVORK5CYII='
 const SIDECAR_RETRY_DELAYS_MS = [150, 350, 750] as const
+const GET_ACTIVE_LIBRARY_TIMEOUT_MS = 4000
+const READ_CLIENT_CONFIG_TIMEOUT_MS = 2500
 
 function isTauriRuntime(): boolean {
     if (typeof window === 'undefined') return false
@@ -41,6 +42,25 @@ function isTauriRuntime(): boolean {
 
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const timer = window.setTimeout(() => {
+            reject(new Error(`${label} timed out after ${timeoutMs}ms`))
+        }, timeoutMs)
+
+        promise.then(
+            (value) => {
+                window.clearTimeout(timer)
+                resolve(value)
+            },
+            (error) => {
+                window.clearTimeout(timer)
+                reject(error)
+            },
+        )
+    })
 }
 
 async function invokeSidecarWithRetry<T = any>(method: string, params: any): Promise<T> {
@@ -357,7 +377,11 @@ async function getStoredClientConfig() {
             let lastError: unknown = null
             for (let attempt = 0; attempt <= SIDECAR_RETRY_DELAYS_MS.length; attempt += 1) {
                 try {
-                    return await invoke<string>('read_client_config')
+                    return await withTimeout(
+                        invoke<string>('read_client_config'),
+                        READ_CLIENT_CONFIG_TIMEOUT_MS,
+                        'read_client_config',
+                    )
                 } catch (error) {
                     lastError = error
                     if (attempt >= SIDECAR_RETRY_DELAYS_MS.length) break
@@ -760,7 +784,11 @@ export function initTauriDesktopBridge(): void {
         getActiveLibrary: async () => {
             let sidecarResult: any = null
             try {
-                sidecarResult = await invokeSidecarWithRetry<any>('get_active_library', null)
+                sidecarResult = await withTimeout(
+                    invokeSidecarWithRetry<any>('get_active_library', null),
+                    GET_ACTIVE_LIBRARY_TIMEOUT_MS,
+                    'get_active_library',
+                )
                 if (sidecarResult && typeof sidecarResult === 'object' && sidecarResult.path) return sidecarResult
             } catch (error) {
                 console.error('[TauriBridge] getActiveLibrary failed, falling back to config:', error)
@@ -2381,11 +2409,11 @@ export function initTauriDesktopBridge(): void {
                 return '0.0.0-tauri'
             }
         },
-        getPluginScripts: async () => {
+        getPluginScripts: async (options?: { ids?: string[] }) => {
             try {
                 const result = await invoke<any[]>('sidecar_request', {
                     method: 'get_plugin_scripts',
-                    params: null,
+                    params: options || null,
                 })
                 return Array.isArray(result) ? result : []
             } catch {
@@ -2460,25 +2488,22 @@ export function initTauriDesktopBridge(): void {
             }
         },
         saveAssociatedData: async (mediaFilePath: string, data: any) => {
+            let jsonText: string
             try {
-                const result = await invoke<boolean>('sidecar_request', {
-                    method: 'save_associated_data',
-                    params: { mediaFilePath, data: data ?? null },
-                })
-                if (result === true) return true
-            } catch {
-                // Fallback below.
-            }
-
-            try {
-                localStorage.setItem(
-                    `${PLUGIN_ASSOC_PREFIX}${mediaFilePath}`,
-                    JSON.stringify(data),
-                )
-                return true
+                jsonText = JSON.stringify(data ?? null)
             } catch {
                 return false
             }
+            try {
+                const result = await invoke<boolean>('sidecar_request', {
+                    method: 'save_associated_data',
+                    params: { mediaFilePath, jsonText },
+                })
+                if (result === true) return true
+            } catch {
+                return false
+            }
+            return false
         },
         loadAssociatedData: async (mediaFilePath: string) => {
             try {
@@ -2486,13 +2511,6 @@ export function initTauriDesktopBridge(): void {
                     method: 'load_associated_data',
                     params: { mediaFilePath },
                 })
-            } catch {
-                // Fallback below.
-            }
-
-            try {
-                const raw = localStorage.getItem(`${PLUGIN_ASSOC_PREFIX}${mediaFilePath}`)
-                return raw ? JSON.parse(raw) : null
             } catch {
                 return null
             }

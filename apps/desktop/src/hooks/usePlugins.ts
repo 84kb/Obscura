@@ -25,3 +25,10 @@ export function usePlugins(): ObscuraPlugin[] {
 
     return plugins
 }
+
+export function useCommentProviders(): ObscuraPlugin[] {
+    return usePlugins().filter((plugin) => (
+        typeof plugin.canHandle === 'function' &&
+        (typeof plugin.fetchData === 'function' || typeof (plugin as any).fetchComments === 'function')
+    ))
+}

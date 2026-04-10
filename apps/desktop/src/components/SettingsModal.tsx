@@ -3092,7 +3092,8 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRe
                         <div className="settings-description-box">
                             <span className="settings-description">
                                 <code>plugins</code> フォルダに配置されたスクリプトを拡張機能として読み込みます。<br />
-                                サードパーティ製スクリプトの実行はセキュリティリスクを伴うため、信頼できる提供元のプラグインのみを有効にしてください。
+                                サードパーティ製スクリプトの実行はセキュリティリスクを伴うため、信頼できる提供元のプラグインのみを有効にしてください。<br />
+                                ここでのオンオフは、起動時に自動読み込みされるプラグインにも適用されます。
                             </span>
                         </div>
 

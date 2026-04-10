@@ -1,6 +1,32 @@
 import { ObscuraPlugin, AppSettings, MediaFile, PlayerOverlayContext, ObscuraAPI } from '@obscura/core';
 import { api } from './index';
 
+const ENABLE_PLUGIN_SCRIPT_FETCH = true;
+const ENABLE_PLUGIN_SCRIPT_EXECUTION = true;
+const ENABLED_PLUGIN_SCRIPT_IDS = new Set<string>();
+const STARTUP_DEFERRED_PLUGIN_SCRIPT_IDS = new Set<string>(['niconico']);
+
+const getAssociatedDataCache = (): Map<string, any> => {
+    return ((window as any).__obscura_associated_data_cache ||= new Map<string, any>()) as Map<string, any>;
+};
+
+const loadAssociatedDataCached = async (mediaFilePath: string) => {
+    const cache = getAssociatedDataCache();
+    if (cache.has(mediaFilePath)) {
+        return await cache.get(mediaFilePath);
+    }
+
+    const loadPromise = api.loadAssociatedData(mediaFilePath).then((data) => {
+        cache.set(mediaFilePath, data);
+        return data;
+    }).catch((error) => {
+        cache.delete(mediaFilePath);
+        throw error;
+    });
+    cache.set(mediaFilePath, loadPromise);
+    return await loadPromise;
+};
+
 export function initializePluginSystem() {
     if (window.ObscuraAPI) {
         console.warn('[PluginSystem] ObscuraAPI is already initialized.');
@@ -35,6 +61,10 @@ export function initializePluginSystem() {
                 }
             }
 
+            if (!p.hooks || typeof p.hooks !== 'object') {
+                p.hooks = {};
+            }
+
             plugins.push(plugin);
             console.log(`[PluginSystem] Registered plugin: ${plugin.name} (${plugin.id})`);
             // React コンポーネント等にプラグインが追加されたことを通知する
@@ -65,9 +95,20 @@ export function initializePluginSystem() {
             console.log(`[PluginSystem] Unregistered player overlay: ${id}`);
         },
 
+        registerCommentProvider: (plugin: ObscuraPlugin) => {
+            obscuraAPI.registerPlugin(plugin);
+        },
+
+        unregisterCommentProvider: (pluginId: string) => {
+            obscuraAPI.unregisterPlugin?.(pluginId);
+        },
+
         media: {
             get: async (id: number) => {
                 return await api.getMediaFile(id);
+            },
+            list: async (page?: number, limit?: number, filters?: any) => {
+                return await api.getMediaFiles(page, limit, filters);
             },
             getSelected: async () => {
                 const selected = await api.getSelectedMedia();
@@ -79,15 +120,48 @@ export function initializePluginSystem() {
             update: async (id: number, updates: Partial<MediaFile>) => {
                 return await api.updateMedia(id, updates);
             },
+            rename: async (id: number, newName: string) => {
+                return await api.renameMedia(id, newName);
+            },
             addTag: async (mediaId: number, tagId: number) => {
                 return await api.addTagToMedia(mediaId, tagId);
             },
             removeTag: async (mediaId: number, tagId: number) => {
                 return await api.removeTagFromMedia(mediaId, tagId);
             },
-            import: async (filePaths: string[]) => {
-                return await api.importMedia(filePaths);
+            import: async (filePaths: string[], options?: { deleteSource?: boolean; importSource?: string }) => {
+                return await api.importMedia(filePaths, options);
             }
+        },
+
+        tags: {
+            list: async () => await api.getTags(),
+            create: async (name: string) => await api.createTag(name),
+            delete: async (id: number) => await api.deleteTag(id),
+            addToMedia: async (mediaId: number, tagId: number) => await api.addTagToMedia(mediaId, tagId),
+            removeFromMedia: async (mediaId: number, tagId: number) => await api.removeTagFromMedia(mediaId, tagId),
+        },
+
+        folders: {
+            list: async () => await api.getFolders(),
+            create: async (name: string, parentId?: number | null) => await api.createFolder(name, parentId),
+            rename: async (id: number, newName: string) => await api.renameFolder(id, newName),
+            delete: async (id: number) => await api.deleteFolder(id),
+            addToMedia: async (mediaId: number, folderId: number) => await api.addFolderToMedia(mediaId, folderId),
+            removeFromMedia: async (mediaId: number, folderId: number) => await api.removeFolderFromMedia(mediaId, folderId),
+        },
+
+        libraries: {
+            list: async () => await api.getLibraries(),
+            getActive: async () => await api.getActiveLibrary(),
+            open: async () => await api.openLibrary(),
+            setActive: async (libraryPath: string) => await api.setActiveLibrary(libraryPath),
+            refresh: async () => await api.refreshLibrary(),
+        },
+
+        config: {
+            getClientConfig: async () => await api.getClientConfig(),
+            updateClientConfig: async (updates: any) => await api.updateClientConfig(updates),
         },
 
         ui: {
@@ -102,6 +176,14 @@ export function initializePluginSystem() {
             },
             copyToClipboard: async (text: string) => {
                 await api.copyToClipboard(text);
+            },
+            openMainView: (pluginId: string, viewId: string) => {
+                window.dispatchEvent(new CustomEvent('obscura:open-plugin-main-view', {
+                    detail: { pluginId, viewId }
+                }));
+            },
+            closeMainView: () => {
+                window.dispatchEvent(new CustomEvent('obscura:close-plugin-main-view'));
             }
         },
 
@@ -116,10 +198,24 @@ export function initializePluginSystem() {
                 return await api.loadPluginMediaData(mediaId, pluginId);
             },
             saveAssociatedData: async (mediaFilePath: string, data: any) => {
-                return await api.saveAssociatedData(mediaFilePath, data);
+                const saved = await api.saveAssociatedData(mediaFilePath, data);
+                if (saved) {
+                    getAssociatedDataCache().set(mediaFilePath, data);
+                }
+                return saved;
             },
             loadAssociatedData: async (mediaFilePath: string) => {
-                return await api.loadAssociatedData(mediaFilePath);
+                return await loadAssociatedDataCached(mediaFilePath);
+            },
+            saveCommentFile: async (mediaFilePath: string, data: any) => {
+                const saved = await api.saveAssociatedData(mediaFilePath, data);
+                if (saved) {
+                    getAssociatedDataCache().set(mediaFilePath, data);
+                }
+                return saved;
+            },
+            loadCommentFile: async (mediaFilePath: string) => {
+                return await loadAssociatedDataCached(mediaFilePath);
             },
             openPath: async (path: string) => {
                 await api.openPath(path);
@@ -166,14 +262,39 @@ export function initializePluginSystem() {
 // 既に読み込み済みのプラグインスクリプトID
 const loadedScripts = new Set<string>();
 
-export async function loadPluginScripts(config?: AppSettings) {
+export async function loadPluginScripts(config?: AppSettings, options?: { includeDeferred?: boolean; ids?: string[] }) {
+    if (!ENABLE_PLUGIN_SCRIPT_FETCH) {
+        console.warn('[PluginSystem] Plugin runtime is temporarily disabled.');
+        return;
+    }
     try {
-        const scripts = await api.getPluginScripts();
+        const requestedIds = options?.ids?.filter(Boolean) || [];
+        const scripts = await api.getPluginScripts(requestedIds.length > 0 ? { ids: requestedIds } : undefined);
         if (!scripts || scripts.length === 0) return;
+        if (!ENABLE_PLUGIN_SCRIPT_EXECUTION) {
+            console.warn(`[PluginSystem] Plugin scripts fetched (${scripts.length}) but execution is temporarily disabled.`);
+            return;
+        }
 
-        for (const script of scripts) {
+        const priorityIds = requestedIds.length > 0 ? requestedIds : ['niconico'];
+        const priorityIndex = (pluginId: string) => {
+            const index = priorityIds.indexOf(pluginId);
+            return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+        };
+        const orderedScripts = [...scripts].sort((left, right) => priorityIndex(left.id) - priorityIndex(right.id));
+
+        for (const script of orderedScripts) {
             const pluginId = script.id; // API側で用意したIDを使用
             const scriptId = `plugin-script-${pluginId}`;
+            if (options?.ids && options.ids.length > 0 && !options.ids.includes(pluginId)) {
+                continue;
+            }
+            if (ENABLED_PLUGIN_SCRIPT_IDS.size > 0 && !ENABLED_PLUGIN_SCRIPT_IDS.has(pluginId)) {
+                continue;
+            }
+            if (!options?.includeDeferred && STARTUP_DEFERRED_PLUGIN_SCRIPT_IDS.has(pluginId)) {
+                continue;
+            }
 
             // configが渡されている場合、有効化状況を確認する
             if (config && config.extensions) {

@@ -9,7 +9,8 @@ import { toMediaUrl } from '../utils/fileUrl'
 import { ShortcutContext } from '../contexts/ShortcutContext'
 import { AudioSettingsModal } from './AudioSettingsModal'
 import { getAuthHeaders } from '../utils/auth'
-import { usePlugins as useCommentProviders } from '../hooks/usePlugins'
+import { useCommentProviders } from '../hooks/usePlugins'
+import { loadPluginScripts } from '../api/plugin-system'
 
 interface PlayerProps {
     media: MediaFile
@@ -121,6 +122,10 @@ export const Player: React.FC<PlayerProps> = ({
     }, [])
 
     const commentProviders = useCommentProviders()
+    useEffect(() => {
+        if (!settings) return
+        void loadPluginScripts(settings, { includeDeferred: true, ids: ['niconico'] })
+    }, [settings])
     const playerExtensionButtons = React.useMemo(() => {
         if (!media) return []
         try {
@@ -966,6 +971,28 @@ export const Player: React.FC<PlayerProps> = ({
 
     const fileUrl = toMediaUrl(media.file_path)
 
+    useEffect(() => {
+        if (!media.file_path || !isVideo) return
+        const cache = ((window as any).__obscura_associated_data_cache ||= new Map<string, any>()) as Map<string, any>
+        if (cache.has(media.file_path)) return
+        let cancelled = false
+        const loadPromise = api.loadAssociatedData(media.file_path).then((data) => {
+            if (!cancelled) {
+                cache.set(media.file_path, data)
+            }
+            return data
+        }).catch(() => {
+            if (!cancelled) {
+                cache.set(media.file_path, null)
+            }
+            return null
+        })
+        cache.set(media.file_path, loadPromise)
+        return () => {
+            cancelled = true
+        }
+    }, [isVideo, media.file_path])
+
     // 繧ｪ繝ｼ繝舌・繝ｬ繧､謠冗判繝ｫ繝ｼ繝励→Canvas縺ｮ迚ｩ逅・ｧ｣蜒丞ｺｦ隱ｿ謨ｴ・・PI蟇ｾ蠢懶ｼ・
     useEffect(() => {
         const canvas = overlayCanvasRef.current
@@ -982,6 +1009,7 @@ export const Player: React.FC<PlayerProps> = ({
 
         let animationFrameId: number
         const render = () => {
+            handleResize()
             const overlays = (window as any).__obscura_player_overlays as Map<string, any>
             if (overlays) {
                 const canvas = overlayCanvasRef.current
@@ -1002,61 +1030,93 @@ export const Player: React.FC<PlayerProps> = ({
         }
 
         // 繝薙ョ繧ｪ縺ｮ螳滄圀縺ｮ陦ｨ遉ｺ鬆伜沺縺ｫCanvas繧呈ｭ｣遒ｺ縺ｫ荳閾ｴ縺輔○繧九Μ繧ｵ繧､繧ｺ蜃ｦ逅・        // video.getBoundingClientRect()縺ｯobject-fit縺ｮ蠖ｱ髻ｿ繧貞渚譏縺励↑縺・◆繧√・        // 繧ｳ繝ｳ繝・リ繧ｵ繧､繧ｺ縺ｨ繧｢繧ｹ繝壹け繝域ｯ斐°繧画丐蜒上・陦ｨ遉ｺ鬆伜沺繧定・蜑阪〒險育ｮ励☆繧・
+        let resizeRetryFrameId: number | null = null
+        const scheduleResizeRetry = () => {
+            if (resizeRetryFrameId !== null) return
+            resizeRetryFrameId = requestAnimationFrame(() => {
+                resizeRetryFrameId = null
+                handleResize()
+            })
+        }
+
         const handleResize = () => {
             const parent = canvas.parentElement
             if (!parent || videoSize.width === 0) return
 
             const rect = parent.getBoundingClientRect()
-            const dpr = window.devicePixelRatio || 1
-
+            if (rect.width <= 0 || rect.height <= 0) {
+                scheduleResizeRetry()
+                return
+            }
+            const videoRect = videoRef.current?.getBoundingClientRect()
+            if (!videoRect || videoRect.width <= 0 || videoRect.height <= 0) {
+                scheduleResizeRetry()
+                return
+            }
             const videoRatio = videoSize.width / videoSize.height
-            const containerRatio = rect.width / rect.height
-
-            let displayWidth = 0
-            let displayHeight = 0
-
-            if (resizeMode === 'scale-down') {
-                // 繧ｪ繝ｪ繧ｸ繝翫Ν繧ｵ繧､繧ｺ: 繝阪う繝・ぅ繝冶ｧ｣蜒丞ｺｦ繧定ｶ・∴縺ｪ縺・ｯ・峇縺ｧ繧ｳ繝ｳ繝・リ縺ｫ蜿弱ａ繧・                displayWidth = Math.min(videoSize.width, rect.width)
-                displayHeight = displayWidth / videoRatio
-                if (displayHeight > rect.height) {
-                    displayHeight = rect.height
-                    displayWidth = displayHeight * videoRatio
-                }
+            const elementRatio = videoRect.width / videoRect.height
+            let displayWidth = videoRect.width
+            let displayHeight = videoRect.height
+            let contentOffsetLeft = 0
+            let contentOffsetTop = 0
+            if (elementRatio > videoRatio) {
+                displayHeight = videoRect.height
+                displayWidth = displayHeight * videoRatio
+                contentOffsetLeft = (videoRect.width - displayWidth) / 2
             } else {
-                // 繧ｦ繧｣繝ｳ繝峨え縺ｫ蜷医ｏ縺帙ｋ: 繧ｳ繝ｳ繝・リ蜀・〒繧｢繧ｹ繝壹け繝域ｯ斐ｒ邯ｭ謖√＠縺ｦ譛螟ｧ蛹・
-                if (containerRatio > videoRatio) {
-                    displayHeight = rect.height
-                    displayWidth = displayHeight * videoRatio
-                } else {
-                    displayWidth = rect.width
-                    displayHeight = displayWidth / videoRatio
-                }
+                displayWidth = videoRect.width
+                displayHeight = displayWidth / videoRatio
+                contentOffsetTop = (videoRect.height - displayHeight) / 2
+            }
+            const offsetLeft = videoRect.left - rect.left + contentOffsetLeft
+            const offsetTop = videoRect.top - rect.top + contentOffsetTop
+            const newWidth = 1920
+            const newHeight = 1080
+            if (newWidth <= 0 || newHeight <= 0) {
+                scheduleResizeRetry()
+                return
             }
 
-            const newWidth = Math.floor(displayWidth * dpr)
-            const newHeight = Math.floor(displayHeight * dpr)
-
             if (canvas.width !== newWidth || canvas.height !== newHeight ||
-                canvas.style.width !== `${displayWidth}px` || canvas.style.height !== `${displayHeight}px`) {
+                canvas.style.width !== `${displayWidth}px` || canvas.style.height !== `${displayHeight}px` ||
+                canvas.style.left !== `${offsetLeft}px` || canvas.style.top !== `${offsetTop}px`) {
                 canvas.width = newWidth
                 canvas.height = newHeight
+                canvas.style.position = 'absolute'
+                canvas.style.left = `${offsetLeft}px`
+                canvas.style.top = `${offsetTop}px`
                 canvas.style.width = `${displayWidth}px`
                 canvas.style.height = `${displayHeight}px`
-                console.log(`[Player] Canvas resized to ${newWidth}x${newHeight} (DPR: ${dpr}, CSS: ${displayWidth}x${displayHeight})`)
+                console.log(`[Player] Canvas resized to ${newWidth}x${newHeight} (CSS: ${displayWidth}x${displayHeight})`)
             }
         }
 
         const resizeObserver = new ResizeObserver(handleResize)
         if (canvas.parentElement) {
             resizeObserver.observe(canvas.parentElement)
+            if (canvas.parentElement.parentElement) {
+                resizeObserver.observe(canvas.parentElement.parentElement)
+            }
         }
+        if (videoRef.current) {
+            resizeObserver.observe(videoRef.current)
+        }
+        const contentElement = canvas.parentElement?.closest('.player-content')
+        if (contentElement) {
+            resizeObserver.observe(contentElement)
+        }
+        window.addEventListener('resize', handleResize)
         handleResize()
 
         render()
 
         return () => {
             cancelAnimationFrame(animationFrameId)
+            if (resizeRetryFrameId !== null) {
+                cancelAnimationFrame(resizeRetryFrameId)
+            }
             resizeObserver.disconnect()
+            window.removeEventListener('resize', handleResize)
         }
     }, [media, isVideo, videoSize, resizeMode])
 
@@ -1257,9 +1317,7 @@ export const Player: React.FC<PlayerProps> = ({
                                 pointerEvents: 'none',
                                 zIndex: 2,
                                 overflow: 'hidden',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center'
+                                position: 'relative'
                             }}>
                                 <canvas
                                     ref={overlayCanvasRef}

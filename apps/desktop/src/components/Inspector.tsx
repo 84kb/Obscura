@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { MediaFile, Tag, Folder, MediaComment, SharedUser, ObscuraPlugin, AppSettings, ExtensionInfoRow } from '@obscura/core'
+import { MediaFile, Tag, Folder, MediaComment, SharedUser, ObscuraPlugin, AppSettings, ExtensionInfoRow, ExtensionInspectorSection, ExtensionInspectorSectionBlock } from '@obscura/core'
 import './Inspector.css'
 import { toMediaUrl } from '../utils/fileUrl'
 import { api } from '../api'
@@ -8,8 +8,9 @@ import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { InspectorSection, InfoSectionContent, CommentSectionContent, PlaylistSectionContent, RelationSectionContent, MediaPicker } from './InspectorSections'
 import { useNotification } from '../contexts/NotificationContext'
-import { usePlugins } from '../hooks/usePlugins'
+import { useCommentProviders } from '../hooks/usePlugins'
 import { t as i18nT, AppLanguage } from '../i18n'
+import { PluginMount } from './PluginMount'
 
 interface InspectorProps {
     media: MediaFile[]
@@ -113,7 +114,48 @@ export function Inspector({
     const [fetchingPlugins, setFetchingPlugins] = useState<Record<string, boolean>>({})
 
     // カスタムフックでプロバイダを監視・取得
-    const availableProviders = usePlugins()
+    const availableProviders = useCommentProviders()
+    const pluginInspectorContext = useMemo(() => ({
+        media,
+        playingMedia,
+        currentContextMedia,
+        settings,
+        language,
+    }), [currentContextMedia, language, media, playingMedia, settings])
+    const pluginInspectorBlocks = useMemo<(ExtensionInspectorSectionBlock & { pluginId: string; key: string })[]>(() => {
+        return availableProviders
+            .flatMap((plugin: ObscuraPlugin) => {
+                try {
+                    const blocks = plugin.uiHooks?.inspectorSectionBlocks?.(pluginInspectorContext) || []
+                    return blocks.map((block) => ({
+                        ...block,
+                        pluginId: plugin.id,
+                        key: `${plugin.id}:${block.sectionId}:${block.id}`,
+                    }))
+                } catch (error) {
+                    console.error(`[PluginSystem] Failed to collect inspector blocks for ${plugin.id}`, error)
+                    return []
+                }
+            })
+            .sort((a, b) => (a.order || 0) - (b.order || 0) || a.id.localeCompare(b.id))
+    }, [availableProviders, pluginInspectorContext])
+    const pluginInspectorSections = useMemo<(ExtensionInspectorSection & { pluginId: string; key: string })[]>(() => {
+        return availableProviders
+            .flatMap((plugin: ObscuraPlugin) => {
+                try {
+                    const sections = plugin.uiHooks?.inspectorSections?.(pluginInspectorContext) || []
+                    return sections.map((section) => ({
+                        ...section,
+                        pluginId: plugin.id,
+                        key: `${plugin.id}:${section.id}`,
+                    }))
+                } catch (error) {
+                    console.error(`[PluginSystem] Failed to collect inspector sections for ${plugin.id}`, error)
+                    return []
+                }
+            })
+            .sort((a, b) => (a.order || 0) - (b.order || 0) || a.title.localeCompare(b.title))
+    }, [availableProviders, pluginInspectorContext])
 
     // Electron で window.prompt が使えないためのカスタムプロンプト状態
     const [promptData, setPromptData] = useState<{
@@ -185,6 +227,11 @@ export function Inspector({
                 throw new Error(tr(`プラグイン ${provider.name} は fetchData メソッドを実装していません。`, `Plugin ${provider.name} does not implement fetchData.`));
             }
             const resourceData = await provider.fetchData(media[0].id, targetUrl);
+            const isEmptyArray = Array.isArray(resourceData) && resourceData.length === 0
+            const isEmptyObject = resourceData && typeof resourceData === 'object' && !Array.isArray(resourceData) && Object.keys(resourceData).length === 0
+            if (resourceData == null || isEmptyArray || isEmptyObject) {
+                throw new Error(tr(`${provider.name} から有効なデータを取得できませんでした`, `Failed to fetch valid data from ${provider.name}`));
+            }
 
             // 2. 動画ファイルと同階層にデータを保存
             const filePath = media[0].file_path;
@@ -730,6 +777,25 @@ export function Inspector({
         }
     }
 
+    const renderPluginBlocks = (sectionId: ExtensionInspectorSectionBlock['sectionId']) => {
+        const blocks = pluginInspectorBlocks.filter((block) => block.sectionId === sectionId)
+        if (blocks.length === 0) return null
+        return blocks.map((block) => (
+            <div key={block.key} className="section-content plugin-section-block">
+                {block.title && <div className="section-subtitle">{block.title}</div>}
+                <PluginMount
+                    mount={block.mount}
+                    context={{
+                        pluginId: block.pluginId,
+                        media: media[0] || null,
+                        selection: media,
+                        sectionId,
+                    }}
+                />
+            </div>
+        ))
+    }
+
     if (media.length === 0) {
         return (
             <div className={`inspector ${enableRichText ? 'rich-text-enabled' : ''} `} ref={inspectorRef}>
@@ -965,6 +1031,7 @@ export function Inspector({
                                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                                 </button>
                                             </div>
+                                            {renderPluginBlocks(sectionId as ExtensionInspectorSectionBlock['sectionId'])}
                                         </InspectorSection>
                                     )
                                 case 'folders':
@@ -987,6 +1054,7 @@ export function Inspector({
                                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                                 </button>
                                             </div>
+                                            {renderPluginBlocks(sectionId as ExtensionInspectorSectionBlock['sectionId'])}
                                         </InspectorSection>
                                     )
                                 case 'artist':
@@ -1011,6 +1079,7 @@ export function Inspector({
                                                     }
                                                 }}
                                             />
+                                            {renderPluginBlocks(sectionId as ExtensionInspectorSectionBlock['sectionId'])}
                                         </InspectorSection>
                                     )
                                 case 'relations':
@@ -1042,6 +1111,7 @@ export function Inspector({
                                                     }}
                                                 />
                                             ) : <div>{i18nT(language, 'inspector.featureDisabled')}</div>}
+                                            {renderPluginBlocks(sectionId as ExtensionInspectorSectionBlock['sectionId'])}
                                         </InspectorSection>
                                     )
                                 case 'description':
@@ -1129,6 +1199,7 @@ export function Inspector({
                                                     disabled={media.length !== 1}
                                                 />
                                             )}
+                                            {renderPluginBlocks(sectionId as ExtensionInspectorSectionBlock['sectionId'])}
                                         </InspectorSection>
                                     )
                                 case 'url':
@@ -1191,6 +1262,7 @@ export function Inspector({
                                                     {i18nT(language, 'inspector.open')}
                                                 </button>
                                             </div>
+                                            {renderPluginBlocks(sectionId as ExtensionInspectorSectionBlock['sectionId'])}
                                         </InspectorSection>
                                     )
                                 case 'info':
@@ -1226,6 +1298,7 @@ export function Inspector({
                                                     : []
                                                 )}
                                             />
+                                            {renderPluginBlocks(sectionId as ExtensionInspectorSectionBlock['sectionId'])}
                                         </InspectorSection>
                                     )
                                 case 'comments':
@@ -1260,6 +1333,7 @@ export function Inspector({
                                                     )}
                                                 />
                                             </div>
+                                            {renderPluginBlocks(sectionId as ExtensionInspectorSectionBlock['sectionId'])}
                                         </InspectorSection>
                                     )
                                 case 'playlist':
@@ -1283,12 +1357,32 @@ export function Inspector({
                                                 prevVisibleCount={playlistPrevVisibleCount}
                                                 nextVisibleCount={playlistNextVisibleCount}
                                             />
+                                            {renderPluginBlocks(sectionId as ExtensionInspectorSectionBlock['sectionId'])}
                                         </InspectorSection>
                                     )
                                 default:
                                     return null
                             }
                         })}
+                        {pluginInspectorSections.map((section) => (
+                            <InspectorSection
+                                key={section.key}
+                                id={section.key}
+                                title={section.title}
+                                isOpen={!collapsedSections[section.key]}
+                                onToggle={() => toggleSection(section.key)}
+                            >
+                                <PluginMount
+                                    mount={section.mount}
+                                    context={{
+                                        pluginId: section.pluginId,
+                                        media: media[0] || null,
+                                        selection: media,
+                                        sectionId: section.id,
+                                    }}
+                                />
+                            </InspectorSection>
+                        ))}
                     </SortableContext >
                 </DndContext >
 

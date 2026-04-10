@@ -50,10 +50,59 @@ function send(message) {
   }
 }
 
+function getBundledPluginDirs() {
+  const candidates = []
+  const fromEnv = process.env.OBSCURA_PLUGIN_DIR
+  if (fromEnv) candidates.push(fromEnv)
+  candidates.push(path.resolve(__dirname, '..', 'plugins'))
+  if (process.resourcesPath) {
+    candidates.push(path.join(process.resourcesPath, 'plugins'))
+  }
+  if (process.cwd && typeof process.cwd === 'function') {
+    candidates.push(path.resolve(process.cwd(), 'plugins'))
+  }
+  return [...new Set(candidates.map((dir) => String(dir || '').trim()).filter(Boolean))]
+}
+
+function syncBundledPluginsToRuntimeDir(runtimeDir) {
+  ensureDir(runtimeDir)
+  for (const dir of getBundledPluginDirs()) {
+    try {
+      if (!fs.existsSync(dir) || path.resolve(dir) === path.resolve(runtimeDir)) continue
+      const files = fs.readdirSync(dir).filter((f) => f.endsWith('.js'))
+      for (const fileName of files) {
+        const src = path.join(dir, fileName)
+        const dest = path.join(runtimeDir, fileName)
+        if (fs.existsSync(dest)) {
+          const srcCode = fs.readFileSync(src, 'utf8')
+          const destCode = fs.readFileSync(dest, 'utf8')
+          const srcMeta = parseMetadata(srcCode, fileName)
+          const destMeta = parseMetadata(destCode, fileName)
+          const shouldUpdateBundledPlugin =
+            srcMeta.author === 'Obscura' &&
+            destMeta.author === 'Obscura' &&
+            srcMeta.version &&
+            destMeta.version &&
+            srcMeta.version !== destMeta.version
+          if (!shouldUpdateBundledPlugin) continue
+        }
+        fs.copyFileSync(src, dest)
+      }
+    } catch {
+      // Ignore plugin sync failures and keep trying other candidates.
+    }
+  }
+}
+
 function getPluginDir() {
   const fromEnv = process.env.OBSCURA_PLUGIN_DIR
-  if (fromEnv && fs.existsSync(fromEnv)) return fromEnv
-  return path.resolve(__dirname, '..', 'plugins')
+  if (fromEnv) {
+    ensureDir(fromEnv)
+    return fromEnv
+  }
+  const runtimeDir = path.join(getDataRoot(), 'plugins')
+  syncBundledPluginsToRuntimeDir(runtimeDir)
+  return runtimeDir
 }
 
 function ensurePluginDir() {
@@ -1525,11 +1574,39 @@ function mediaDataPath(mediaId, pluginId) {
 }
 
 function associatedDataPath(mediaFilePath) {
-  const root = getDataRoot()
-  const dir = path.join(root, 'associated')
+  const normalized = String(mediaFilePath || '').trim()
+  if (!normalized) return null
+  const dir = path.dirname(normalized)
+  const ext = path.extname(normalized)
+  const base = path.basename(normalized, ext)
+  return path.join(dir, `${base}.associated.json`)
+}
+
+function legacyAssociatedDataPath(mediaFilePath) {
+  const normalized = String(mediaFilePath || '').trim()
+  if (!normalized) return null
+  const dir = path.join(getDataRoot(), 'associated')
   ensureDir(dir)
-  const fileHash = hashPath(mediaFilePath)
-  return path.join(dir, `${fileHash}.json`)
+  const fileName = crypto.createHash('sha256').update(normalized).digest('hex')
+  return path.join(dir, `${fileName}.json`)
+}
+
+function readAssociatedDataFromMetadata(mediaFilePath) {
+  const metadataPath = getMetadataJsonPathForFile(mediaFilePath)
+  const parsed = readJsonIfExists(metadataPath, null)
+  if (!parsed || typeof parsed !== 'object') return null
+  return parsed.associatedData ?? null
+}
+
+function writeAssociatedDataToMetadata(mediaFilePath, data) {
+  const metadataPath = getMetadataJsonPathForFile(mediaFilePath)
+  if (!metadataPath) {
+    throw new Error('metadata path not found')
+  }
+  const next = readJsonIfExists(metadataPath, {})
+  const payload = next && typeof next === 'object' && !Array.isArray(next) ? { ...next } : {}
+  payload.associatedData = data ?? null
+  fs.writeFileSync(metadataPath, JSON.stringify(payload, null, 2), 'utf8')
 }
 
 function readJsonIfExists(filePath, fallbackValue) {
@@ -3429,6 +3506,16 @@ function refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache, optio
       item.is_deleted = metadataEntry.is_deleted
     }
   }
+  const resolvedDominantColor = resolveNonEmptyDominantColor(
+    item,
+    overlay,
+    metadataEntry,
+    readJsonIfExists(path.join(fileDir, 'metadata.json'), null),
+  )
+  if (resolvedDominantColor) {
+    item.dominant_color = resolvedDominantColor
+    overlay.dominant_color = resolvedDominantColor
+  }
   if (probed) {
     if (typeof probed.format_name === 'string' && probed.format_name.trim()) {
       item.format_name = probed.format_name.trim()
@@ -3682,6 +3769,17 @@ function getMetadataJsonPathForFile(filePath) {
   return path.join(path.dirname(normalized), 'metadata.json')
 }
 
+function resolveNonEmptyDominantColor(...candidates) {
+  for (const candidate of candidates) {
+    const value =
+      stringOrEmpty(candidate?.dominant_color) ||
+      stringOrEmpty(candidate?.dominantColor) ||
+      (typeof candidate === 'string' ? stringOrEmpty(candidate) : '')
+    if (value) return value
+  }
+  return ''
+}
+
 function syncMetadataJsonForMedia(media, overlay, meta) {
   try {
     const filePath = String(media?.file_path || '').trim()
@@ -3721,6 +3819,12 @@ function syncMetadataJsonForMedia(media, overlay, meta) {
       file_name: String(merged?.file_name || path.basename(filePath)),
       tags: resolvedTags,
       folders: resolvedFolders,
+    }
+    const dominantColor = resolveNonEmptyDominantColor(merged, overlay, base)
+    if (dominantColor) {
+      payload.dominant_color = dominantColor
+    } else {
+      delete payload.dominant_color
     }
     delete payload.tag_ids
     delete payload.tag_names
@@ -3850,24 +3954,27 @@ function parseMetadata(code, fileName) {
   return metadata
 }
 
-function getPluginScripts() {
+function getPluginScripts(options = {}) {
   const dir = getPluginDir()
   if (!fs.existsSync(dir)) return []
 
+  const ids = new Set(asArray(options?.ids).map((id) => String(id || '').trim()).filter(Boolean))
   const files = fs.readdirSync(dir).filter((f) => f.endsWith('.js'))
-  return files.map((fileName) => {
-    const fullPath = path.join(dir, fileName)
-    const code = fs.readFileSync(fullPath, 'utf8')
-    const id = fileName.replace(/\.js$/i, '')
-    const metadata = parseMetadata(code, fileName)
-    return {
-      id,
-      fileName,
-      name: metadata.name,
-      code,
-      metadata,
-    }
-  })
+  return files
+    .filter((fileName) => ids.size === 0 || ids.has(fileName.replace(/\.js$/i, '')))
+    .map((fileName) => {
+      const fullPath = path.join(dir, fileName)
+      const code = fs.readFileSync(fullPath, 'utf8')
+      const id = fileName.replace(/\.js$/i, '')
+      const metadata = parseMetadata(code, fileName)
+      return {
+        id,
+        fileName,
+        name: metadata.name,
+        code,
+        metadata,
+      }
+    })
 }
 
 function handleRequest(req) {
@@ -4905,7 +5012,7 @@ function handleRequest(req) {
 
   if (method === 'get_plugin_scripts') {
     try {
-      send({ id, ok: true, result: getPluginScripts() })
+      send({ id, ok: true, result: getPluginScripts(params) })
     } catch (err) {
       send({ id, ok: false, error: `plugin read failed: ${err?.message || String(err)}` })
     }
@@ -5100,17 +5207,23 @@ function handleRequest(req) {
   if (method === 'save_associated_data') {
     try {
       const mediaFilePath = params?.mediaFilePath
-      const data = params?.data
+      const jsonText = typeof params?.jsonText === 'string' ? params.jsonText : null
+      const data = jsonText != null ? JSON.parse(jsonText) : (params?.data ?? null)
       if (!mediaFilePath) {
         send({ id, ok: false, error: 'save_associated_data requires mediaFilePath' })
         return
       }
       const target = associatedDataPath(mediaFilePath)
-      fs.writeFileSync(
-        target,
-        JSON.stringify({ mediaFilePath, data: data ?? null }, null, 2),
-        'utf8',
-      )
+      if (!target) {
+        send({ id, ok: false, error: 'save_associated_data could not resolve target path' })
+        return
+      }
+      const payloadText = JSON.stringify({ mediaFilePath, data: data ?? null }, null, 2)
+      fs.writeFileSync(target, payloadText, 'utf8')
+      const legacyTarget = legacyAssociatedDataPath(mediaFilePath)
+      if (legacyTarget) {
+        fs.writeFileSync(legacyTarget, payloadText, 'utf8')
+      }
       send({ id, ok: true, result: true })
     } catch (err) {
       send({ id, ok: false, error: `save_associated_data failed: ${err?.message || String(err)}` })
@@ -5126,13 +5239,25 @@ function handleRequest(req) {
         return
       }
       const target = associatedDataPath(mediaFilePath)
-      if (!fs.existsSync(target)) {
-        send({ id, ok: true, result: null })
+      if (target && fs.existsSync(target)) {
+        const raw = fs.readFileSync(target, 'utf8')
+        const parsed = JSON.parse(raw)
+        send({ id, ok: true, result: parsed?.data ?? null })
         return
       }
-      const raw = fs.readFileSync(target, 'utf8')
-      const parsed = JSON.parse(raw)
-      send({ id, ok: true, result: parsed?.data ?? null })
+      const legacyTarget = legacyAssociatedDataPath(mediaFilePath)
+      if (legacyTarget && fs.existsSync(legacyTarget)) {
+        const raw = fs.readFileSync(legacyTarget, 'utf8')
+        const parsed = JSON.parse(raw)
+        send({ id, ok: true, result: parsed?.data ?? null })
+        return
+      }
+      const metadataData = readAssociatedDataFromMetadata(mediaFilePath)
+      if (metadataData != null) {
+        send({ id, ok: true, result: metadataData })
+        return
+      }
+      send({ id, ok: true, result: null })
     } catch (err) {
       send({ id, ok: false, error: `load_associated_data failed: ${err?.message || String(err)}` })
     }
@@ -6791,6 +6916,11 @@ function handleRequest(req) {
         const metadataEntry = resolveMetadataEntryForFile(sourcePath, metadataJsonCache)
         if (metadataEntry) {
           applyMetadataOverlayFromEntry(item, overlay, metadataEntry)
+        }
+        const resolvedDominantColor = resolveNonEmptyDominantColor(item, overlay, metadataEntry)
+        if (resolvedDominantColor) {
+          item.dominant_color = resolvedDominantColor
+          overlay.dominant_color = resolvedDominantColor
         }
         if (probed) {
           if (typeof probed.format_name === 'string' && probed.format_name.trim()) {

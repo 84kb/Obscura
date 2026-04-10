@@ -398,8 +398,8 @@ export class DesktopAdapter implements IMediaLibraryAPI {
         return this.api.updateClientConfig(updates);
     }
 
-    async getPluginScripts(): Promise<any[]> {
-        return this.api.getPluginScripts();
+    async getPluginScripts(options?: { ids?: string[] }): Promise<any[]> {
+        return this.api.getPluginScripts(options);
     }
 
     async installPlugin(): Promise<{ installed?: string[]; skipped?: string[]; error?: string }> {

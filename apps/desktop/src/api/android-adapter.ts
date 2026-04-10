@@ -99,7 +99,7 @@ export class AndroidAdapter implements IMediaLibraryAPI {
 
     async getClientConfig(): Promise<ClientConfig> { throw new Error('Not implemented'); }
     async updateClientConfig(_updates: Partial<ClientConfig>): Promise<ClientConfig> { throw new Error('Not implemented'); }
-    async getPluginScripts(): Promise<any[]> { return []; }
+    async getPluginScripts(_options?: { ids?: string[] }): Promise<any[]> { return []; }
     async installPlugin(): Promise<{ installed?: string[]; skipped?: string[]; error?: string }> {
         return { installed: [], skipped: [], error: 'Not supported on Android' };
     }

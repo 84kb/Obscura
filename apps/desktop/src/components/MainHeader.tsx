@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { FilterOptions, ViewSettings, Tag, TagGroup, MediaFile, Folder, ItemInfoType } from '@obscura/core'
+import { FilterOptions, ViewSettings, Tag, TagGroup, MediaFile, Folder, ItemInfoType, ExtensionHeaderButton, ObscuraPlugin } from '@obscura/core'
 import { api } from '../api'
 import { useDelayUnmount } from '../hooks/useDelayUnmount'
+import { usePlugins } from '../hooks/usePlugins'
 import { TagFilterDropdown } from './TagFilterDropdown'
 import { FolderFilterDropdown } from './FolderFilterDropdown'
 import { RatingFilterDropdown } from './RatingFilterDropdown'
@@ -71,6 +72,7 @@ export function MainHeader({
     onToggleSidebar,
     onOpenSettings,
 }: MainHeaderProps) {
+    const plugins = usePlugins()
     const [isFilterBarOpen, setIsFilterBarOpen] = useState(false)
     const [isTagFilterOpen, setIsTagFilterOpen] = useState(false)
     const [isFolderFilterOpen, setIsFolderFilterOpen] = useState(false)
@@ -114,6 +116,33 @@ export function MainHeader({
     const [isFileSystemCleanupOpen, setIsFileSystemCleanupOpen] = useState(false)
     const [filesystemOrphans, setFilesystemOrphans] = useState<any[]>([])
     const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(false)
+    const pluginHeaderContext = useMemo(() => ({
+        title,
+        filterOptions,
+        viewSettings,
+        allMediaFiles,
+        tags,
+        folders,
+    }), [allMediaFiles, filterOptions, folders, tags, title, viewSettings])
+    const pluginHeaderButtons = useMemo<(ExtensionHeaderButton & { pluginId: string; key: string })[]>(() => {
+        return plugins
+            .flatMap((plugin: ObscuraPlugin) => {
+                try {
+                    const buttons = plugin.uiHooks?.headerButtons?.(pluginHeaderContext) || []
+                    return buttons.map((button) => ({
+                        ...button,
+                        pluginId: plugin.id,
+                        key: `${plugin.id}:${button.id}`,
+                    }))
+                } catch (error) {
+                    console.error(`[PluginSystem] Failed to collect header buttons for ${plugin.id}`, error)
+                    return []
+                }
+            })
+            .sort((a, b) => (a.order || 0) - (b.order || 0) || a.label.localeCompare(b.label))
+    }, [pluginHeaderContext, plugins])
+    const pluginHeaderLeftButtons = pluginHeaderButtons.filter((button) => (button.location || 'right') === 'left')
+    const pluginHeaderRightButtons = pluginHeaderButtons.filter((button) => (button.location || 'right') !== 'left')
 
     const handleConfirmRefresh = () => {
         setIsRefreshModalOpen(false)
@@ -401,6 +430,23 @@ export function MainHeader({
         return filterPresets.filter((preset) => preset.name.toLowerCase().includes(q))
     }, [filterPresets, presetSearchQuery])
 
+    const renderPluginHeaderButton = (button: ExtensionHeaderButton & { key: string }) => (
+        <button
+            key={button.key}
+            className={`filter-bar-btn filter-action-btn ${button.isActive ? 'active' : ''}`}
+            onClick={() => { void button.onClick(pluginHeaderContext) }}
+            title={button.label}
+            disabled={button.disabled}
+            type="button"
+        >
+            {button.icon ? (
+                <span aria-hidden="true" dangerouslySetInnerHTML={{ __html: button.icon }} />
+            ) : (
+                <span>{button.label}</span>
+            )}
+        </button>
+    )
+
     return (
         <div className="main-header-container">
             <header className="main-header">
@@ -439,6 +485,11 @@ export function MainHeader({
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
                         </button>
                     </div>
+                    {pluginHeaderLeftButtons.length > 0 && (
+                        <div className="filter-bar-actions">
+                            {pluginHeaderLeftButtons.map(renderPluginHeaderButton)}
+                        </div>
+                    )}
                     <h2 className="current-title">{title}</h2>
                 </div>
 
@@ -990,6 +1041,7 @@ export function MainHeader({
                     </div>
 
                     <div className="filter-bar-actions">
+                        {pluginHeaderRightButtons.map(renderPluginHeaderButton)}
                         <div className="filter-bar-item filter-action-item" ref={presetMenuRef}>
                             <button
                                 className={`filter-bar-btn filter-action-btn ${isPresetMenuOpen ? 'active' : ''}`}

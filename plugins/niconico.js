@@ -1,7 +1,7 @@
 // @id niconico
 // @name ニコニコ動画コメント統合
 // @description 対象動画でニコニコ動画のコメントを取得し、画面に流す機能を提供します。
-// @version 1.0.0
+// @version 1.0.5
 // @author Obscura
 /**
  * NicoNico Comment Provider Plugin for Obscura
@@ -39,6 +39,32 @@
             return url;
         }
         return null;
+    };
+
+    const normalizeV1Threads = (input) => {
+        if (typeof input === 'string') {
+            try {
+                return normalizeV1Threads(JSON.parse(input));
+            } catch (e) {
+                return [];
+            }
+        }
+
+        const threads = Array.isArray(input)
+            ? input
+            : Array.isArray(input?.threads)
+                ? input.threads
+                : Array.isArray(input?.data?.threads)
+                    ? input.data.threads
+                    : Array.isArray(input?.data?.data?.threads)
+                        ? input.data.data.threads
+                        : [];
+
+        return threads.filter((thread) => thread && Array.isArray(thread.comments));
+    };
+
+    const countV1Comments = (threads) => {
+        return threads.reduce((sum, thread) => sum + (thread.comments?.length || 0), 0);
     };
 
     /**
@@ -226,18 +252,19 @@
 
         const data = res.data;
 
-        // niconicomments が format:"v1" で受け付ける形式はそのまま threads 配列
-        if (!data?.data?.threads) {
+        const threads = normalizeV1Threads(data);
+        if (threads.length === 0) {
             throw new Error('NV Comment API: スレッドデータが含まれていません');
         }
 
-        const totalComments = data.data.threads.reduce(
-            (sum, t) => sum + (t.comments?.length || 0), 0
-        );
-        console.log(`[NicoNicoPlugin] Fetched ${totalComments} comments from ${data.data.threads.length} threads`);
+        const totalComments = countV1Comments(threads);
+        if (totalComments === 0) {
+            throw new Error('ニコニコ動画のコメントを取得できませんでした');
+        }
+        console.log(`[NicoNicoPlugin] Fetched ${totalComments} comments from ${threads.length} threads`);
 
         // v1Thread 形式: threads 配列をそのまま返す
-        return data.data.threads;
+        return threads;
     };
 
     // --- オーバーレイ描画ロジック ---
@@ -247,6 +274,20 @@
     let isLoading = false;
     let lastInitializedWidth = 0;
     let lastInitializedHeight = 0;
+    let lastLoadAttemptAt = 0;
+    const LOAD_RETRY_INTERVAL_MS = 500;
+    const COMMENT_STAGE_WIDTH = 1920;
+    const COMMENT_STAGE_HEIGHT = 1080;
+
+    const createNiconiComments = (canvas, data) => {
+        return new window.NiconiComments(canvas, data, {
+            format: 'v1',
+            config: {
+                canvasWidth: COMMENT_STAGE_WIDTH,
+                canvasHeight: COMMENT_STAGE_HEIGHT
+            }
+        });
+    };
 
     // 表示状態の管理をプラグイン内部に持たせる
     let isOverlayVisible = (() => {
@@ -264,7 +305,7 @@
         if (!media) return;
 
         const ctx = canvas.getContext('2d');
-        const dpr = window.devicePixelRatio || 1;
+        const hasRenderableSize = canvas.width > 0 && canvas.height > 0;
         const sizeChanged = canvas.width !== lastInitializedWidth || canvas.height !== lastInitializedHeight;
 
         // メディアが変更された場合、または設定が無効になった場合に確実に状態をリセット・クリアする
@@ -282,6 +323,7 @@
                     currentCommentData = null;
                     lastInitializedWidth = 0;
                     lastInitializedHeight = 0;
+                    lastLoadAttemptAt = 0;
                 }
             }
 
@@ -298,35 +340,34 @@
             return;
         }
 
-        // サイズ変更のみの場合は再初期化（メディアは同じ）
-        if (sizeChanged && currentCommentData) {
-            console.log(`[NicoNicoPlugin] Resize detected (${canvas.width}x${canvas.height}). Re-initializing.`);
-            currentNiconiComments = new window.NiconiComments(canvas, currentCommentData, {
-                format: 'v1',
-                scale: dpr
-            });
-            lastInitializedWidth = canvas.width;
-            lastInitializedHeight = canvas.height;
-            return;
-        }
-
-        // 新しいメディアのコメント読み込み
-        if (!currentNiconiComments && !isLoading && context.enabled) {
+        // Canvas の初期レイアウト完了前でも、コメントデータの読み込みだけは先に進める
+        if (!currentCommentData && !isLoading && context.enabled) {
+            const now = Date.now();
+            if (now - lastLoadAttemptAt < LOAD_RETRY_INTERVAL_MS) {
+                return;
+            }
+            lastLoadAttemptAt = now;
             isLoading = true;
             // 読み込み開始時に念のためCanvasをクリア（残像防止）
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (hasRenderableSize) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
             (async () => {
                 try {
-                    console.log(`[NicoNicoPlugin] loading comments for ${media.id} (Canvas: ${canvas.width}x${canvas.height}, DPR: ${dpr})`);
+                    console.log(`[NicoNicoPlugin] loading comments for ${media.id} (Canvas: ${canvas.width}x${canvas.height})`);
                     const data = await window.ObscuraAPI.system.loadCommentFile(media.file_path);
-                    if (data && currentMediaId === media.id) {
-                        currentCommentData = data;
-                        currentNiconiComments = new window.NiconiComments(canvas, data, {
-                            format: 'v1',
-                            scale: dpr
-                        });
-                        lastInitializedWidth = canvas.width;
-                        lastInitializedHeight = canvas.height;
+                    const threads = normalizeV1Threads(data);
+                    const totalComments = countV1Comments(threads);
+                    if (threads.length > 0 && totalComments > 0 && currentMediaId === media.id) {
+                        currentCommentData = threads;
+                        if (canvas.width > 0 && canvas.height > 0) {
+                            currentNiconiComments = createNiconiComments(canvas, threads);
+                            lastInitializedWidth = canvas.width;
+                            lastInitializedHeight = canvas.height;
+                        }
+                        console.log(`[NicoNicoPlugin] Loaded ${totalComments} comments for overlay.`);
+                    } else if (currentMediaId === media.id) {
+                        currentCommentData = null;
                     }
                 } catch (e) {
                     console.error('[NicoNicoPlugin] Overlay load error:', e);
@@ -334,6 +375,19 @@
                     isLoading = false;
                 }
             })();
+            return;
+        }
+
+        if (!hasRenderableSize) {
+            return;
+        }
+
+        // サイズ変更のみの場合は再初期化（メディアは同じ）
+        if (sizeChanged && currentCommentData) {
+            console.log(`[NicoNicoPlugin] Resize detected (${canvas.width}x${canvas.height}). Re-initializing.`);
+            currentNiconiComments = createNiconiComments(canvas, currentCommentData);
+            lastInitializedWidth = canvas.width;
+            lastInitializedHeight = canvas.height;
             return;
         }
 

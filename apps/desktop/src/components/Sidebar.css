@@ -423,6 +423,11 @@
     box-shadow: none;
 }
 
+.sidebar-nav-item.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .sidebar-nav-item:hover {
     background: var(--bg-hover);
     border-color: transparent;

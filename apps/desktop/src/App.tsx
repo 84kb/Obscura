@@ -12,7 +12,7 @@ import { ContextMenu } from './components/ContextMenu'
 import { ConfirmModal } from './components/ConfirmModal'
 import { SubfolderGrid } from './components/SubfolderGrid'
 import { useLibrary } from './hooks/useLibrary'
-import { MediaFile, AppSettings, ViewSettings, defaultViewSettings, ClientConfig, SharedUser, FilterOptions } from '@obscura/core'
+import { MediaFile, AppSettings, ViewSettings, defaultViewSettings, ClientConfig, SharedUser, FilterOptions, ExtensionMainView, ExtensionMainViewContext } from '@obscura/core'
 import { MainHeader } from './components/MainHeader'
 import { useSocket } from './hooks/useSocket'
 import { useTheme } from './hooks/useTheme'
@@ -28,6 +28,8 @@ import { api } from './api'
 import { initializePluginSystem, loadPluginScripts } from './api/plugin-system'
 import { t as i18nT, AppLanguage } from './i18n'
 import { getBundledReleaseNotes } from './releaseNotes'
+import { usePlugins } from './hooks/usePlugins'
+import { PluginMount } from './components/PluginMount'
 
 const ENABLE_RANDOM_THUMB_PREFETCH = false
 const FILTER_PRESETS_STORAGE_KEY = 'obscura_filter_presets'
@@ -116,6 +118,29 @@ const normalizeFilterOptions = (input: Partial<FilterOptions> | null | undefined
     }
 }
 
+const normalizeFilterPresetList = (input: unknown): FilterPreset[] => {
+    if (!Array.isArray(input)) return []
+    return input
+        .filter((item) => item && typeof item === 'object' && typeof (item as any).id === 'string' && typeof (item as any).name === 'string')
+        .map((item) => ({
+            id: (item as any).id,
+            name: (item as any).name,
+            createdAt: typeof (item as any).createdAt === 'string' ? (item as any).createdAt : new Date().toISOString(),
+            options: normalizeFilterOptions((item as any).options)
+        }))
+}
+
+const readStoredFilterPresets = (): FilterPreset[] => {
+    if (typeof window === 'undefined') return []
+    try {
+        const raw = localStorage.getItem(FILTER_PRESETS_STORAGE_KEY)
+        if (!raw) return []
+        return normalizeFilterPresetList(JSON.parse(raw))
+    } catch {
+        return []
+    }
+}
+
 const DEFAULT_INSPECTOR_SETTINGS = {
     sectionVisibility: {
         artist: true,
@@ -159,6 +184,9 @@ const DEFAULT_SETTINGS: AppSettings = {
     imageScaling: 'smooth',
     inspector: DEFAULT_INSPECTOR_SETTINGS,
     extensions: {
+        'creator-manager': {
+            enabled: true
+        },
         niconico: {
             enabled: false
         }
@@ -417,6 +445,8 @@ function AppContent() {
         loadMore,
         hasMore
     } = useLibrary({ showSubfolderContent: viewSettings.showSubfolderContent })
+    const plugins = usePlugins()
+    const [activePluginMainView, setActivePluginMainView] = useState<{ pluginId: string, viewId: string } | null>(null)
     const isStartupOverlayVisible = startupLoading && loadingProgress < 100
 
     const reconcilePanelWidths = useCallback((nextSidebarWidth: number, nextInspectorWidth: number, viewportWidth = window.innerWidth) => {
@@ -758,6 +788,10 @@ function AppContent() {
             return next
         })
     }, [getSearchScopeKey, setFilterOptions])
+    const applyFilterChange = useCallback((nextValue: FilterOptions | ((prev: FilterOptions) => FilterOptions)) => {
+        setActivePluginMainView(null)
+        updateFilterOptions(nextValue)
+    }, [updateFilterOptions])
 
     // テーマシステムの初期化
     const { updateClientConfig, clientConfig, reloadSettings } = useSettings()
@@ -969,6 +1003,80 @@ function AppContent() {
 
 
     // リモート接続時のみ初期同期を実行
+    const runSmartImport = async (
+        filePaths: string[],
+        onImported?: (media: MediaFile) => void,
+        options?: { deleteSource?: boolean; importSource?: string; trigger?: 'manual' | 'drop' | 'auto' | 'plugin' },
+    ) => {
+        const trigger = options?.trigger || 'manual'
+        let effectiveFilePaths = [...filePaths]
+        let effectiveOptions = { deleteSource: options?.deleteSource, importSource: options?.importSource }
+        let imported: MediaFile[] | null = null
+
+        for (const plugin of plugins) {
+            try {
+                const result = await plugin.hooks?.beforeImport?.({
+                    filePaths: effectiveFilePaths,
+                    options: effectiveOptions,
+                    trigger,
+                    activeLibrary,
+                    activeRemoteLibrary,
+                })
+                if (!result) continue
+                if (result.cancel) {
+                    if (result.message) {
+                        api.showNotification({
+                            title: tr('Import cancelled', 'Import cancelled'),
+                            message: result.message,
+                        })
+                    }
+                    return
+                }
+                if (Array.isArray(result.filePaths)) {
+                    effectiveFilePaths = result.filePaths.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+                }
+                if (result.options) {
+                    effectiveOptions = { ...effectiveOptions, ...result.options }
+                }
+                if (result.handled) {
+                    imported = Array.isArray(result.importedMedia) ? result.importedMedia : []
+                    break
+                }
+            } catch (error) {
+                console.error(`[PluginSystem] beforeImport failed for ${plugin.id}`, error)
+            }
+        }
+
+        if (effectiveFilePaths.length === 0) return
+        imported = imported ?? await importMedia(effectiveFilePaths, effectiveOptions)
+        if (!imported) return
+
+        for (const plugin of plugins) {
+            try {
+                await plugin.hooks?.afterImport?.({
+                    importedMedia: imported,
+                    filePaths: effectiveFilePaths,
+                    options: effectiveOptions,
+                    trigger,
+                    activeLibrary,
+                    activeRemoteLibrary,
+                })
+            } catch (error) {
+                console.error(`[PluginSystem] afterImport failed for ${plugin.id}`, error)
+            }
+        }
+
+        for (const media of imported) {
+            const duplicates = await checkEntryDuplicates(media.id)
+            if (duplicates.length > 0) {
+                const queueItems = duplicates.map((d: any) => ({ ...d, onResolve: onImported }))
+                setDuplicateQueue(prev => [...prev, ...queueItems])
+            } else if (onImported) {
+                await onImported(media)
+            }
+        }
+    }
+
     useEffect(() => {
         if (!activeRemoteLibrary) return
 
@@ -1175,10 +1283,105 @@ function AppContent() {
 
     // プラグイン読み込みの同期
     useEffect(() => {
-        if (settings) {
-            loadPluginScripts(settings)
-        }
+        void (async () => {
+            await loadPluginScripts(settings, { includeDeferred: true, ids: ['niconico'] })
+            await loadPluginScripts(settings, { includeDeferred: true })
+        })()
     }, [settings])
+    const pluginMainViewContext = useMemo<ExtensionMainViewContext>(() => ({
+        filterOptions,
+        activeLibrary,
+        activeRemoteLibrary,
+        allMediaFiles,
+        visibleMediaFiles: mediaFiles,
+        tags,
+        folders,
+        settings,
+        language: uiLanguage
+    }), [activeLibrary, activeRemoteLibrary, allMediaFiles, filterOptions, folders, mediaFiles, settings, tags, uiLanguage])
+    const pluginMainViews = useMemo<Array<ExtensionMainView & { pluginId: string; key: string }>>(() => {
+        return plugins
+            .flatMap((plugin) => {
+                try {
+                    const views = plugin.uiHooks?.mainViews?.(pluginMainViewContext) || []
+                    return views.map((view) => ({
+                        ...view,
+                        pluginId: plugin.id,
+                        key: `${plugin.id}:${view.id}`
+                    }))
+                } catch (error) {
+                    console.error(`[PluginSystem] Failed to collect main views for ${plugin.id}`, error)
+                    return []
+                }
+            })
+            .sort((a, b) => (a.order || 0) - (b.order || 0) || a.title.localeCompare(b.title))
+    }, [pluginMainViewContext, plugins])
+    const currentPluginMainView = useMemo(() => {
+        if (!activePluginMainView) return null
+        return pluginMainViews.find((view) => view.pluginId === activePluginMainView.pluginId && view.id === activePluginMainView.viewId) || null
+    }, [activePluginMainView, pluginMainViews])
+    const currentPluginMainMountContext = useMemo(() => {
+        if (!currentPluginMainView) return null
+        return {
+            pluginId: currentPluginMainView.pluginId,
+            filterOptions,
+            activeLibrary,
+            activeRemoteLibrary,
+            allMediaFiles,
+            visibleMediaFiles: mediaFiles,
+            tags,
+            folders,
+            settings,
+            language: uiLanguage,
+        }
+    }, [
+        activeLibrary,
+        activeRemoteLibrary,
+        allMediaFiles,
+        currentPluginMainView,
+        filterOptions,
+        folders,
+        mediaFiles,
+        settings,
+        tags,
+        uiLanguage,
+    ])
+
+    useEffect(() => {
+        const handleOpenPluginMainView = (event: Event) => {
+            const detail = (event as CustomEvent<{ pluginId?: string; viewId?: string }>).detail
+            if (!detail?.pluginId || !detail?.viewId) return
+            setPlayingMedia(null)
+            setActivePluginMainView({
+                pluginId: detail.pluginId,
+                viewId: detail.viewId
+            })
+        }
+        const handleClosePluginMainView = () => {
+            setActivePluginMainView(null)
+        }
+
+        window.addEventListener('obscura:open-plugin-main-view', handleOpenPluginMainView as EventListener)
+        window.addEventListener('obscura:close-plugin-main-view', handleClosePluginMainView)
+
+        return () => {
+            window.removeEventListener('obscura:open-plugin-main-view', handleOpenPluginMainView as EventListener)
+            window.removeEventListener('obscura:close-plugin-main-view', handleClosePluginMainView)
+        }
+    }, [])
+
+    useEffect(() => {
+        if (!activePluginMainView) return
+        if (!currentPluginMainView) {
+            setActivePluginMainView(null)
+        }
+    }, [activePluginMainView, currentPluginMainView])
+
+    useEffect(() => {
+        window.dispatchEvent(new CustomEvent('obscura:plugin-main-view-changed', {
+            detail: activePluginMainView
+        }))
+    }, [activePluginMainView])
 
     // ライブラリ更新状態
     const [isRefreshing, setIsRefreshing] = useState(false)
@@ -1212,24 +1415,8 @@ function AppContent() {
         }
     }
     const [showSettingsModal, setShowSettingsModal] = useState(false)
-    const [filterPresets, setFilterPresets] = useState<FilterPreset[]>(() => {
-        try {
-            const raw = localStorage.getItem(FILTER_PRESETS_STORAGE_KEY)
-            if (!raw) return []
-            const parsed = JSON.parse(raw)
-            if (!Array.isArray(parsed)) return []
-            return parsed
-                .filter((item) => item && typeof item === 'object' && typeof item.id === 'string' && typeof item.name === 'string')
-                .map((item) => ({
-                    id: item.id,
-                    name: item.name,
-                    createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date().toISOString(),
-                    options: normalizeFilterOptions(item.options)
-                }))
-        } catch {
-            return []
-        }
-    })
+    const [filterPresets, setFilterPresets] = useState<FilterPreset[]>(() => readStoredFilterPresets())
+    const filterPresetsHydratedRef = useRef(false)
     const [showLibraryModal, setShowLibraryModal] = useState(false)
     const [isDragging, setIsDragging] = useState(false)
     const [releaseNotesModal, setReleaseNotesModal] = useState<ReleaseNotesModalState | null>(null)
@@ -1250,7 +1437,58 @@ function AppContent() {
     const [libraryScrollRestoreKey, setLibraryScrollRestoreKey] = useState('initial')
 
     useEffect(() => {
-        localStorage.setItem(FILTER_PRESETS_STORAGE_KEY, JSON.stringify(filterPresets))
+        let cancelled = false
+
+        void (async () => {
+            try {
+                const config = await api.getClientConfig()
+                if (cancelled) return
+
+                const persistedPresets = normalizeFilterPresetList((config as any)?.filterPresets)
+                if (persistedPresets.length > 0) {
+                    setFilterPresets(persistedPresets)
+                    try {
+                        localStorage.setItem(FILTER_PRESETS_STORAGE_KEY, JSON.stringify(persistedPresets))
+                    } catch {
+                        // Ignore local cache write failures.
+                    }
+                    return
+                }
+
+                const legacyPresets = readStoredFilterPresets()
+                if (legacyPresets.length > 0) {
+                    try {
+                        await api.updateClientConfig({ filterPresets: legacyPresets } as Partial<ClientConfig>)
+                    } catch {
+                        // Ignore config migration failures and keep local fallback.
+                    }
+                }
+            } catch {
+                // Ignore config hydration failures and keep local fallback.
+            } finally {
+                if (!cancelled) {
+                    filterPresetsHydratedRef.current = true
+                }
+            }
+        })()
+
+        return () => {
+            cancelled = true
+        }
+    }, [])
+
+    useEffect(() => {
+        if (!filterPresetsHydratedRef.current) return
+
+        try {
+            localStorage.setItem(FILTER_PRESETS_STORAGE_KEY, JSON.stringify(filterPresets))
+        } catch {
+            // Ignore local cache write failures.
+        }
+
+        void api.updateClientConfig({ filterPresets } as Partial<ClientConfig>).catch(() => {
+            // Ignore config persistence failures and keep local fallback.
+        })
     }, [filterPresets])
 
     const handleApplyFilterPreset = useCallback((presetId: string) => {
@@ -1585,7 +1823,7 @@ function AppContent() {
             console.log('[Global D&D] New files to import:', newFilePaths.length, 'of', filePaths.length)
 
             if (newFilePaths.length > 0) {
-                await handleSmartImport(newFilePaths)
+                await runSmartImport(newFilePaths, undefined, { trigger: 'drop' })
             }
         }
 
@@ -1759,10 +1997,10 @@ function AppContent() {
                         : null
                     const effectiveImportOptions = { ...dragDropImportOptions, ...(options ?? {}) }
                     const importTask = currentDropZone.type === 'folder' && typeof currentDropZone.folderId === 'number'
-                        ? handleSmartImport(newFilePaths, async (media) => {
+                        ? runSmartImport(newFilePaths, async (media) => {
                             await addFolderToMedia(media.id, currentDropZone.folderId!, targetFolder)
-                        }, effectiveImportOptions)
-                        : handleSmartImport(newFilePaths, undefined, effectiveImportOptions)
+                        }, { ...effectiveImportOptions, trigger: options?.importSource === 'auto-import' ? 'auto' : 'drop' })
+                        : runSmartImport(newFilePaths, undefined, { ...effectiveImportOptions, trigger: options?.importSource === 'auto-import' ? 'auto' : 'drop' })
                     importTask.catch(e => console.error('Import failed via trigger:', e))
                 } else {
                     console.log('[App] All files filtered out as existing in library')
@@ -2593,9 +2831,9 @@ function AppContent() {
             }
         } else {
             // 外部ドラッグ：Smartインポートを使用して解決
-            await handleSmartImport(filePaths, async (media) => {
+            await runSmartImport(filePaths, async (media) => {
                 await addFolderToMedia(media.id, folderId, targetFolder)
-            }, dragDropImportOptions)
+            }, { ...dragDropImportOptions, trigger: 'drop' })
             // ライブラリをリフレッシュ (addFolderToMedia内でloadMediaFilesしていれば不要だが念のため)
             await refreshLibrary()
         }
@@ -2691,6 +2929,7 @@ function AppContent() {
     // ヘッダータイトルの取得
     const getHeaderTitle = () => {
         if (activeRemoteLibrary) return activeRemoteLibrary.name || tr('Remote Library', 'Remote Library')
+        if (currentPluginMainView) return currentPluginMainView.title
 
         if (filterOptions.filterType === 'tag_manager') return tr('Tag Manager', 'Tag Manager')
         if (filterOptions.filterType === 'trash') return tr('Trash', 'Trash')
@@ -2800,7 +3039,16 @@ function AppContent() {
         ) : null
 
         let mainContent = null
-        if (filterOptions.filterType === 'tag_manager') {
+        if (currentPluginMainView && currentPluginMainMountContext) {
+            mainContent = (
+                <PluginMount
+                    key={currentPluginMainView.key}
+                    className="content-container plugin-main-view-container"
+                    mount={currentPluginMainView.mount}
+                    context={currentPluginMainMountContext}
+                />
+            )
+        } else if (filterOptions.filterType === 'tag_manager') {
             mainContent = (
                 <TagManager
                     tags={tags}
@@ -2828,7 +3076,7 @@ function AppContent() {
                     <MainHeader
                         title={getHeaderTitle()}
                         filterOptions={filterOptions}
-                        onFilterChange={updateFilterOptions}
+                        onFilterChange={applyFilterChange}
                         filterPresets={filterPresets}
                         onApplyFilterPreset={handleApplyFilterPreset}
                         onSaveFilterPreset={handleSaveFilterPreset}
@@ -2857,7 +3105,7 @@ function AppContent() {
                         <SubfolderGrid
                             subfolders={folders.filter(f => f.parentId === filterOptions.selectedFolders[0])}
                             onSelectFolder={(folderId) => {
-                                updateFilterOptions(prev => ({ ...prev, selectedFolders: [folderId] }))
+                                applyFilterChange(prev => ({ ...prev, selectedFolders: [folderId] }))
                             }}
                             getMediaCount={(folderId) => {
                                 // TODO: 実際のメディアカウントを計算
@@ -2930,7 +3178,7 @@ function AppContent() {
                             viewSettings={viewSettings}
                             updateViewSettings={handleUpdateViewSettings}
                             filterOptions={filterOptions}
-                            onFilterChange={updateFilterOptions}
+                            onFilterChange={applyFilterChange}
                             onLoadMore={loadMore}
                             hasMore={hasMore}
                             onInternalDragStart={beginInternalMediaDrag}
@@ -2988,9 +3236,10 @@ function AppContent() {
                         <Sidebar
                 language={clientConfig?.language === 'en' ? 'en' : 'ja'}
                 filterOptions={filterOptions}
+                hasActivePluginMainView={!!currentPluginMainView}
                 onFilterChange={(options) => {
                     setPlayingMedia(null)
-                    updateFilterOptions(options)
+                    applyFilterChange(options)
                 }}
                 folders={folders}
                 libraries={libraries}

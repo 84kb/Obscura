@@ -129,7 +129,7 @@ export interface IMediaLibraryAPI {
     // クライアント設定
     getClientConfig(): Promise<ClientConfig>;
     updateClientConfig(updates: Partial<ClientConfig>): Promise<ClientConfig>;
-    getPluginScripts(): Promise<any[]>;
+    getPluginScripts(options?: { ids?: string[] }): Promise<any[]>;
     installPlugin(): Promise<{ installed?: string[]; skipped?: string[]; error?: string }>;
     uninstallPlugin(pluginId: string): Promise<{ success: boolean; error?: string }>;
     selectDownloadDirectory(): Promise<string | null>;

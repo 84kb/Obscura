@@ -7,6 +7,7 @@ import { getAuthQuery } from '../utils/auth'
 export function useLibrary(options?: { showSubfolderContent?: boolean }) {
     const MEDIA_LOAD_TIMEOUT_MS = 60000
     const STARTUP_METADATA_TIMEOUT_MS = 15000
+    const STARTUP_OVERLAY_TIMEOUT_MS = 12000
     const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([])
     const [tags, setTags] = useState<Tag[]>([])
     const [tagGroups, setTagGroups] = useState<TagGroup[]>([])
@@ -18,6 +19,7 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
     const previousLibraryLoadKey = useRef<string | null>(null)
     const startupRefreshAttemptedKey = useRef<string | null>(null)
     const startupLoadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const startupOverlayFailSafeTriggeredRef = useRef(false)
     const [startupLoading, setStartupLoading] = useState(true)
     const [initialLibraryResolved, setInitialLibraryResolved] = useState(false)
     const [activeLibrary, setActiveLibrary] = useState<Library | null>(null)
@@ -479,6 +481,34 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
 
         return () => clearTimeout(timer)
     }, [startupLoading, loading, mediaFiles, activeLibrary, activeRemoteLibrary, finalizeStartupLoading])
+
+    useEffect(() => {
+        if (!startupLoading) return
+
+        const timer = setTimeout(() => {
+            if (startupOverlayFailSafeTriggeredRef.current) return
+            startupOverlayFailSafeTriggeredRef.current = true
+            console.error('[useLibrary] Startup overlay fail-safe triggered. Forcing startup to continue.', {
+                loading,
+                loadingProgress,
+                hasActiveLibrary: Boolean(activeLibrary || activeRemoteLibrary),
+                initialLibraryResolved,
+            })
+            loadingRef.current = false
+            setLoading(false)
+            setLoadingProgress(0)
+            setStartupLoading(false)
+            setInitialLibraryResolved(true)
+            addNotification({
+                type: 'warning',
+                title: '起動処理を継続しました',
+                message: 'データ読み込みが長時間進まなかったため、起動を継続しました。ライブラリが空の場合は再読み込みを試してください。',
+                duration: 7000,
+            })
+        }, STARTUP_OVERLAY_TIMEOUT_MS)
+
+        return () => clearTimeout(timer)
+    }, [startupLoading, loading, loadingProgress, activeLibrary, activeRemoteLibrary, initialLibraryResolved, addNotification])
 
     // タグ読み込み
     const loadTags = useCallback(async () => {

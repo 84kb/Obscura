@@ -423,7 +423,7 @@ export interface DesktopAPI {
     // 繝励Λ繧ｰ繧､繝ｳ繝ｻ諡｡蠑ｵ讖溯・謫堺ｽ・    pluginFetch: (url: string, options?: any) => Promise<{ ok: boolean; status: number; statusText: string; data?: any; error?: boolean }>;
     savePluginMediaData: (mediaId: number, pluginId: string, data: any) => Promise<boolean>;
     loadPluginMediaData: (mediaId: number, pluginId: string) => Promise<any>;
-    getPluginScripts: () => Promise<PluginInfo[]>;
+    getPluginScripts: (options?: { ids?: string[] }) => Promise<PluginInfo[]>;
 
     // 繧ｳ繝｡繝ｳ繝医ヵ繧｡繧､繝ｫI/O・亥虚逕ｻ讓ｪ菫晏ｭ假ｼ・    saveAssociatedData: (mediaFilePath: string, data: any) => Promise<boolean>;
     loadAssociatedData: (mediaFilePath: string) => Promise<any>;
@@ -489,13 +489,15 @@ export interface ExtensionButton {
     icon?: string;
     disabled?: boolean;
     isActive?: boolean;
-    onClick: (context: { media: MediaFile; updateMedia?: (media: MediaFile) => void }) => void;
+    order?: number;
+    onClick: (context: { media: MediaFile; updateMedia?: (media: MediaFile) => void }) => void | Promise<void>;
 }
 
 export interface ExtensionInfoRow {
     id: string
     label: string
     value: string | number | boolean | null | undefined
+    order?: number
 }
 
 export interface PlayerOverlayContext {
@@ -520,41 +522,204 @@ export interface ExtensionMessageBoxOptions {
     cancelId?: number;
 }
 
+export type ExtensionMountCleanup = void | (() => void)
+
+export interface ExtensionMountContext {
+    pluginId: string
+    container: HTMLElement
+    media?: MediaFile | null
+    selection?: MediaFile[]
+    sectionId?: string
+}
+
+export interface ExtensionSidebarContext {
+    filterOptions: FilterOptions
+    activeLibrary: Library | null
+    activeRemoteLibrary: RemoteLibrary | null
+    folders: Folder[]
+    libraries: Library[]
+    remoteLibraries: RemoteLibrary[]
+    itemCounts?: { [key: string]: number }
+    language?: 'ja' | 'en'
+}
+
+export interface ExtensionHeaderContext {
+    title: string
+    filterOptions: FilterOptions
+    viewSettings: ViewSettings
+    allMediaFiles: MediaFile[]
+    tags: Tag[]
+    folders: Folder[]
+}
+
+export interface ExtensionInspectorContext {
+    media: MediaFile[]
+    playingMedia?: MediaFile | null
+    currentContextMedia?: MediaFile[]
+    settings?: AppSettings
+    language?: 'ja' | 'en'
+}
+
+export interface ExtensionMainViewContext {
+    filterOptions: FilterOptions
+    activeLibrary: Library | null
+    activeRemoteLibrary: RemoteLibrary | null
+    allMediaFiles: MediaFile[]
+    visibleMediaFiles: MediaFile[]
+    tags: Tag[]
+    folders: Folder[]
+    settings?: AppSettings
+    language?: 'ja' | 'en'
+}
+
+export interface ExtensionImportContext {
+    filePaths: string[]
+    options?: { deleteSource?: boolean; importSource?: string }
+    trigger: 'manual' | 'drop' | 'auto' | 'plugin'
+    activeLibrary: Library | null
+    activeRemoteLibrary: RemoteLibrary | null
+}
+
+export interface ExtensionImportResult {
+    filePaths?: string[]
+    options?: { deleteSource?: boolean; importSource?: string }
+    cancel?: boolean
+    handled?: boolean
+    importedMedia?: MediaFile[]
+    message?: string
+}
+
+export interface ExtensionSidebarItem {
+    id: string
+    label: string
+    icon?: string
+    count?: string | number
+    disabled?: boolean
+    isActive?: boolean
+    order?: number
+    location?: 'nav' | 'after-tags' | 'after-folders' | 'footer'
+    onClick: (context: ExtensionSidebarContext) => void | Promise<void>
+}
+
+export interface ExtensionSidebarSection {
+    id: string
+    title: string
+    count?: string | number
+    order?: number
+    location?: 'nav' | 'after-tags' | 'after-folders' | 'footer'
+    mount: (context: ExtensionMountContext) => ExtensionMountCleanup
+}
+
+export interface ExtensionHeaderButton {
+    id: string
+    label: string
+    icon?: string
+    disabled?: boolean
+    isActive?: boolean
+    order?: number
+    location?: 'left' | 'right'
+    onClick: (context: ExtensionHeaderContext) => void | Promise<void>
+}
+
+export interface ExtensionInspectorSection {
+    id: string
+    title: string
+    order?: number
+    mount: (context: ExtensionMountContext & { media: MediaFile[] }) => ExtensionMountCleanup
+}
+
+export interface ExtensionInspectorSectionBlock {
+    id: string
+    sectionId: 'artist' | 'description' | 'relations' | 'url' | 'tags' | 'folders' | 'info' | 'comments' | 'playlist'
+    title?: string
+    order?: number
+    mount: (context: ExtensionMountContext & { media: MediaFile[] }) => ExtensionMountCleanup
+}
+
+export interface ExtensionMainView {
+    id: string
+    title: string
+    order?: number
+    mount: (context: ExtensionMountContext & ExtensionMainViewContext) => ExtensionMountCleanup
+}
+
 export interface ExtensionUIHooks {
     inspectorActions?: (media: MediaFile) => ExtensionButton[];
     inspectorInfo?: (media: MediaFile) => ExtensionInfoRow[];
     inspectorInfoRows?: (media: MediaFile) => ExtensionInfoRow[];
     playerTopBar?: (media: MediaFile) => ExtensionButton[];
     playerOverlay?: (canvas: HTMLCanvasElement, media: MediaFile, context: PlayerOverlayContext) => void;
+    sidebarItems?: (context: ExtensionSidebarContext) => ExtensionSidebarItem[];
+    sidebarSections?: (context: ExtensionSidebarContext) => ExtensionSidebarSection[];
+    headerButtons?: (context: ExtensionHeaderContext) => ExtensionHeaderButton[];
+    inspectorSections?: (context: ExtensionInspectorContext) => ExtensionInspectorSection[];
+    inspectorSectionBlocks?: (context: ExtensionInspectorContext) => ExtensionInspectorSectionBlock[];
+    mainViews?: (context: ExtensionMainViewContext) => ExtensionMainView[];
 }
 
 export interface ObscuraPlugin {
     id: string;
     name: string;
-    canHandle: (url: string) => boolean;
-    fetchData: (mediaId: number, url: string) => Promise<ExtensionResource[]>;
+    canHandle?: (url: string) => boolean;
+    fetchData?: (mediaId: number, url: string) => Promise<ExtensionResource[]>;
     uiHooks?: ExtensionUIHooks;
+    hooks?: {
+        beforeImport?: (context: ExtensionImportContext) => Promise<ExtensionImportResult | void> | ExtensionImportResult | void
+        afterImport?: (context: ExtensionImportContext & { importedMedia: MediaFile[] }) => Promise<void> | void
+    }
 }
 
 export interface ObscuraAPI {
     registerPlugin: (plugin: ObscuraPlugin) => void;
+    registerCommentProvider?: (plugin: ObscuraPlugin) => void;
     unregisterPlugin?: (pluginId: string) => void;
+    unregisterCommentProvider?: (pluginId: string) => void;
     getPlugins: () => ObscuraPlugin[];
     registerPlayerOverlay: (id: string, callback: (canvas: HTMLCanvasElement, media: MediaFile, context: PlayerOverlayContext) => void) => void;
     unregisterPlayerOverlay: (id: string) => void;
     media: {
         get: (id: number) => Promise<MediaFile | null>;
+        list: (page?: number, limit?: number, filters?: any) => Promise<{ media: MediaFile[]; total: number; page: number; limit: number } | MediaFile[]>;
         getSelected: () => Promise<MediaFile | null>;
         getSelection: () => Promise<MediaFile[]>;
         update: (id: number, updates: Partial<MediaFile>) => Promise<MediaFile | null>;
+        rename: (id: number, newName: string) => Promise<MediaFile | null>;
         addTag: (mediaId: number, tagId: number) => Promise<void>;
         removeTag: (mediaId: number, tagId: number) => Promise<void>;
-        import: (filePaths: string[]) => Promise<MediaFile[]>;
+        import: (filePaths: string[], options?: { deleteSource?: boolean; importSource?: string }) => Promise<MediaFile[]>;
+    };
+    tags: {
+        list: () => Promise<Tag[]>
+        create: (name: string) => Promise<Tag>
+        delete: (id: number) => Promise<void>
+        addToMedia: (mediaId: number, tagId: number) => Promise<void>
+        removeFromMedia: (mediaId: number, tagId: number) => Promise<void>
+    };
+    folders: {
+        list: () => Promise<Folder[]>
+        create: (name: string, parentId?: number | null) => Promise<Folder>
+        rename: (id: number, newName: string) => Promise<void>
+        delete: (id: number) => Promise<void>
+        addToMedia: (mediaId: number, folderId: number) => Promise<void>
+        removeFromMedia: (mediaId: number, folderId: number) => Promise<void>
+    };
+    libraries: {
+        list: () => Promise<Library[]>
+        getActive: () => Promise<Library | null>
+        open: () => Promise<Library | null>
+        setActive: (libraryPath: string) => Promise<void>
+        refresh: () => Promise<boolean>
+    };
+    config: {
+        getClientConfig: () => Promise<ClientConfig>
+        updateClientConfig: (updates: Partial<ClientConfig>) => Promise<ClientConfig>
     };
     ui: {
         showNotification: (options: ExtensionNotificationOptions) => void;
         showMessageBox: (options: ExtensionMessageBoxOptions) => Promise<{ response: number }>;
-        copyToClipboard: (text: string) => void;
+        copyToClipboard: (text: string) => void | Promise<void>;
+        openMainView: (pluginId: string, viewId: string) => void;
+        closeMainView: () => void;
     };
     system: {
         fetch: (url: string, options?: any) => Promise<any>;
@@ -562,6 +727,8 @@ export interface ObscuraAPI {
         loadMediaData: (mediaId: number, pluginId: string) => Promise<any>;
         saveAssociatedData: (mediaFilePath: string, data: any) => Promise<boolean>;
         loadAssociatedData: (mediaFilePath: string) => Promise<any>;
+        saveCommentFile?: (mediaFilePath: string, data: any) => Promise<boolean>;
+        loadCommentFile?: (mediaFilePath: string) => Promise<any>;
         openPath: (path: string) => Promise<void>;
         openExternal: (url: string) => Promise<void>;
         storage: {
@@ -569,7 +736,7 @@ export interface ObscuraAPI {
             set: (key: string, value: any) => Promise<void>;
         };
     };
-    on: (event: string, callback: (...args: any[]) => void) => void;
+    on: (event: string, callback: (...args: any[]) => void) => (() => void) | void;
 }
 
 // 繧ｰ繝ｭ繝ｼ繝舌Ν繧ｪ繝悶ず繧ｧ繧ｯ繝医・蝙区僑蠑ｵ
@@ -618,6 +785,12 @@ export interface ClientConfig {
     myUserToken?: string
     autoImport: AutoImportConfig
     dragDropImportMoveSource?: boolean
+    filterPresets?: {
+        id: string
+        name: string
+        options: FilterOptions
+        createdAt: string
+    }[]
     libraryViewSettings: { [libraryId: string]: LibraryViewSettings }
     thumbnailMode: 'speed' | 'quality'
     discordRichPresenceEnabled: boolean

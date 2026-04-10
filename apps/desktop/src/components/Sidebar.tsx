@@ -2,11 +2,13 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useFloatingPosition } from '../hooks/useFloatingPosition'
 import AuditLogModal from './AuditLogModal'
-import { FilterOptions, Library, RemoteLibrary, Folder } from '@obscura/core'
+import { FilterOptions, Library, RemoteLibrary, Folder, ExtensionSidebarItem, ExtensionSidebarSection, ObscuraPlugin } from '@obscura/core'
 import { api } from '../api'
 import './Sidebar.css'
 
 import { ConfirmModal } from './ConfirmModal'
+import { usePlugins } from '../hooks/usePlugins'
+import { PluginMount } from './PluginMount'
 
 interface SidebarProps {
     filterOptions: FilterOptions
@@ -34,6 +36,7 @@ interface SidebarProps {
     externalDropFolderId?: number | null
     itemCounts?: { [key: string]: number }
     language?: 'ja' | 'en'
+    hasActivePluginMainView?: boolean
 }
 
 interface FolderWithChildren extends Folder {
@@ -87,6 +90,9 @@ const Icons = {
     Cloud: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path></svg>,
     Plus: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
 }
+
+type SidebarPluginItem = ExtensionSidebarItem & { pluginId: string; key: string }
+type SidebarPluginSection = ExtensionSidebarSection & { pluginId: string; key: string; location?: 'nav' | 'after-tags' | 'after-folders' | 'footer' }
 
 function RenameInput({
     initialValue,
@@ -161,8 +167,10 @@ export function Sidebar({
     onInternalDragEnd,
     externalDropFolderId = null,
     itemCounts,
-    language = 'ja'
+    language = 'ja',
+    hasActivePluginMainView = false
 }: SidebarProps) {
+    const plugins = usePlugins()
     const parseDraggedMediaIds = (dataTransfer: DataTransfer): number[] => {
         const customData = dataTransfer.getData('application/x-obscura-media-ids')
         if (customData) {
@@ -179,7 +187,53 @@ export function Sidebar({
         return []
     }
 
+    const pluginSidebarContext = useMemo(() => ({
+        filterOptions,
+        activeLibrary,
+        activeRemoteLibrary,
+        folders,
+        libraries,
+        remoteLibraries,
+        itemCounts,
+        language,
+    }), [activeLibrary, activeRemoteLibrary, filterOptions, folders, itemCounts, language, libraries, remoteLibraries])
+    const pluginSidebarItems = useMemo<SidebarPluginItem[]>(() => {
+        return plugins
+            .flatMap((plugin: ObscuraPlugin) => {
+                try {
+                    const items = plugin.uiHooks?.sidebarItems?.(pluginSidebarContext) || []
+                    return items.map((item) => ({
+                        ...item,
+                        pluginId: plugin.id,
+                        key: `${plugin.id}:${item.id}`,
+                    }))
+                } catch (error) {
+                    console.error(`[PluginSystem] Failed to collect sidebar items for ${plugin.id}`, error)
+                    return []
+                }
+            })
+            .sort((a, b) => (a.order || 0) - (b.order || 0) || a.label.localeCompare(b.label))
+    }, [pluginSidebarContext, plugins])
+    const pluginSidebarSections = useMemo<SidebarPluginSection[]>(() => {
+        return plugins
+            .flatMap((plugin: ObscuraPlugin) => {
+                try {
+                    const sections = plugin.uiHooks?.sidebarSections?.(pluginSidebarContext) || []
+                    return sections.map((section) => ({
+                        ...section,
+                        pluginId: plugin.id,
+                        key: `${plugin.id}:${section.id}`,
+                    }))
+                } catch (error) {
+                    console.error(`[PluginSystem] Failed to collect sidebar sections for ${plugin.id}`, error)
+                    return []
+                }
+            })
+            .sort((a, b) => (a.order || 0) - (b.order || 0) || a.title.localeCompare(b.title))
+    }, [pluginSidebarContext, plugins])
+
     const isEnglish = language === 'en'
+    const isStandardFilterActive = !hasActivePluginMainView
     const t = {
         selectLibrary: isEnglish ? 'Select library...' : 'ライブラリを選択...',
         search: isEnglish ? 'Search...' : '検索...',
@@ -233,6 +287,51 @@ export function Sidebar({
     const libContextMenuRef = useRef<HTMLDivElement>(null)
 
     const folderTree = useMemo(() => buildFolderTree(folders), [folders])
+    const getPluginItemsByLocation = (location: SidebarPluginItem['location']) =>
+        pluginSidebarItems.filter((item) => (item.location || 'nav') === location)
+    const getPluginSectionsByLocation = (location: SidebarPluginSection['location']) =>
+        pluginSidebarSections.filter((section) => (section.location || 'after-folders') === location)
+
+    const renderPluginItem = (item: SidebarPluginItem) => (
+        <div
+            key={item.key}
+            className={`sidebar-nav-item ${item.isActive ? 'active' : ''} ${item.disabled ? 'disabled' : ''}`}
+            onClick={() => {
+                if (item.disabled) return
+                void item.onClick(pluginSidebarContext)
+            }}
+            title={item.label}
+            aria-disabled={item.disabled ? 'true' : undefined}
+        >
+            {item.icon ? (
+                <span aria-hidden="true" dangerouslySetInnerHTML={{ __html: item.icon }} />
+            ) : (
+                <Icons.Plus />
+            )}
+            <span>{item.label}</span>
+            {item.count !== undefined && item.count !== null && (
+                <span className="sidebar-count">{String(item.count)}</span>
+            )}
+        </div>
+    )
+
+    const renderPluginSection = (section: SidebarPluginSection) => (
+        <div key={section.key} className="sidebar-section">
+            <div className="sidebar-section-header">
+                <div className="sidebar-section-title-group">
+                    <span>{section.title}</span>
+                    {section.count !== undefined && section.count !== null && (
+                        <span className="sidebar-count sidebar-section-count">({String(section.count)})</span>
+                    )}
+                </div>
+            </div>
+            <PluginMount
+                className="sidebar-genre-list"
+                mount={section.mount}
+                context={{ pluginId: section.pluginId }}
+            />
+        </div>
+    )
 
     useFloatingPosition(
         folderContextMenuRef,
@@ -859,7 +958,7 @@ export function Sidebar({
                 <div className="sidebar-section">
                     <div className="sidebar-nav">
                         <div
-                            className={`sidebar-nav-item ${filterOptions.filterType === 'all' && filterOptions.selectedFolders.length === 0 ? 'active' : ''}`}
+                            className={`sidebar-nav-item ${isStandardFilterActive && filterOptions.filterType === 'all' && filterOptions.selectedFolders.length === 0 ? 'active' : ''}`}
                             onClick={() => setFilterType('all')}
                         >
                             <Icons.All />
@@ -869,7 +968,7 @@ export function Sidebar({
                             )}
                         </div>
                         <div
-                            className={`sidebar-nav-item ${filterOptions.filterType === 'uncategorized' ? 'active' : ''}`}
+                            className={`sidebar-nav-item ${isStandardFilterActive && filterOptions.filterType === 'uncategorized' ? 'active' : ''}`}
                             onClick={() => setFilterType('uncategorized')}
                         >
                             <Icons.Uncategorized />
@@ -879,7 +978,7 @@ export function Sidebar({
                             )}
                         </div>
                         <div
-                            className={`sidebar-nav-item ${filterOptions.filterType === 'untagged' ? 'active' : ''}`}
+                            className={`sidebar-nav-item ${isStandardFilterActive && filterOptions.filterType === 'untagged' ? 'active' : ''}`}
                             onClick={() => setFilterType('untagged')}
                         >
                             <Icons.Untagged />
@@ -889,21 +988,21 @@ export function Sidebar({
                             )}
                         </div>
                         <div
-                            className={`sidebar-nav-item ${filterOptions.filterType === 'recent' ? 'active' : ''}`}
+                            className={`sidebar-nav-item ${isStandardFilterActive && filterOptions.filterType === 'recent' ? 'active' : ''}`}
                             onClick={() => setFilterType('recent')}
                         >
                             <Icons.Recent />
                             <span>{t.recent}</span>
                         </div>
                         <div
-                            className={`sidebar-nav-item ${filterOptions.filterType === 'random' ? 'active' : ''}`}
+                            className={`sidebar-nav-item ${isStandardFilterActive && filterOptions.filterType === 'random' ? 'active' : ''}`}
                             onClick={() => setFilterType('random')}
                         >
                             <Icons.Random />
                             <span>{t.random}</span>
                         </div>
                         <div
-                            className={`sidebar-nav-item ${filterOptions.filterType === 'tag_manager' ? 'active' : ''}`}
+                            className={`sidebar-nav-item ${isStandardFilterActive && filterOptions.filterType === 'tag_manager' ? 'active' : ''}`}
                             onClick={() => setFilterType('tag_manager')}
                         >
                             <Icons.Tags />
@@ -912,8 +1011,9 @@ export function Sidebar({
                                 <span className="sidebar-count">{itemCounts['tags'].toLocaleString()}</span>
                             )}
                         </div>
+                        {getPluginItemsByLocation('after-tags').map(renderPluginItem)}
                         <div
-                            className={`sidebar-nav-item ${filterOptions.filterType === 'trash' ? 'active' : ''}`}
+                            className={`sidebar-nav-item ${isStandardFilterActive && filterOptions.filterType === 'trash' ? 'active' : ''}`}
                             onClick={() => setFilterType('trash')}
                         >
                             <Icons.Trash />
@@ -922,6 +1022,7 @@ export function Sidebar({
                                 <span className="sidebar-count">{itemCounts['trash'].toLocaleString()}</span>
                             )}
                         </div>
+                        {getPluginItemsByLocation('nav').map(renderPluginItem)}
                     </div>
                 </div>
 
@@ -947,9 +1048,19 @@ export function Sidebar({
                         {folderTree.map(renderFolderNode)}
                     </div>
                 </div>
+                {getPluginSectionsByLocation('after-folders').map(renderPluginSection)}
+                {getPluginItemsByLocation('after-folders').length > 0 && (
+                    <div className="sidebar-section">
+                        <div className="sidebar-nav">
+                            {getPluginItemsByLocation('after-folders').map(renderPluginItem)}
+                        </div>
+                    </div>
+                )}
             </div>
 
             <div className="sidebar-footer">
+                {getPluginSectionsByLocation('footer').map(renderPluginSection)}
+                {getPluginItemsByLocation('footer').map(renderPluginItem)}
                 <button className="sidebar-settings-btn" onClick={onOpenSettings} title={t.settings}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M12.22 2h-0.44a2 2 0 0 0-2 2v0.18a2 2 0 0 1-1 1.73l-0.43 0.25a2 2 0 0 1-2 0l-0.15-0.08a2 2 0 0 0-2.73 0.73l-0.22 0.38a2 2 0 0 0 0.73 2.73l0.15 0.1a2 2 0 0 1 1 1.72v0.51a2 2 0 0 1-1 1.74l-0.15 0.09a2 2 0 0 0-0.73 2.73l-0.22-0.38a2 2 0 0 0-2.73-0.73l-0.15 0.08a2 2 0 0 1-2 0l-0.43-0.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
