@@ -5,6 +5,7 @@ const path = require('node:path')
 const crypto = require('node:crypto')
 const os = require('node:os')
 const http = require('node:http')
+const net = require('node:net')
 const { spawn, spawnSync } = require('node:child_process')
 
 let machineIdSync = null
@@ -31,16 +32,313 @@ let cachedResolvedTfLibraryPath = null
 let cachedResolvedTfRevision = -1
 let cachedResolvedTf = { tags: [], folders: [] }
 let pendingUpdateInstallerPath = null
-let discordRpcModule = null
-let discordClient = null
+let discordSocket = null
 let discordReady = false
 let discordLoginPromise = null
+let discordPipeIndex = null
+let discordIpcBuffer = Buffer.alloc(0)
+const discordPendingRequests = new Map()
+const discordReadyWaiters = new Set()
+let discordConnectionId = 0
+let discordOperationQueue = Promise.resolve()
 let ffmpegHwaccelAvailable = true
+const DISCORD_IPC_MAX_INDEX = 10
+const DISCORD_OPCODES = {
+  HANDSHAKE: 0,
+  FRAME: 1,
+  CLOSE: 2,
+  PING: 3,
+  PONG: 4,
+}
+
+function mapDiscordActivityType(kind) {
+  switch (String(kind || '').trim().toLowerCase()) {
+    case 'streaming':
+      return 1
+    case 'listening':
+      return 2
+    case 'watching':
+      return 3
+    case 'competing':
+      return 5
+    default:
+      return 0
+  }
+}
+
+async function setDiscordActivityWithType(activity) {
+  let timestamps
+  let assets
+
+  if (Number.isFinite(Number(activity?.startTimestamp)) || Number.isFinite(Number(activity?.endTimestamp))) {
+    timestamps = {
+      start: Number.isFinite(Number(activity?.startTimestamp)) ? Number(activity.startTimestamp) : undefined,
+      end: Number.isFinite(Number(activity?.endTimestamp)) ? Number(activity.endTimestamp) : undefined,
+    }
+  }
+
+  if (
+    typeof activity?.largeImageKey === 'string'
+    || typeof activity?.largeImageText === 'string'
+    || typeof activity?.smallImageKey === 'string'
+    || typeof activity?.smallImageText === 'string'
+  ) {
+    assets = {
+      large_image: typeof activity?.largeImageKey === 'string' ? activity.largeImageKey : 'monitor_icon',
+      large_text: typeof activity?.largeImageText === 'string' ? activity.largeImageText : 'Obscura',
+      small_image: typeof activity?.smallImageKey === 'string' ? activity.smallImageKey : undefined,
+      small_text: typeof activity?.smallImageText === 'string' ? activity.smallImageText : undefined,
+    }
+  }
+
+  return discordRequest('SET_ACTIVITY', {
+    pid: process.pid,
+    activity: {
+      type: mapDiscordActivityType(activity?.kind),
+      details: typeof activity?.details === 'string' ? activity.details : undefined,
+      state: typeof activity?.state === 'string' ? activity.state : undefined,
+      timestamps,
+      assets,
+      buttons: Array.isArray(activity?.buttons) ? activity.buttons : undefined,
+      instance: false,
+    },
+  })
+}
+
 let networkServer = null
 let networkServerPort = null
 let networkServerHost = null
+let pendingShellActionIntent = null
+let currentFrontendSessionId = ''
 
 const DISCORD_CLIENT_ID = '1462710290322952234'
+
+function getDiscordIpcPath(id) {
+  if (process.platform === 'win32') {
+    return `\\\\?\\pipe\\discord-ipc-${id}`
+  }
+  const { env: { XDG_RUNTIME_DIR, TMPDIR, TMP, TEMP } } = process
+  const prefix = XDG_RUNTIME_DIR || TMPDIR || TMP || TEMP || '/tmp'
+  return `${String(prefix).replace(/\/$/, '')}/discord-ipc-${id}`
+}
+
+function encodeDiscordPacket(op, data) {
+  const raw = JSON.stringify(data)
+  const len = Buffer.byteLength(raw)
+  const packet = Buffer.alloc(8 + len)
+  packet.writeInt32LE(op, 0)
+  packet.writeInt32LE(len, 4)
+  packet.write(raw, 8, len)
+  return packet
+}
+
+function createDiscordNonce() {
+  if (typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return crypto.randomBytes(16).toString('hex')
+}
+
+function resetDiscordRequestState(error) {
+  for (const waiter of discordReadyWaiters) {
+    clearTimeout(waiter.timer)
+    waiter.reject(error)
+  }
+  discordReadyWaiters.clear()
+  for (const pending of discordPendingRequests.values()) {
+    clearTimeout(pending.timer)
+    pending.reject(error)
+  }
+  discordPendingRequests.clear()
+}
+
+function clearDiscordSocketState() {
+  discordSocket = null
+  discordReady = false
+  discordIpcBuffer = Buffer.alloc(0)
+}
+
+function handleDiscordDisconnect(reason, shouldForgetPipe = false, connectionId = discordConnectionId) {
+  if (connectionId !== discordConnectionId) {
+    return
+  }
+  const error = reason instanceof Error ? reason : new Error(String(reason || 'discord disconnected'))
+  const pipeLabel = discordPipeIndex ?? 'unknown'
+  if (shouldForgetPipe) {
+    discordPipeIndex = null
+  }
+  clearDiscordSocketState()
+  resetDiscordRequestState(error)
+  appendDebugLog(`[DiscordPresence] sidecar disconnect pipe=${pipeLabel} error=${error.message}`)
+}
+
+function resolveDiscordReady(connectionId = discordConnectionId) {
+  if (connectionId !== discordConnectionId) {
+    return
+  }
+  for (const waiter of discordReadyWaiters) {
+    clearTimeout(waiter.timer)
+    waiter.resolve(true)
+  }
+  discordReadyWaiters.clear()
+}
+
+function waitForDiscordReady(connectionId, timeoutMs = 5000) {
+  if (connectionId === discordConnectionId && discordReady) {
+    return Promise.resolve(true)
+  }
+  return new Promise((resolve, reject) => {
+    const waiter = {
+      connectionId,
+      timer: setTimeout(() => {
+        discordReadyWaiters.delete(waiter)
+        reject(new Error('discord ready timeout'))
+      }, timeoutMs),
+      resolve,
+      reject,
+    }
+    discordReadyWaiters.add(waiter)
+  })
+}
+
+function handleDiscordFrame(op, payload, connectionId) {
+  if (connectionId !== discordConnectionId) {
+    return
+  }
+  if (op === DISCORD_OPCODES.PING) {
+    if (discordSocket) {
+      discordSocket.write(encodeDiscordPacket(DISCORD_OPCODES.PONG, payload))
+    }
+    return
+  }
+
+  if (op === DISCORD_OPCODES.CLOSE) {
+    const message = payload?.message || payload?.data?.message || 'discord closed ipc connection'
+    handleDiscordDisconnect(new Error(message), true, connectionId)
+    return
+  }
+
+  if (op !== DISCORD_OPCODES.FRAME || !payload) {
+    return
+  }
+
+  if (payload.cmd === 'DISPATCH' && payload.evt === 'READY') {
+    discordReady = true
+    appendDebugLog(`[DiscordPresence] sidecar ready pipe=${discordPipeIndex ?? 'unknown'}`)
+    resolveDiscordReady(connectionId)
+    return
+  }
+
+  const nonce = typeof payload.nonce === 'string' ? payload.nonce : ''
+  if (!nonce || !discordPendingRequests.has(nonce)) {
+    return
+  }
+
+  const pending = discordPendingRequests.get(nonce)
+  discordPendingRequests.delete(nonce)
+  clearTimeout(pending.timer)
+
+  if (payload.evt === 'ERROR') {
+    const message = payload?.data?.message || payload?.message || 'discord request failed'
+    pending.reject(new Error(message))
+    return
+  }
+
+  pending.resolve(payload?.data)
+}
+
+function handleDiscordSocketData(chunk, connectionId) {
+  if (connectionId !== discordConnectionId) {
+    return
+  }
+  discordIpcBuffer = Buffer.concat([discordIpcBuffer, chunk])
+  while (discordIpcBuffer.length >= 8) {
+    const op = discordIpcBuffer.readInt32LE(0)
+    const len = discordIpcBuffer.readInt32LE(4)
+    if (discordIpcBuffer.length < 8 + len) {
+      return
+    }
+    const raw = discordIpcBuffer.slice(8, 8 + len).toString('utf8')
+    discordIpcBuffer = discordIpcBuffer.slice(8 + len)
+    try {
+      handleDiscordFrame(op, raw ? JSON.parse(raw) : null, connectionId)
+    } catch (error) {
+      appendDebugLog(`[DiscordPresence] sidecar parse error=${error?.message || String(error)}`)
+    }
+  }
+}
+
+async function connectDiscordPipe(pipeIndex) {
+  await destroyDiscordClient()
+  const connectionId = ++discordConnectionId
+
+  const socket = await new Promise((resolve, reject) => {
+    const candidate = net.createConnection(getDiscordIpcPath(pipeIndex))
+    const timeout = setTimeout(() => {
+      candidate.destroy(new Error('discord pipe connect timeout'))
+    }, 1500)
+    candidate.once('connect', () => {
+      clearTimeout(timeout)
+      resolve(candidate)
+    })
+    candidate.once('error', (error) => {
+      clearTimeout(timeout)
+      reject(error)
+    })
+  })
+
+  discordSocket = socket
+  discordPipeIndex = pipeIndex
+  discordIpcBuffer = Buffer.alloc(0)
+  discordReady = false
+
+  socket.on('data', (chunk) => handleDiscordSocketData(chunk, connectionId))
+  socket.on('close', () => handleDiscordDisconnect(new Error('discord ipc closed'), true, connectionId))
+  socket.on('error', (error) => handleDiscordDisconnect(error, true, connectionId))
+
+  socket.write(encodeDiscordPacket(DISCORD_OPCODES.HANDSHAKE, {
+    v: 1,
+    client_id: DISCORD_CLIENT_ID,
+  }))
+
+  await waitForDiscordReady(connectionId, 2500)
+  appendDebugLog(`[DiscordPresence] sidecar connected pipe=${pipeIndex}`)
+  return true
+}
+
+async function discordRequest(cmd, args) {
+  const ready = await ensureDiscordClient()
+  if (!ready || !discordSocket || !discordReady) {
+    throw new Error('discord client unavailable')
+  }
+
+  const nonce = createDiscordNonce()
+  const promise = new Promise((resolve, reject) => {
+    const pending = {
+      resolve,
+      reject,
+      timer: setTimeout(() => {
+        discordPendingRequests.delete(nonce)
+        reject(new Error(`discord request timeout: ${cmd}`))
+      }, 5000),
+    }
+    discordPendingRequests.set(nonce, pending)
+  })
+
+  discordSocket.write(encodeDiscordPacket(DISCORD_OPCODES.FRAME, {
+    cmd,
+    args,
+    nonce,
+  }))
+
+  return promise
+}
+
+function enqueueDiscordOperation(task) {
+  const run = discordOperationQueue.then(task, task)
+  discordOperationQueue = run.catch(() => undefined)
+  return run
+}
 
 function send(message) {
   try {
@@ -48,6 +346,12 @@ function send(message) {
   } catch {
     // ignore
   }
+}
+
+function sleepSync(ms) {
+  const duration = Math.max(0, Number(ms) || 0)
+  if (duration <= 0) return
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, duration)
 }
 
 function getBundledPluginDirs() {
@@ -128,15 +432,40 @@ function getLibraryBackupRetention() {
   return Math.max(1, Math.min(100, Math.floor(value)))
 }
 
+function getDebugLogTargets() {
+  const candidates = [
+    path.join(getDataRoot(), 'debug-fileops.log'),
+    path.resolve(__dirname, '..', '.sidecar-data', 'debug-fileops.log'),
+  ]
+  if (process.cwd && typeof process.cwd === 'function') {
+    candidates.push(path.resolve(process.cwd(), '.sidecar-data', 'debug-fileops.log'))
+  }
+  return [...new Set(candidates.map((value) => String(value || '').trim()).filter(Boolean))]
+}
+
 function appendDebugLog(line) {
+  const ts = new Date().toISOString()
+  const message = `[${ts}] ${String(line || '')}\n`
+  for (const target of getDebugLogTargets()) {
+    try {
+      ensureDir(path.dirname(target))
+      fs.appendFileSync(target, message, 'utf8')
+    } catch {
+      // Ignore debug log errors.
+    }
+  }
+}
+
+function getDebugStack(skip = 2, take = 8) {
   try {
-    const root = getDataRoot()
-    ensureDir(root)
-    const target = path.join(root, 'debug-fileops.log')
-    const ts = new Date().toISOString()
-    fs.appendFileSync(target, `[${ts}] ${String(line || '')}\n`, 'utf8')
+    return String(new Error().stack || '')
+      .split('\n')
+      .slice(skip, skip + take)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .join(' | ')
   } catch {
-    // Ignore debug log errors.
+    return ''
   }
 }
 
@@ -144,6 +473,32 @@ function getUpdateDir() {
   const dir = path.join(getDataRoot(), 'updates')
   ensureDir(dir)
   return dir
+}
+
+function findLatestUpdateInstallerPath() {
+  const dir = getUpdateDir()
+  let entries = []
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return ''
+  }
+
+  return entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => {
+      const fullPath = path.join(dir, entry.name)
+      const ext = path.extname(entry.name).toLowerCase()
+      if (ext !== '.exe' && ext !== '.msi') return null
+      try {
+        const stat = fs.statSync(fullPath)
+        return { fullPath, mtimeMs: Number(stat.mtimeMs || 0) }
+      } catch {
+        return null
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)[0]?.fullPath || ''
 }
 
 function getManagedBinDir() {
@@ -386,6 +741,7 @@ function buildMergedMediaForLibrary(libraryPath) {
     return mediaList
       .map((m) => ({
         ...m,
+        thumbnail_path: sanitizeThumbnailPath(m?.file_type, m?.thumbnail_path, m?.file_path),
         tags: normalizeNamedEntities(m?.tags, tagById, tagByName, 'tag'),
         folders: normalizeNamedEntities(m?.folders, folderById, folderByName, 'folder'),
       }))
@@ -400,6 +756,7 @@ function buildMergedMediaForLibrary(libraryPath) {
     return {
       ...m,
       ...overlay,
+      thumbnail_path: sanitizeThumbnailPath(overlay?.file_type ?? m?.file_type, overlay?.thumbnail_path ?? m?.thumbnail_path, overlay?.file_path ?? m?.file_path),
       tags: mergeNamedEntities(
         normalizeNamedEntities(overlayTagNames, tagById, tagByName, 'tag'),
         normalizeNamedEntities(m?.tags, tagById, tagByName, 'tag'),
@@ -420,6 +777,7 @@ function buildMergedMediaForLibrary(libraryPath) {
     if (!fp || indexed.has(fp)) continue
     indexed.set(fp, {
       ...manual,
+      thumbnail_path: sanitizeThumbnailPath(manual?.file_type, manual?.thumbnail_path, manual?.file_path),
       tags: normalizeNamedEntities(manual?.tags, tagById, tagByName, 'tag'),
       folders: normalizeNamedEntities(manual?.folders, folderById, folderByName, 'folder'),
     })
@@ -580,7 +938,12 @@ function handleNetworkRequest(req, res) {
   if (method === 'GET' && route.startsWith('/api/thumbnails/')) {
     const id = Number(route.split('/').pop())
     const media = getMediaByIdForLibrary(libraryPath, id)
-    sendFileResponse(res, media?.thumbnail_path)
+    const safeThumbnailPath = sanitizeThumbnailPath(media?.file_type, media?.thumbnail_path, media?.file_path)
+    if (!safeThumbnailPath) {
+      writeJson(res, 404, { error: 'Thumbnail not found' })
+      return
+    }
+    sendFileResponse(res, safeThumbnailPath)
     return
   }
 
@@ -701,78 +1064,74 @@ function stopNetworkServer() {
 }
 
 async function ensureDiscordClient() {
-  if (discordClient && discordReady) return true
-
-  if (!discordRpcModule) {
-    try {
-      discordRpcModule = require('discord-rpc')
-    } catch {
-      return false
-    }
+  if (discordSocket && discordReady) return true
+  if (discordLoginPromise) {
+    return await discordLoginPromise
   }
 
-  try {
-    if (!discordClient) {
-      discordClient = new discordRpcModule.Client({ transport: 'ipc' })
-      discordClient.on('ready', () => {
-        discordReady = true
-        discordLoginPromise = null
-      })
-      discordClient.on('disconnected', () => {
-        discordReady = false
-        discordLoginPromise = null
-        discordClient = null
-      })
+  discordLoginPromise = (async () => {
+    const candidatePipeIndexes = []
+    if (Number.isInteger(discordPipeIndex) && discordPipeIndex >= 0) {
+      candidatePipeIndexes.push(discordPipeIndex)
+    }
+    for (let pipeIndex = 0; pipeIndex < DISCORD_IPC_MAX_INDEX; pipeIndex += 1) {
+      if (!candidatePipeIndexes.includes(pipeIndex)) {
+        candidatePipeIndexes.push(pipeIndex)
+      }
     }
 
-    if (!discordReady) {
-      if (!discordLoginPromise) {
-        const loginPromise = discordClient.login({ clientId: DISCORD_CLIENT_ID })
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('discord login timeout')), 5000)
-        })
-        discordLoginPromise = Promise.race([loginPromise, timeoutPromise])
-      }
-      await discordLoginPromise
-      discordReady = true
-      discordLoginPromise = null
-    }
-    return true
-  } catch {
-    discordReady = false
-    discordLoginPromise = null
-    if (discordClient) {
+    for (const pipeIndex of candidatePipeIndexes) {
       try {
-        await discordClient.destroy()
-      } catch {
-        // ignore
+        appendDebugLog(`[DiscordPresence] sidecar connect attempt pipe=${pipeIndex}`)
+        await connectDiscordPipe(pipeIndex)
+        return true
+      } catch (error) {
+        appendDebugLog(`[DiscordPresence] sidecar connect failed pipe=${pipeIndex} error=${error?.message || String(error)}`)
       }
     }
-    discordClient = null
+
     return false
+  })()
+
+  try {
+    return await discordLoginPromise
+  } finally {
+    discordLoginPromise = null
   }
 }
 
 async function clearDiscordActivitySafe() {
-  if (!discordClient || !discordReady) return false
-  try {
-    await discordClient.clearActivity()
+  if (!discordSocket || !discordReady) {
+    appendDebugLog('[DiscordPresence] sidecar clear skipped reason=not-connected')
     return true
-  } catch {
+  }
+  try {
+    await discordRequest('SET_ACTIVITY', {
+      pid: process.pid,
+      activity: null,
+    })
+    return true
+  } catch (error) {
+    appendDebugLog(`[DiscordPresence] sidecar clear failed error=${error?.message || String(error)}`)
     return false
   }
 }
 
 async function destroyDiscordClient() {
-  if (!discordClient) return
+  if (!discordSocket) return
+  const socket = discordSocket
   try {
-    await discordClient.destroy()
+    socket.write(encodeDiscordPacket(DISCORD_OPCODES.CLOSE, {}))
   } catch {
     // ignore
   } finally {
+    try {
+      socket.destroy()
+    } catch {
+      // ignore
+    }
     discordLoginPromise = null
-    discordClient = null
-    discordReady = false
+    clearDiscordSocketState()
   }
 }
 
@@ -865,12 +1224,36 @@ function runPowerShell(command) {
 function openPathWithDefaultFileManager(targetPath) {
   const target = String(targetPath || '').trim()
   if (!target) throw new Error('file manager target is empty')
-  const child = spawn('cmd.exe', ['/c', 'start', '', target], {
+  if (isWindows()) {
+    appendDebugLog(`openPathWithDefaultFileManager target=${target} mode=default-file-manager`)
+    appendDebugLog(`openPathWithDefaultFileManager command=explorer.exe \"${target}\"`)
+    spawnDetached('explorer.exe', [target])
+    return
+  }
+  const child = spawn('xdg-open', [target], {
     detached: true,
     stdio: 'ignore',
     windowsHide: true,
   })
   child.unref()
+}
+
+function revealPathInWindowsExplorer(targetPath) {
+  const target = String(targetPath || '').trim()
+  if (!target) throw new Error('reveal target is empty')
+  appendDebugLog(`revealPathInWindowsExplorer target=${target}`)
+  appendDebugLog(`revealPathInWindowsExplorer command=explorer.exe /select,\"${target}\"`)
+  spawnDetached('explorer.exe', ['/select,', target])
+}
+
+function openFileWithDefaultApplication(targetPath) {
+  const target = String(targetPath || '').trim()
+  if (!target) throw new Error('file path is empty')
+  if (isWindows()) {
+    spawnDetached('cmd.exe', ['/c', 'start', '', target])
+    return
+  }
+  spawnDetached('xdg-open', [target])
 }
 
 function launchInstaller(installerPath) {
@@ -960,7 +1343,7 @@ function decodeDataUrl(dataUrl) {
 function normalizeInputFilePath(inputPath) {
   let raw = String(inputPath || '').trim()
   if (!raw) return ''
-  appendDebugLog(`normalizeInputFilePath raw=${raw}`)
+  appendDebugLog(`normalizeInputFilePath raw=${raw} stack=${getDebugStack(2, 6)}`)
   raw = raw.replace(/^"+|"+$/g, '')
 
   if (/^media:\/\//i.test(raw)) {
@@ -1048,12 +1431,28 @@ function getFfprobeExecutablePath() {
 
 function isImagePath(filePath) {
   const ext = path.extname(String(filePath || '')).toLowerCase()
-  return ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(ext)
+  return ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.avif'].includes(ext)
 }
 
 function isAudioPath(filePath) {
   const ext = path.extname(String(filePath || '')).toLowerCase()
   return ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a'].includes(ext)
+}
+
+function sanitizeThumbnailPath(fileType, thumbnailPath, filePath) {
+  const rawThumbnailPath = String(thumbnailPath || '').trim()
+  if (rawThumbnailPath && isImagePath(rawThumbnailPath) && fs.existsSync(rawThumbnailPath)) {
+    return rawThumbnailPath
+  }
+
+  if (String(fileType || '').toLowerCase() === 'image') {
+    const rawFilePath = String(filePath || '').trim()
+    if (rawFilePath && isImagePath(rawFilePath) && fs.existsSync(rawFilePath)) {
+      return rawFilePath
+    }
+  }
+
+  return ''
 }
 
 function findSiblingThumbnailPath(filePath) {
@@ -1090,6 +1489,7 @@ function findSiblingThumbnailPath(filePath) {
 
 function extractThumbnailWithFfmpeg(filePath, outputPath) {
   const ffmpegPath = getFfmpegExecutablePath()
+  appendDebugLog(`ffmpeg_thumbnail start ffmpegPath=${ffmpegPath} filePath=${filePath} outputPath=${outputPath}`)
   ensureDir(path.dirname(outputPath))
   try {
     if (fs.existsSync(outputPath)) {
@@ -1100,11 +1500,13 @@ function extractThumbnailWithFfmpeg(filePath, outputPath) {
   }
 
   const runExtract = (args) => {
+    appendDebugLog(`ffmpeg_thumbnail exec args=${JSON.stringify(args)}`)
     const proc = spawnSync(ffmpegPath, args, {
       encoding: 'utf8',
       windowsHide: true,
       timeout: 120000,
     })
+    appendDebugLog(`ffmpeg_thumbnail result status=${proc.status} error=${proc.error ? String(proc.error.message || proc.error) : ''} outputExists=${fs.existsSync(outputPath)}`)
     return proc.status === 0 && fs.existsSync(outputPath)
   }
 
@@ -1133,7 +1535,118 @@ function extractThumbnailWithFfmpeg(filePath, outputPath) {
     ])
     if (ok) return true
   }
+  appendDebugLog(`ffmpeg_thumbnail failed filePath=${filePath} outputPath=${outputPath}`)
   return false
+}
+
+function registerFrontendSession(sessionId, startedAt) {
+  currentFrontendSessionId = String(sessionId || '').trim()
+  pendingShellActionIntent = null
+  appendDebugLog(`register_frontend_session sessionId=${currentFrontendSessionId} startedAt=${String(startedAt || '')}`)
+}
+
+function unregisterFrontendSession(sessionId, reason, endedAt) {
+  const normalizedSessionId = String(sessionId || '').trim()
+  const shouldClear = !normalizedSessionId || normalizedSessionId === currentFrontendSessionId
+  appendDebugLog(`unregister_frontend_session sessionId=${normalizedSessionId} currentSessionId=${currentFrontendSessionId} reason=${String(reason || '')} endedAt=${String(endedAt || '')} cleared=${shouldClear}`)
+  if (!shouldClear) return
+  currentFrontendSessionId = ''
+  pendingShellActionIntent = null
+}
+
+function grantShellActionIntent(sessionId, token, expiresAt, action, filePath) {
+  const normalizedSessionId = String(sessionId || '').trim()
+  if (!normalizedSessionId) {
+    throw new Error('frontend sessionId is required')
+  }
+  if (!currentFrontendSessionId) {
+    throw new Error('frontend session is not registered')
+  }
+  if (currentFrontendSessionId !== normalizedSessionId) {
+    throw new Error(`frontend session mismatch: current=${currentFrontendSessionId} incoming=${normalizedSessionId}`)
+  }
+  pendingShellActionIntent = {
+    sessionId: normalizedSessionId,
+    token: String(token || '').trim(),
+    expiresAt: Number(expiresAt || 0),
+    action: String(action || '').trim(),
+    filePath: normalizeInputFilePath(filePath),
+  }
+  appendDebugLog(`grant_shell_action_intent sessionId=${pendingShellActionIntent.sessionId} token=${pendingShellActionIntent.token} action=${pendingShellActionIntent.action} path=${pendingShellActionIntent.filePath} expiresAt=${pendingShellActionIntent.expiresAt}`)
+}
+
+function consumeShellActionIntent(sessionId, token, action, filePath) {
+  const normalizedSessionId = String(sessionId || '').trim()
+  const normalizedToken = String(token || '').trim()
+  const normalizedAction = String(action || '').trim()
+  const normalizedPath = normalizeInputFilePath(filePath)
+  const now = Date.now()
+  const intent = pendingShellActionIntent
+  const isValid = Boolean(
+    normalizedSessionId
+    && currentFrontendSessionId
+    && normalizedSessionId === currentFrontendSessionId
+    && normalizedToken
+    && intent
+    && normalizedSessionId === String(intent.sessionId || '')
+    && normalizedToken === intent.token
+    && normalizedAction
+    && normalizedAction === intent.action
+    && normalizedPath
+    && normalizedPath === intent.filePath
+    && Number.isFinite(intent.expiresAt)
+    && intent.expiresAt >= now
+  )
+  appendDebugLog(`consume_shell_action_intent sessionId=${normalizedSessionId} currentSessionId=${currentFrontendSessionId} token=${normalizedToken} action=${normalizedAction} path=${normalizedPath} valid=${isValid} pending=${intent ? JSON.stringify(intent) : 'null'}`)
+  pendingShellActionIntent = null
+  return isValid
+}
+
+function extractDominantColorWithFfmpeg(filePath) {
+  const targetPath = String(filePath || '').trim()
+  if (!targetPath || !fs.existsSync(targetPath)) return ''
+  const ffmpegPath = getFfmpegExecutablePath()
+  try {
+    const proc = spawnSync(ffmpegPath, [
+      '-i', targetPath,
+      '-vf', 'scale=1:1',
+      '-frames:v', '1',
+      '-f', 'rawvideo',
+      '-pix_fmt', 'rgb24',
+      'pipe:1',
+    ], {
+      windowsHide: true,
+      timeout: 30000,
+    })
+    if (proc.status !== 0) return ''
+    const bytes = Buffer.isBuffer(proc.stdout) ? proc.stdout : Buffer.from(proc.stdout || '')
+    if (!bytes || bytes.length < 3) return ''
+    const toHex = (value) => Number(value || 0).toString(16).padStart(2, '0')
+    return `#${toHex(bytes[0])}${toHex(bytes[1])}${toHex(bytes[2])}`
+  } catch {
+    return ''
+  }
+}
+
+function deletePathWithRetries(targetPath) {
+  const normalized = String(targetPath || '').trim()
+  if (!normalized) return true
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      if (!fs.existsSync(normalized)) return true
+      try {
+        fs.chmodSync(normalized, 0o666)
+      } catch {
+        // ignore chmod failures
+      }
+      fs.rmSync(normalized, { force: true })
+      if (!fs.existsSync(normalized)) return true
+    } catch {
+      // retry below
+    }
+    sleepSync(120 * (attempt + 1))
+  }
+  return !fs.existsSync(normalized)
 }
 
 function rgbToHex(r, g, b) {
@@ -1606,7 +2119,7 @@ function writeAssociatedDataToMetadata(mediaFilePath, data) {
   const next = readJsonIfExists(metadataPath, {})
   const payload = next && typeof next === 'object' && !Array.isArray(next) ? { ...next } : {}
   payload.associatedData = data ?? null
-  fs.writeFileSync(metadataPath, JSON.stringify(payload, null, 2), 'utf8')
+  writeJsonAtomic(metadataPath, payload)
 }
 
 function readJsonIfExists(filePath, fallbackValue) {
@@ -1619,6 +2132,59 @@ function readJsonIfExists(filePath, fallbackValue) {
   } catch {
     return fallbackValue
   }
+}
+
+function stringOrEmpty(value) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function safeJsonStringify(payload, spacing = 2) {
+  const seen = new WeakSet()
+  return JSON.stringify(payload, (key, value) => {
+    if (typeof value === 'bigint') return Number(value)
+    if (typeof value === 'function' || typeof value === 'symbol') return undefined
+    if (Buffer.isBuffer(value)) return value.toString('base64')
+    if (value instanceof Error) {
+      return {
+        name: value.name,
+        message: value.message,
+        stack: value.stack,
+      }
+    }
+    if (value && typeof value === 'object') {
+      if (seen.has(value)) return undefined
+      seen.add(value)
+    }
+    return value
+  }, spacing)
+}
+
+function writeJsonAtomic(targetPath, payload) {
+  const normalized = String(targetPath || '').trim()
+  if (!normalized) {
+    throw new Error('target path is required')
+  }
+  ensureDir(path.dirname(normalized))
+  let serialized = ''
+  try {
+    serialized = safeJsonStringify(payload, 2)
+  } catch (error) {
+    appendDebugLog(`writeJsonAtomic stringify failed path=${normalized} error=${error?.message || String(error)}`)
+    throw error
+  }
+  let lastError = null
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      fs.writeFileSync(normalized, serialized, 'utf8')
+      return
+    } catch (error) {
+      lastError = error
+      appendDebugLog(`writeJsonAtomic write retry=${attempt + 1} path=${normalized} error=${error?.message || String(error)}`)
+      sleepSync(120 * (attempt + 1))
+    }
+  }
+  appendDebugLog(`writeJsonAtomic failed path=${normalized} error=${lastError?.message || String(lastError)}`)
+  throw new Error(lastError?.message || String(lastError) || 'write failed')
 }
 
 function getActiveLibraryDataPath(fileName) {
@@ -2361,6 +2927,38 @@ function getDirectoryMetadataRaw(filePath, cache) {
   return raw
 }
 
+function getXAttrMetadataRaw(filePath, cache) {
+  const normalizedPath = String(filePath || '').trim()
+  if (!normalizedPath) return null
+  const cacheKey = `xattr:${normalizedPath}`
+  if (cache && cache.has(cacheKey)) return cache.get(cacheKey)
+
+  let raw = null
+  try {
+    if (isWindows()) {
+      const ps = spawnSync('powershell.exe', [
+        '-NoProfile',
+        '-Command',
+        "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; try { $targetPath = $args[0]; if ($targetPath) { $stream = Get-Content -LiteralPath $targetPath -Stream 'XAttrMetadata' -Raw -ErrorAction Stop; if ($null -ne $stream) { [Console]::Out.Write($stream) } } } catch { }",
+        normalizedPath,
+      ], {
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 10000,
+      })
+      const text = String(ps.stdout || '').replace(/^\uFEFF/, '').trim()
+      if (ps.status === 0 && text) {
+        raw = JSON.parse(text)
+      }
+    }
+  } catch {
+    raw = null
+  }
+
+  if (cache) cache.set(cacheKey, raw)
+  return raw
+}
+
 function asMetadataCandidates(raw) {
   if (!raw) return []
   if (Array.isArray(raw)) return raw.filter((item) => item && typeof item === 'object')
@@ -2396,7 +2994,8 @@ function asMetadataCandidates(raw) {
 
 function resolveMetadataEntryForFile(filePath, cache) {
   const raw = getDirectoryMetadataRaw(filePath, cache)
-  if (!raw) return null
+  const xattrRaw = getXAttrMetadataRaw(filePath, cache)
+  if (!raw && !xattrRaw) return null
 
   const normalizedFilePath = normalizeMetadataPathKey(filePath)
   const fileName = path.basename(String(filePath || ''))
@@ -2411,7 +3010,10 @@ function resolveMetadataEntryForFile(filePath, cache) {
     }
   }
 
-  const candidates = asMetadataCandidates(raw)
+  const candidates = [
+    ...asMetadataCandidates(raw),
+    ...asMetadataCandidates(xattrRaw),
+  ]
   if (candidates.length === 0) return null
 
   let best = null
@@ -2441,6 +3043,9 @@ function resolveMetadataEntryForFile(filePath, cache) {
     if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
       return raw
     }
+    if (xattrRaw && typeof xattrRaw === 'object' && !Array.isArray(xattrRaw)) {
+      return xattrRaw
+    }
     return null
   }
   return best
@@ -2449,7 +3054,6 @@ function resolveMetadataEntryForFile(filePath, cache) {
 function applyMetadataOverlayFromEntry(item, overlay, entry) {
   if (!entry || typeof entry !== 'object') return
 
-  const stringOrEmpty = (value) => (typeof value === 'string' ? value.trim() : '')
   const toFiniteNumber = (value) => {
     const n = Number(value)
     return Number.isFinite(n) ? n : undefined
@@ -2693,7 +3297,15 @@ function loadLocalMetaForLibrary(libraryPath) {
     return cachedLocalMetaByLibrary.get(normalized)
   }
   const loaded = loadLocalMetaFromPath(localMetaPathForLibrary(normalized))
+  const compacted = compactManualMediaForLibraryMeta(normalized, loaded)
   cachedLocalMetaByLibrary.set(normalized, loaded)
+  if (compacted.changed) {
+    try {
+      saveLocalMetaForLibrary(normalized, loaded, { skipBackup: true, compact: true })
+    } catch {
+      // Keep load resilient even if compaction writeback fails.
+    }
+  }
   return loaded
 }
 
@@ -2708,6 +3320,7 @@ function saveLocalMetaForLibrary(libraryPath, meta, options = {}) {
   const skipBackup = Boolean(options?.skipBackup)
   const compact = Boolean(options?.compact)
   const normalizedMeta = loadLocalMetaFromObject(meta)
+  compactManualMediaForLibraryMeta(normalized, normalizedMeta)
   fs.writeFileSync(target, JSON.stringify(normalizedMeta, null, compact ? 0 : 2), 'utf8')
   if (normalized) {
     cachedLocalMetaByLibrary.set(normalized, normalizedMeta)
@@ -2776,6 +3389,50 @@ function loadLocalMetaFromObject(input) {
     nextCommentId: Number.isFinite(raw?.nextCommentId) ? raw.nextCommentId : 1,
     nextFolderId: Number.isFinite(raw?.nextFolderId) ? raw.nextFolderId : 1,
   }
+}
+
+function dedupeManualMediaEntries(entries) {
+  const deduped = new Map()
+  for (const item of asArray(entries)) {
+    if (!item || typeof item !== 'object') continue
+    const key = mediaIdentityKey(item)
+    if (!key) continue
+    deduped.set(key, item)
+  }
+  return [...deduped.values()]
+}
+
+function compactManualMediaForLibraryMeta(libraryPath, meta) {
+  if (!meta || typeof meta !== 'object') {
+    return { changed: false, entries: [] }
+  }
+
+  const previousEntries = asArray(meta.manualMedia)
+  const dedupedEntries = dedupeManualMediaEntries(previousEntries)
+  const normalized = String(libraryPath || '').trim()
+
+  if (!normalized) {
+    const changed = dedupedEntries.length !== previousEntries.length
+    meta.manualMedia = dedupedEntries
+    return { changed, entries: dedupedEntries }
+  }
+
+  const indexedMedia =
+    cachedLibraryPath === normalized
+      ? asArray(cachedScannedMedia)
+      : readLibraryMediaIndex(normalized)
+  const indexedKeys = new Set(
+    indexedMedia
+      .map((item) => mediaIdentityKey(item))
+      .filter(Boolean),
+  )
+  const compactedEntries = dedupedEntries.filter((item) => !indexedKeys.has(mediaIdentityKey(item)))
+  const changed =
+    compactedEntries.length !== previousEntries.length ||
+    compactedEntries.length !== dedupedEntries.length
+
+  meta.manualMedia = compactedEntries
+  return { changed, entries: compactedEntries }
 }
 
 function getResolvedTagsAndFolders(meta, libraryPath) {
@@ -3486,7 +4143,13 @@ function refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache, optio
   if (typeof probed?.url === 'string' && probed.url.trim()) overlay.url = probed.url.trim()
   if (item.dominant_color) overlay.dominant_color = item.dominant_color
 
-  const metadataEntry = resolveMetadataEntryForFile(filePath, metadataJsonCache)
+  let metadataEntry = null
+  try {
+    metadataEntry = resolveMetadataEntryForFile(filePath, metadataJsonCache)
+  } catch (metadataReadError) {
+    console.warn('[Sidecar] failed to resolve metadata entry during refresh:', filePath, metadataReadError)
+    metadataEntry = null
+  }
   markPerf('metadataLookup')
   if (metadataEntry) {
     applyMetadataOverlayFromEntry(item, overlay, metadataEntry)
@@ -3515,6 +4178,12 @@ function refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache, optio
   if (resolvedDominantColor) {
     item.dominant_color = resolvedDominantColor
     overlay.dominant_color = resolvedDominantColor
+  } else {
+    const extractedDominantColor = extractDominantColorWithFfmpeg(thumbnailPath || filePath)
+    if (extractedDominantColor) {
+      item.dominant_color = extractedDominantColor
+      overlay.dominant_color = extractedDominantColor
+    }
   }
   if (probed) {
     if (typeof probed.format_name === 'string' && probed.format_name.trim()) {
@@ -3546,11 +4215,7 @@ function refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache, optio
   markPerf('relations')
 
   meta.byFilePath[filePath] = overlay
-  try {
-    fs.writeFileSync(path.join(fileDir, 'metadata.json'), JSON.stringify(item, null, 2), 'utf8')
-  } catch {
-    // metadata.json write errors should not abort refresh
-  }
+  writeJsonAtomic(path.join(fileDir, 'metadata.json'), item)
   markPerf('writeMetadata')
 
   if (logPerf && emitPerf) {
@@ -3597,6 +4262,7 @@ function probeMediaMetadata(filePath) {
   }
 
   const ffprobePath = getFfprobeExecutablePath()
+  appendDebugLog(`ffprobe start ffprobePath=${ffprobePath} filePath=${filePath}`)
   try {
     const proc = spawnSync(ffprobePath, [
       '-v', 'error',
@@ -3609,6 +4275,7 @@ function probeMediaMetadata(filePath) {
       windowsHide: true,
       timeout: 15000,
     })
+    appendDebugLog(`ffprobe result filePath=${filePath} status=${proc.status} error=${proc.error ? String(proc.error.message || proc.error) : ''}`)
     if (proc.error || proc.status !== 0) return null
     const stdout = String(proc.stdout || '')
     const data = JSON.parse(stdout || '{}')
@@ -3759,6 +4426,7 @@ function probeMediaMetadata(filePath) {
       url: url || undefined,
     }
   } catch {
+    appendDebugLog(`ffprobe exception filePath=${filePath}`)
     return null
   }
 }
@@ -3858,6 +4526,21 @@ function updateMediaMetaById(mediaId, updater) {
   syncMetadataJsonForMedia(merged, next, meta)
   mediaIndexById.set(idNum, merged)
   return merged
+}
+
+function getImportedPathsForLibrary(libraryPath) {
+  const normalizedLibraryPath = String(libraryPath || '').trim()
+  if (!normalizedLibraryPath) return []
+  const indexedMedia = readLibraryMediaIndex(normalizedLibraryPath)
+  const mergedMedia = mergeMediaWithMeta(indexedMedia, normalizedLibraryPath)
+  const out = new Set()
+  for (const media of asArray(mergedMedia)) {
+    const filePath = String(media?.file_path || '').trim()
+    const sourcePath = String(media?.import_source_path || '').trim()
+    if (filePath) out.add(filePath)
+    if (sourcePath) out.add(sourcePath)
+  }
+  return [...out]
 }
 
 function applyMediaFilters(media, filters) {
@@ -3989,6 +4672,46 @@ function handleRequest(req) {
 
   if (method === 'status') {
     send({ id, ok: true, result: { status: 'ready', pid: process.pid } })
+    return
+  }
+
+  if (method === 'grant_shell_action_intent') {
+    try {
+      grantShellActionIntent(params?.sessionId, params?.token, params?.expiresAt, params?.action, params?.filePath)
+      send({ id, ok: true, result: true })
+    } catch (err) {
+      send({ id, ok: false, error: `grant_shell_action_intent failed: ${err?.message || String(err)}` })
+    }
+    return
+  }
+
+  if (method === 'register_frontend_session') {
+    try {
+      registerFrontendSession(params?.sessionId, params?.startedAt)
+      send({ id, ok: true, result: true })
+    } catch (err) {
+      send({ id, ok: false, error: `register_frontend_session failed: ${err?.message || String(err)}` })
+    }
+    return
+  }
+
+  if (method === 'unregister_frontend_session') {
+    try {
+      unregisterFrontendSession(params?.sessionId, params?.reason, params?.endedAt)
+      send({ id, ok: true, result: true })
+    } catch (err) {
+      send({ id, ok: false, error: `unregister_frontend_session failed: ${err?.message || String(err)}` })
+    }
+    return
+  }
+
+  if (method === 'append_debug_log') {
+    try {
+      appendDebugLog(String(params?.line || ''))
+      send({ id, ok: true, result: true })
+    } catch (err) {
+      send({ id, ok: false, error: `append_debug_log failed: ${err?.message || String(err)}` })
+    }
     return
   }
 
@@ -4143,33 +4866,24 @@ function handleRequest(req) {
   if (method === 'discord_update_activity') {
     ; (async () => {
       try {
-        const enabled = params?.enabled !== false
-        if (!enabled) {
-          await clearDiscordActivitySafe()
-          send({ id, ok: true, result: true })
-          return
-        }
+        await enqueueDiscordOperation(async () => {
+          const enabled = params?.enabled !== false
+          if (!enabled) {
+            await clearDiscordActivitySafe()
+            return
+          }
 
-        const activity = params?.activity && typeof params.activity === 'object' ? params.activity : {}
-        const ready = await ensureDiscordClient()
-        if (!ready || !discordClient) {
-          send({ id, ok: true, result: false })
-          return
-        }
+          const activity = params?.activity && typeof params.activity === 'object' ? params.activity : {}
+          const ready = await ensureDiscordClient()
+          if (!ready || !discordSocket || !discordReady) {
+            throw new Error(`discord client unavailable ready=${ready} socket=${Boolean(discordSocket)} connected=${discordReady}`)
+          }
 
-        await discordClient.setActivity({
-          details: typeof activity.details === 'string' ? activity.details : undefined,
-          state: typeof activity.state === 'string' ? activity.state : undefined,
-          startTimestamp: Number.isFinite(Number(activity.startTimestamp)) ? Number(activity.startTimestamp) : undefined,
-          endTimestamp: Number.isFinite(Number(activity.endTimestamp)) ? Number(activity.endTimestamp) : undefined,
-          largeImageKey: typeof activity.largeImageKey === 'string' ? activity.largeImageKey : 'app_icon',
-          largeImageText: typeof activity.largeImageText === 'string' ? activity.largeImageText : 'Obscura',
-          smallImageKey: typeof activity.smallImageKey === 'string' ? activity.smallImageKey : undefined,
-          smallImageText: typeof activity.smallImageText === 'string' ? activity.smallImageText : undefined,
-          instance: false,
+          await setDiscordActivityWithType(activity)
         })
         send({ id, ok: true, result: true })
-      } catch {
+      } catch (error) {
+        appendDebugLog(`[DiscordPresence] sidecar update failed error=${error?.message || String(error)}`)
         send({ id, ok: true, result: false })
       }
     })()
@@ -4179,9 +4893,10 @@ function handleRequest(req) {
   if (method === 'discord_clear_activity') {
     ; (async () => {
       try {
-        const ok = await clearDiscordActivitySafe()
+        const ok = await enqueueDiscordOperation(() => clearDiscordActivitySafe())
         send({ id, ok: true, result: ok })
-      } catch {
+      } catch (error) {
+        appendDebugLog(`[DiscordPresence] sidecar clear failed error=${error?.message || String(error)}`)
         send({ id, ok: true, result: false })
       }
     })()
@@ -4240,6 +4955,20 @@ function handleRequest(req) {
     return
   }
 
+  if (method === 'get_imported_paths_for_library') {
+    try {
+      const libraryPath = String(params?.libraryPath || '').trim()
+      if (!libraryPath) {
+        send({ id, ok: true, result: [] })
+        return
+      }
+      send({ id, ok: true, result: getImportedPathsForLibrary(libraryPath) })
+    } catch (err) {
+      send({ id, ok: false, error: `get_imported_paths_for_library failed: ${err?.message || String(err)}` })
+    }
+    return
+  }
+
   if (method === 'list_library_backups') {
     try {
       send({ id, ok: true, result: listLibraryBackups(activeLibraryPath) })
@@ -4286,9 +5015,11 @@ function handleRequest(req) {
       const pageRaw = Number(params?.page)
       const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1
       const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : 100
+      appendDebugLog(`get_media_files start fastPreview=${fastPreview} hasPaging=${hasPaging} page=${page} limit=${limit} activeLibraryPath=${String(activeLibraryPath || '')}`)
 
       emitLibraryLoadProgress(id, 3, 100, 'read-index')
       const merged = getAllMediaForActiveLibrary()
+      appendDebugLog(`get_media_files merged count=${asArray(merged).length}`)
       emitLibraryLoadProgress(id, 45, 100, 'index-ready', { totalItems: asArray(merged).length })
 
       let filtered = []
@@ -4311,6 +5042,7 @@ function handleRequest(req) {
         emitLibraryLoadProgress(id, 88, 100, 'filter-ready')
       }
       mediaIndexById = new Map(asArray(filtered).map((m) => [Number(m?.id), m]))
+      appendDebugLog(`get_media_files ready filtered=${asArray(filtered).length} fastPreview=${fastPreview}`)
       if (!hasPaging) {
         emitLibraryLoadProgress(id, 100, 100, 'done', { count: asArray(filtered).length, previewMode: fastPreview })
         send({ id, ok: true, result: filtered })
@@ -4337,6 +5069,7 @@ function handleRequest(req) {
         },
       })
     } catch (err) {
+      appendDebugLog(`get_media_files error message=${err?.message || String(err)}`)
       send({ id, ok: false, error: `get_media_files failed: ${err?.message || String(err)}` })
     }
     return
@@ -4345,10 +5078,12 @@ function handleRequest(req) {
   if (method === 'refresh_library') {
     ; (async () => {
       try {
+        appendDebugLog(`refresh_library start activeLibraryPath=${String(activeLibraryPath || '')}`)
         send({ id: null, ok: true, event: 'refresh-progress', payload: { current: 0, total: 100 } })
         if (activeLibraryPath) {
           const imagesRoot = path.join(activeLibraryPath, 'images')
           const scanRoot = fs.existsSync(imagesRoot) ? imagesRoot : activeLibraryPath
+          appendDebugLog(`refresh_library scanRoot=${scanRoot}`)
           const existingIndexedMedia = activeLibraryPath
             ? readLibraryMediaIndex(activeLibraryPath)
             : []
@@ -4361,6 +5096,7 @@ function handleRequest(req) {
             const progress = Math.min(30, Math.floor((Number(pulse?.processed || 0) / 25000) * 30))
             send({ id: null, ok: true, event: 'refresh-progress', payload: { current: progress, total: 100 } })
           })
+          appendDebugLog(`refresh_library scannedRaw=${scannedRaw.length}`)
           send({ id: null, ok: true, event: 'refresh-progress', payload: { current: 30, total: 100 } })
           const seededScan = scannedRaw.map((item) => {
             const filePath = String(item?.file_path || '').trim()
@@ -4385,6 +5121,9 @@ function handleRequest(req) {
 
           for (let i = 0; i < seededScan.length; i += 1) {
             const media = seededScan[i]
+            if ((i % 100) === 0) {
+              appendDebugLog(`refresh_library rebuild progress index=${i} total=${seededScan.length} filePath=${String(media?.file_path || '')}`)
+            }
             const rebuilt = refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache)
             refreshed.push(rebuilt?.item || media)
             const progress = 30 + Math.floor(((i + 1) / total) * 70)
@@ -4402,8 +5141,10 @@ function handleRequest(req) {
           mediaIndexById = new Map()
           send({ id: null, ok: true, event: 'refresh-progress', payload: { current: 100, total: 100 } })
         }
+        appendDebugLog('refresh_library complete')
         send({ id, ok: true, result: true })
       } catch (err) {
+        appendDebugLog(`refresh_library error message=${err?.message || String(err)}`)
         send({ id, ok: false, error: `refresh_library failed: ${err?.message || String(err)}` })
       }
     })()
@@ -5333,6 +6074,13 @@ function handleRequest(req) {
   if (method === 'file_open_path') {
     try {
       const filePath = normalizeInputFilePath(params?.filePath)
+      if (!consumeShellActionIntent(params?.sessionId, params?.intentToken, 'openPath', filePath)) {
+        appendDebugLog(`file_open_path blocked invalid_intent path=${String(params?.filePath || '')}`)
+        send({ id, ok: false, error: 'file_open_path blocked: missing or invalid intent token' })
+        return
+      }
+      appendDebugLog(`file_open_path input=${String(params?.filePath || '')}`)
+      appendDebugLog(`file_open_path normalized=${filePath}`)
       if (!filePath) {
         send({ id, ok: false, error: 'file_open_path requires filePath' })
         return
@@ -5340,16 +6088,18 @@ function handleRequest(req) {
 
       if (isWindows()) {
         const resolved = path.resolve(filePath)
+        appendDebugLog(`file_open_path resolved=${resolved} exists=${fs.existsSync(resolved)}`)
         if (fs.existsSync(resolved)) {
-          openPathWithDefaultFileManager(resolved)
+          openFileWithDefaultApplication(resolved)
         } else {
           spawnDetached('cmd', ['/c', 'start', '', resolved])
         }
       } else {
-        spawnDetached('xdg-open', [filePath])
+        openFileWithDefaultApplication(filePath)
       }
       send({ id, ok: true, result: true })
     } catch (err) {
+      appendDebugLog(`file_open_path error=${err?.message || String(err)}`)
       send({ id, ok: false, error: `file_open_path failed: ${err?.message || String(err)}` })
     }
     return
@@ -5358,6 +6108,11 @@ function handleRequest(req) {
   if (method === 'file_show_item_in_folder') {
     try {
       const filePath = normalizeInputFilePath(params?.filePath)
+      if (!consumeShellActionIntent(params?.sessionId, params?.intentToken, 'showItemInFolder', filePath)) {
+        appendDebugLog(`file_show_item_in_folder blocked invalid_intent path=${String(params?.filePath || '')}`)
+        send({ id, ok: false, error: 'file_show_item_in_folder blocked: missing or invalid intent token' })
+        return
+      }
       appendDebugLog(`file_show_item_in_folder input=${String(params?.filePath || '')}`)
       appendDebugLog(`file_show_item_in_folder normalized=${filePath}`)
       if (!filePath) {
@@ -5372,14 +6127,22 @@ function handleRequest(req) {
         appendDebugLog(`file_show_item_in_folder resolved=${resolved} exists=${fs.existsSync(resolved)}`)
         if (fs.existsSync(resolved)) {
           const stat = fs.statSync(resolved)
-          targetDir = stat.isDirectory() ? resolved : path.dirname(resolved)
-          appendDebugLog(`file_show_item_in_folder stat.isDirectory=${stat.isDirectory()} targetDir=${targetDir}`)
+          if (stat.isDirectory()) {
+            targetDir = resolved
+            appendDebugLog(`file_show_item_in_folder stat.isDirectory=true targetDir=${targetDir}`)
+            appendDebugLog(`file_show_item_in_folder shell_open_default_manager=${targetDir}`)
+            openPathWithDefaultFileManager(targetDir)
+          } else {
+            appendDebugLog(`file_show_item_in_folder stat.isDirectory=false reveal=${resolved}`)
+            revealPathInWindowsExplorer(resolved)
+          }
         } else {
-          targetDir = getExistingParentDir(resolved) || path.dirname(resolved)
-          appendDebugLog(`file_show_item_in_folder fallback targetDir=${targetDir} exists=${fs.existsSync(targetDir)}`)
+          const fallbackDir = getExistingParentDir(resolved) || path.dirname(resolved)
+          targetDir = fallbackDir
+          appendDebugLog(`file_show_item_in_folder fallback targetDir=${fallbackDir} exists=${fs.existsSync(fallbackDir)}`)
+          appendDebugLog(`file_show_item_in_folder shell_open_default_manager=${targetDir}`)
+          openPathWithDefaultFileManager(targetDir)
         }
-        appendDebugLog(`file_show_item_in_folder shell_open_default_manager=${targetDir}`)
-        openPathWithDefaultFileManager(targetDir)
       } else {
         const dirPath = getExistingParentDir(filePath) || path.dirname(filePath)
         appendDebugLog(`file_show_item_in_folder xdg_open=${dirPath}`)
@@ -5396,6 +6159,11 @@ function handleRequest(req) {
   if (method === 'file_open_with') {
     try {
       const filePath = normalizeInputFilePath(params?.filePath)
+      if (!consumeShellActionIntent(params?.sessionId, params?.intentToken, 'openWith', filePath)) {
+        appendDebugLog(`file_open_with blocked invalid_intent path=${String(params?.filePath || '')}`)
+        send({ id, ok: false, error: 'file_open_with blocked: missing or invalid intent token' })
+        return
+      }
       if (!filePath) {
         send({ id, ok: false, error: 'file_open_with requires filePath' })
         return
@@ -6132,16 +6900,18 @@ function handleRequest(req) {
 
   if (method === 'quit_and_install') {
     try {
-      const installerPath = String(params?.path || pendingUpdateInstallerPath || '').trim()
+      const installerPath = String(params?.path || pendingUpdateInstallerPath || findLatestUpdateInstallerPath()).trim()
       if (!installerPath) {
         send({ id, ok: true, result: false })
         return
       }
-      if (!fs.existsSync(installerPath)) {
+      const fallbackInstallerPath = findLatestUpdateInstallerPath()
+      const resolvedInstallerPath = fs.existsSync(installerPath) ? installerPath : fallbackInstallerPath
+      if (!resolvedInstallerPath || !fs.existsSync(resolvedInstallerPath)) {
         send({ id, ok: true, result: false })
         return
       }
-      launchInstaller(installerPath)
+      launchInstaller(resolvedInstallerPath)
       send({ id, ok: true, result: true })
     } catch {
       send({ id, ok: true, result: false })
@@ -6521,7 +7291,6 @@ function handleRequest(req) {
           } catch {
             // metadata.json write errors should not abort transfer
           }
-          targetMeta.manualMedia.push(transferredItem)
           importedItems.push(transferredItem)
           copied += 1
         } catch {
@@ -6743,15 +7512,9 @@ function handleRequest(req) {
       let count = 0
       for (const target of paths) {
         try {
-          if (fs.existsSync(target)) {
-            const stat = fs.statSync(target)
-            if (stat.isDirectory()) {
-              fs.rmSync(target, { recursive: true, force: true })
-            } else {
-              fs.unlinkSync(target)
-            }
+          if (deletePathWithRetries(target)) {
+            count += 1
           }
-          count += 1
         } catch {
           // ignore per-file errors
         }
@@ -6776,6 +7539,7 @@ function handleRequest(req) {
       )]
       const importOptions = params?.options && typeof params.options === 'object' ? params.options : {}
       const shouldDeleteSource = Boolean(importOptions.deleteSource)
+      appendDebugLog(`import_media start activeLibraryPath=${activeLibraryPath} fileCount=${filePaths.length} deleteSource=${shouldDeleteSource} importSource=${String(importOptions?.importSource || '')} filePaths=${JSON.stringify(filePaths)}`)
       const meta = loadLocalMeta()
       const metadataJsonCache = new Map()
       if (!meta.byFilePath || typeof meta.byFilePath !== 'object') {
@@ -6789,6 +7553,7 @@ function handleRequest(req) {
         current += 1
         const sourcePath = String(sourcePathRaw || '').trim()
         const sourceBaseName = path.basename(sourcePath)
+        appendDebugLog(`import_media file-start current=${current}/${total} sourcePath=${sourcePath}`)
         send({
           id: null,
           ok: true,
@@ -6803,17 +7568,26 @@ function handleRequest(req) {
           },
         })
 
-        if (!sourcePath || !fs.existsSync(sourcePath)) continue
+        if (!sourcePath || !fs.existsSync(sourcePath)) {
+          appendDebugLog(`import_media skip reason=missing-source sourcePath=${sourcePath}`)
+          continue
+        }
         let stat = null
         try {
           stat = fs.statSync(sourcePath)
         } catch {
           stat = null
         }
-        if (!stat || !stat.isFile()) continue
+        if (!stat || !stat.isFile()) {
+          appendDebugLog(`import_media skip reason=not-file sourcePath=${sourcePath}`)
+          continue
+        }
 
         const ext = path.extname(sourcePath).toLowerCase()
-        if (!MEDIA_EXTENSIONS.has(ext)) continue
+        if (!MEDIA_EXTENSIONS.has(ext)) {
+          appendDebugLog(`import_media skip reason=unsupported-ext sourcePath=${sourcePath} ext=${ext}`)
+          continue
+        }
         const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'].includes(ext)
         const isAudio = ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a'].includes(ext)
         const fileType = isImage ? 'image' : isAudio ? 'audio' : 'video'
@@ -6825,6 +7599,7 @@ function handleRequest(req) {
         const sourceNameSanitized = sourceBaseName.replace(/[\\/:*?"<>|]/g, '_')
         const destPath = path.join(destDir, sourceNameSanitized)
         fs.copyFileSync(sourcePath, destPath)
+        appendDebugLog(`import_media copied sourcePath=${sourcePath} destPath=${destPath}`)
         try {
           fs.utimesSync(destPath, stat.atime, stat.mtime)
         } catch {
@@ -6844,16 +7619,14 @@ function handleRequest(req) {
             // Fallback logic below.
           }
         }
-        if (fileType === 'video') {
-          if (!thumbnailPath) {
-            const generatedThumbPath = path.join(destDir, `${destBaseName}_thumbnail.png`)
-            try {
-              if (extractThumbnailWithFfmpeg(destPath, generatedThumbPath)) {
-                thumbnailPath = generatedThumbPath
-              }
-            } catch {
-              // Continue import even if thumbnail generation fails.
+        if (fileType === 'video' && !thumbnailPath) {
+          const generatedThumbPath = path.join(destDir, `${destBaseName}_thumbnail.png`)
+          try {
+            if (extractThumbnailWithFfmpeg(destPath, generatedThumbPath)) {
+              thumbnailPath = generatedThumbPath
             }
+          } catch {
+            // Continue import even if thumbnail generation fails.
           }
         }
 
@@ -6921,6 +7694,12 @@ function handleRequest(req) {
         if (resolvedDominantColor) {
           item.dominant_color = resolvedDominantColor
           overlay.dominant_color = resolvedDominantColor
+        } else {
+          const extractedDominantColor = extractDominantColorWithFfmpeg(thumbnailPath || destPath)
+          if (extractedDominantColor) {
+            item.dominant_color = extractedDominantColor
+            overlay.dominant_color = extractedDominantColor
+          }
         }
         if (probed) {
           if (typeof probed.format_name === 'string' && probed.format_name.trim()) {
@@ -6948,13 +7727,14 @@ function handleRequest(req) {
           // metadata.json write errors should not abort import
         }
 
-        meta.manualMedia.push(item)
         imported.push(item)
+        appendDebugLog(`import_media item-created mediaId=${item.id} fileType=${fileType} sourcePath=${sourcePath} destPath=${destPath} thumbnailPath=${thumbnailPath || ''}`)
 
         if (shouldDeleteSource) {
           try {
             if (fs.existsSync(sourcePath)) {
               fs.unlinkSync(sourcePath)
+              appendDebugLog(`import_media source-deleted sourcePath=${sourcePath}`)
             }
           } catch {
             // Keep import result even if source cleanup fails.
@@ -6979,8 +7759,10 @@ function handleRequest(req) {
           percentage: 100,
         },
       })
+      appendDebugLog(`import_media complete imported=${imported.length}`)
       send({ id, ok: true, result: imported })
     } catch (err) {
+      appendDebugLog(`import_media error message=${err?.message || String(err)}`)
       send({ id, ok: false, error: `import_media failed: ${err?.message || String(err)}` })
     }
     return

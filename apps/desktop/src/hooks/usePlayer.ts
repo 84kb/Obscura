@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { MediaFile } from '@obscura/core'
-import { toMediaUrl } from '../utils/fileUrl'
+import { toMediaUrl, toThumbnailUrl } from '../utils/fileUrl'
 import { useShortcut } from '../contexts/ShortcutContext'
 import { useAudioEngine } from './useAudioEngine'
 import { api } from '../api'
@@ -52,6 +52,7 @@ interface UsePlayerProps {
     mode?: string | null
     playlist?: any | null
     media?: MediaFile
+    playbackStartToken?: number
     onNext?: () => void
     onPrev?: () => void
     onPlayFirst?: () => void
@@ -67,7 +68,7 @@ interface UsePlayerProps {
     controlMode?: 'navigation' | 'skip'
 }
 
-export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasPrev: _hasPrev = false, hasNext: _hasNext = false, onPlayPause: _onPlayPause = () => { }, onNext = () => { }, onPrev = () => { }, volume: _externalVolume = 1, setVolume: _externalSetVolume = () => { }, isMuted: _externalIsMuted = false, toggleMute: _externalToggleMute = () => { }, controlMode: _controlMode = 'navigation', media, onPlayFirst, autoPlayEnabled, pipControlMode = 'navigation' }: UsePlayerProps = {}) => {
+export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasPrev: _hasPrev = false, hasNext: _hasNext = false, onPlayPause: _onPlayPause = () => { }, onNext = () => { }, onPrev = () => { }, volume: _externalVolume = 1, setVolume: _externalSetVolume = () => { }, isMuted: _externalIsMuted = false, toggleMute: _externalToggleMute = () => { }, controlMode: _controlMode = 'navigation', media, playbackStartToken = 0, onPlayFirst, autoPlayEnabled, pipControlMode = 'navigation' }: UsePlayerProps = {}) => {
     const audioEngine = useAudioEngine()
     const [isPlaying, setIsPlaying] = useState(false)
     const [currentTime, setCurrentTime] = useState(0)
@@ -515,6 +516,10 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
     // Native audio event listeners
     useEffect(() => {
         if (!usesNativeAudio) return
+        if (!media?.id || playbackStartToken <= 0) {
+            setIsPlaying(false)
+            return
+        }
 
         // イベント購読
         const cleanupTime = api.on('audio:time-update', (_: any, time: number) => {
@@ -588,7 +593,7 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
                 videoRef.current.pause()
             }
         }
-    }, [usesNativeAudio, useNativeVideoAudio, media?.id])
+    }, [usesNativeAudio, useNativeVideoAudio, media?.id, playbackStartToken])
 
     useEffect(() => {
         if (!usesNativeAudio) return
@@ -670,7 +675,7 @@ export const usePlayer = ({ mode: _mode = null, playlist: _playlist = null, hasP
                 // ローカルパスをブラウザが扱えるURLに変換
                 // ローカルパスをブラウザが扱えるURLに変換
                 // Valid only when running in the desktop renderer context.
-                const artUrl = toMediaUrl(media.thumbnail_path)
+                const artUrl = toThumbnailUrl(media.thumbnail_path)
 
                 // media:// 等のカスタムスキームは MediaSession で警告が出る可能性があるため Blob URL に変換
                 if (artUrl.startsWith('media://')) {

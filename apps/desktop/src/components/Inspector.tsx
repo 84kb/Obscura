@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { MediaFile, Tag, Folder, MediaComment, SharedUser, ObscuraPlugin, AppSettings, ExtensionInfoRow, ExtensionInspectorSection, ExtensionInspectorSectionBlock } from '@obscura/core'
 import './Inspector.css'
-import { toMediaUrl } from '../utils/fileUrl'
+import { toThumbnailUrl } from '../utils/fileUrl'
 import { api } from '../api'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
@@ -31,6 +31,7 @@ interface InspectorProps {
     onRestoreFiles: (ids: number[]) => void
     onDeletePermanently: (id: number) => void
     onDeleteFilesPermanently: (ids: number[]) => void
+    onRequestPermanentDeleteConfirmation?: (ids: number[]) => void
     onClose: () => void
     onRenameMedia?: (id: number, newName: string) => void
     onUpdateRating?: (id: number, rating: number) => void
@@ -68,6 +69,7 @@ export function Inspector({
     onRestoreFiles,
     onDeletePermanently,
     onDeleteFilesPermanently,
+    onRequestPermanentDeleteConfirmation,
     onClose,
     onRenameMedia,
     onUpdateRating,
@@ -938,7 +940,7 @@ export function Inspector({
                     {media.length === 1 ? (
                         <div className="inspector-preview-container" onDoubleClick={() => onPlay(media[0])}>
                             {media[0].thumbnail_path ? (
-                                <img src={toMediaUrl(media[0].thumbnail_path)} alt={media[0].file_name} />
+                                <img src={toThumbnailUrl(media[0].thumbnail_path)} alt={media[0].file_name} draggable={false} onDragStart={(e) => e.preventDefault()} />
                             ) : (
                                 <div className="preview-placeholder">
                                     <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
@@ -1095,7 +1097,7 @@ export function Inspector({
                                                 <RelationSectionContent
                                                     language={language}
                                                     media={media as unknown as MediaFile[]}
-                                                    toMediaUrl={toMediaUrl}
+                                                    toMediaUrl={toThumbnailUrl}
                                                     onRemoveParent={onRemoveParent}
                                                     onSelectMedia={onPlay}
                                                     onOpenPicker={(rect) => {
@@ -1351,7 +1353,7 @@ export function Inspector({
                                                 currentContextMedia={currentContextMedia}
                                                 playingMedia={playingMedia}
                                                 onPlay={onPlay}
-                                                toMediaUrl={toMediaUrl}
+                                                toMediaUrl={toThumbnailUrl}
                                                 formatTime={formatTime}
                                                 formatFileSize={formatFileSize}
                                                 prevVisibleCount={playlistPrevVisibleCount}
@@ -1553,6 +1555,11 @@ export function Inspector({
                                 <button
                                     className="btn btn-danger btn-full btn-small"
                                     onClick={() => {
+                                        if (onRequestPermanentDeleteConfirmation) {
+                                            onRequestPermanentDeleteConfirmation([media[0].id])
+                                            onClose()
+                                            return
+                                        }
                                         if (confirm(tr('ファイルをデバイスから完全に削除しますか？\nこの操作は取り消せません。', 'Delete this file permanently from the device?\nThis action cannot be undone.'))) {
                                             onDeletePermanently(media[0].id)
                                             onClose()
@@ -1573,6 +1580,11 @@ export function Inspector({
                                 <button
                                     className="btn btn-danger btn-full btn-small"
                                     onClick={() => {
+                                        if (onRequestPermanentDeleteConfirmation) {
+                                            onRequestPermanentDeleteConfirmation(media.map(m => m.id))
+                                            onClose()
+                                            return
+                                        }
                                         if (confirm(tr(`${media.length} 個のファイルをデバイスから完全に削除しますか？\nこの操作は取り消せません。`, `Delete ${media.length} files permanently from the device?\nThis action cannot be undone.`))) {
                                             onDeleteFilesPermanently(media.map(m => m.id))
                                             onClose()
@@ -1591,7 +1603,7 @@ export function Inspector({
                         style={relationPickerPos}
                         onClose={() => setShowRelationPicker(false)}
                         onSearch={onSearchMedia || (async () => []) as any}
-                        toMediaUrl={toMediaUrl}
+                        toMediaUrl={toThumbnailUrl}
                         onSelect={(selected, type) => {
                             if (media.length === 1 && onAddParent) {
                                 if (type === 'parent') {

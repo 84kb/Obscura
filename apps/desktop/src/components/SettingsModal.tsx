@@ -119,6 +119,17 @@ const DEFAULT_INSPECTOR_INFO_VISIBILITY = {
     codecId: true
 }
 
+function normalizeFsPath(input: string): string {
+    return String(input || '').replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '').trim()
+}
+
+function isSameOrChildPath(candidatePath: string, basePath: string): boolean {
+    const candidate = normalizeFsPath(candidatePath)
+    const base = normalizeFsPath(basePath)
+    if (!candidate || !base) return false
+    return candidate === base || candidate.startsWith(`${base}/`)
+}
+
 export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRestored, language = 'ja', initialClientConfig = null }: SettingsModalProps) {
     const tr = (ja: string, en: string) => language === 'en' ? en : ja
     const [releaseNotesHistoryModal, setReleaseNotesHistoryModal] = useState<null | {
@@ -408,6 +419,18 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRe
 
     // === Import Settings State ===
     const [availableLibraries, setAvailableLibraries] = useState<{ name: string; path: string }[]>([])
+    const isBlockedAutoImportWatchPath = useCallback((watchPath: string) => {
+        const normalizedWatchPath = normalizeFsPath(watchPath)
+        if (!normalizedWatchPath) return false
+        return availableLibraries.some((library) => {
+            const normalizedLibraryPath = normalizeFsPath(library.path)
+            if (!normalizedLibraryPath) return false
+            return (
+                isSameOrChildPath(normalizedWatchPath, normalizedLibraryPath) ||
+                isSameOrChildPath(normalizedLibraryPath, normalizedWatchPath)
+            )
+        })
+    }, [availableLibraries])
 
     const loadAvailableLibraries = useCallback(async () => {
         try {
@@ -2447,6 +2470,14 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRe
             // Check dupes
             if (clientConfig?.autoImport.watchPaths.some((p: AutoImportPath) => p.path === path)) {
                 alert(tr('このフォルダは既に登録されています', 'This folder is already registered'))
+                return
+            }
+
+            if (isBlockedAutoImportWatchPath(path)) {
+                alert(tr(
+                    'ライブラリ本体、ライブラリ配下、またはライブラリを含む親フォルダは自動インポート監視に登録できません',
+                    'You cannot register the library itself, a folder inside the library, or a parent folder containing the library as an auto-import watch path'
+                ))
                 return
             }
 

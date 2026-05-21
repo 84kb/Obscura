@@ -12,6 +12,7 @@ import { mockDesktopAPI } from './mockDesktopAPI'
 
 const STORAGE_KEY = 'tauri_client_config'
 const PLUGIN_DATA_PREFIX = 'tauri_plugin_data:'
+const PENDING_UPDATE_PATH_KEY = 'tauri_pending_update_path'
 let tauriAudio: HTMLAudioElement | null = null
 let tauriAudioListenersBound = false
 let selectedAudioDeviceId = 'default'
@@ -20,8 +21,18 @@ const pendingThumbnailRequests = new Map<string, Promise<string | null>>()
 let nativeDropUnlisten: (() => void) | null = null
 let autoImportPollTimer: ReturnType<typeof setInterval> | null = null
 let autoImportPollRunning = false
+let autoImportBridgeReady = false
+let nativeFileDragSuppressedUntil = 0
+let nativeFileDragEnabled = true
+let shellActionsEnabled = true
 const autoImportSeenByWatchId = new Map<string, Set<string>>()
 let cachedEnableGpuAcceleration: boolean | null = null
+let pendingRefreshLibraryPromise: Promise<boolean> | null = null
+const frontendSessionId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+let registerFrontendSessionPromise: Promise<void> | null = null
+let unregisterFrontendSessionPromise: Promise<void> | null = null
+let lastDiscordActivitySignature = ''
+let lastDiscordActivitySentAt = 0
 
 const TAURI_EVENTS = {
     UPDATE_STATUS: 'update-status',
@@ -31,8 +42,12 @@ const TAURI_EVENTS = {
 } as const
 const TRANSPARENT_DRAG_ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO9WnWQAAAAASUVORK5CYII='
 const SIDECAR_RETRY_DELAYS_MS = [150, 350, 750] as const
+const DISCORD_ACTIVITY_DEDUPE_WINDOW_MS = 1200
 const GET_ACTIVE_LIBRARY_TIMEOUT_MS = 4000
 const READ_CLIENT_CONFIG_TIMEOUT_MS = 2500
+const SHELL_ACTION_INTENT_WINDOW_MS = 1500
+type ShellAction = 'openPath' | 'showItemInFolder' | 'openWith'
+const IMAGE_THUMBNAIL_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.avif'])
 
 function isTauriRuntime(): boolean {
     if (typeof window === 'undefined') return false
@@ -42,6 +57,169 @@ function isTauriRuntime(): boolean {
 
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function createShellActionToken(): string {
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+}
+
+function getShellDebugStack(): string {
+    try {
+        const raw = String(new Error().stack || '')
+            .split('\n')
+            .slice(2, 10)
+            .map((line) => line.trim())
+            .filter(Boolean)
+        return raw.join(' | ')
+    } catch {
+        return ''
+    }
+}
+
+async function appendDebugLogFromBridge(line: string): Promise<void> {
+    if (!isTauriRuntime()) return
+    try {
+        await invoke('sidecar_request', {
+            method: 'append_debug_log',
+            params: { line },
+        })
+    } catch {
+        // Ignore logging failures.
+    }
+}
+
+export function appendBridgeDebugLog(line: string): void {
+    void appendDebugLogFromBridge(line)
+}
+
+async function ensureFrontendSessionRegistered(): Promise<void> {
+    if (!isTauriRuntime()) return
+    registerFrontendSessionPromise ??= invoke('sidecar_request', {
+        method: 'register_frontend_session',
+        params: {
+            sessionId: frontendSessionId,
+            startedAt: new Date().toISOString(),
+        },
+    }).then(() => {
+        void appendDebugLogFromBridge(`[BridgeSession] registered sessionId=${frontendSessionId}`)
+    }).catch((error) => {
+        registerFrontendSessionPromise = null
+        console.warn('[TauriBridge] failed to register frontend session:', error)
+        throw error
+    })
+    await registerFrontendSessionPromise
+}
+
+async function unregisterFrontendSession(reason: string): Promise<void> {
+    if (!isTauriRuntime()) return
+    unregisterFrontendSessionPromise ??= invoke('sidecar_request', {
+        method: 'unregister_frontend_session',
+        params: {
+            sessionId: frontendSessionId,
+            reason,
+            endedAt: new Date().toISOString(),
+        },
+    }).then(() => {
+        void appendDebugLogFromBridge(`[BridgeSession] unregistered sessionId=${frontendSessionId} reason=${reason}`)
+    }).catch((error) => {
+        console.warn('[TauriBridge] failed to unregister frontend session:', error)
+    }).finally(() => {
+        unregisterFrontendSessionPromise = null
+    })
+    await unregisterFrontendSessionPromise
+}
+
+if (isTauriRuntime()) {
+    void ensureFrontendSessionRegistered().catch(() => {
+        // Retry lazily when a guarded action is attempted.
+    })
+    if (typeof window !== 'undefined') {
+        const teardown = () => {
+            void unregisterFrontendSession('window-unload')
+        }
+        window.addEventListener('pagehide', teardown, { once: true })
+        window.addEventListener('beforeunload', teardown, { once: true })
+    }
+}
+
+const bridgeHot = (import.meta as ImportMeta & { hot?: { dispose: (callback: () => void) => void } }).hot
+if (bridgeHot) {
+    bridgeHot.dispose(() => {
+        void unregisterFrontendSession('hmr-dispose')
+    })
+}
+
+function logShellActionDebug(stage: string, action: ShellAction, filePath: string, extra?: Record<string, unknown>): void {
+    const normalizedPath = decodeMediaProtocolPath(filePath)
+    const stack = getShellDebugStack()
+    const payload = {
+        stage,
+        action,
+        filePath: normalizedPath,
+        extra: extra || {},
+        stack,
+        ts: new Date().toISOString(),
+    }
+    console.warn('[ShellDebug]', payload)
+    void appendDebugLogFromBridge(`[ShellDebug] stage=${stage} action=${action} path=${normalizedPath} extra=${JSON.stringify(extra || {})} stack=${stack}`)
+}
+
+async function grantShellActionIntent(action: ShellAction, filePath: string): Promise<string> {
+    const normalizedPath = decodeMediaProtocolPath(filePath)
+    if (!normalizedPath) {
+        throw new Error(`Cannot ${action} without a file path`)
+    }
+    const token = createShellActionToken()
+    const expiresAt = Date.now() + SHELL_ACTION_INTENT_WINDOW_MS
+    logShellActionDebug('grant', action, normalizedPath, { token, expiresAt })
+    if (isTauriRuntime()) {
+        await ensureFrontendSessionRegistered()
+        await invoke('sidecar_request', {
+            method: 'grant_shell_action_intent',
+            params: {
+                sessionId: frontendSessionId,
+                token,
+                action,
+                filePath: normalizedPath,
+                expiresAt,
+            },
+        })
+    }
+    return token
+}
+
+async function invokeShellAction(action: ShellAction, filePath: string): Promise<void> {
+    if (!shellActionsEnabled) {
+        logShellActionDebug('invoke-blocked', action, filePath, { reason: 'shell-actions-disabled' })
+        throw new Error('Shell actions are temporarily disabled')
+    }
+
+    const decodedPath = decodeMediaProtocolPath(filePath)
+    logShellActionDebug('invoke-start', action, decodedPath)
+    const intentToken = await grantShellActionIntent(action, decodedPath)
+    const method =
+        action === 'openPath'
+            ? 'file_open_path'
+            : action === 'showItemInFolder'
+                ? 'file_show_item_in_folder'
+                : 'file_open_with'
+    await invoke('sidecar_request', {
+        method,
+        params: { filePath: decodedPath, intentToken, sessionId: frontendSessionId },
+    })
+    logShellActionDebug('invoke-success', action, decodedPath, { token: intentToken, method })
+}
+
+export async function openPathFromUserAction(filePath: string): Promise<void> {
+    await invokeShellAction('openPath', filePath)
+}
+
+export async function showItemInFolderFromUserAction(filePath: string): Promise<void> {
+    await invokeShellAction('showItemInFolder', filePath)
+}
+
+export async function openWithFromUserAction(filePath: string): Promise<void> {
+    await invokeShellAction('openWith', filePath)
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -61,6 +239,21 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
             },
         )
     })
+}
+
+function shouldBypassRustDiscordPath(activity: any): string | null {
+    const signature = JSON.stringify(activity ?? {})
+    const now = Date.now()
+    if (
+        signature === lastDiscordActivitySignature
+        && now - lastDiscordActivitySentAt < DISCORD_ACTIVITY_DEDUPE_WINDOW_MS
+    ) {
+        return 'deduped'
+    }
+
+    lastDiscordActivitySignature = signature
+    lastDiscordActivitySentAt = now
+    return null
 }
 
 async function invokeSidecarWithRetry<T = any>(method: string, params: any): Promise<T> {
@@ -234,18 +427,68 @@ function toPlayableSrc(inputPath: string): string {
     return convertFileSrc(normalized)
 }
 
+function isRenderableThumbnailPath(fileType: unknown, thumbnailPath: unknown): boolean {
+    const rawPath = String(thumbnailPath || '').trim()
+    if (!rawPath) return false
+    if (/^data:image\//i.test(rawPath) || /^blob:/i.test(rawPath)) return true
+    if (/^https?:\/\//i.test(rawPath)) return true
+
+    const normalizedPath = decodeMediaProtocolPath(rawPath).split(/[?#]/, 1)[0].toLowerCase()
+    if (String(fileType || '').toLowerCase() === 'image') return true
+
+    for (const ext of IMAGE_THUMBNAIL_EXTENSIONS) {
+        if (normalizedPath.endsWith(ext)) return true
+    }
+
+    return false
+}
+
 async function startNativeFileDrag(filePaths: string[]): Promise<void> {
+    const stack = getShellDebugStack()
+    void appendDebugLogFromBridge(`[NativeDrag] request raw=${JSON.stringify(filePaths ?? [])} enabled=${nativeFileDragEnabled} suppressedUntil=${nativeFileDragSuppressedUntil} now=${Date.now()} focused=${typeof document === 'undefined' ? 'n/a' : String(document.hasFocus())} userActivation=${typeof navigator !== 'undefined' && 'userActivation' in navigator ? String((navigator as Navigator & { userActivation?: { isActive?: boolean } }).userActivation?.isActive) : 'n/a'} stack=${stack}`)
+    if (!nativeFileDragEnabled) {
+        console.warn('[TauriBridge] startDrag suppressed while disabled')
+        void appendDebugLogFromBridge('[NativeDrag] blocked reason=disabled')
+        return
+    }
+
+    if (Date.now() < nativeFileDragSuppressedUntil) {
+        console.warn('[TauriBridge] startDrag suppressed during guarded window')
+        void appendDebugLogFromBridge(`[NativeDrag] blocked reason=suppressed-window remaining=${nativeFileDragSuppressedUntil - Date.now()}`)
+        return
+    }
+
+    if (typeof document !== 'undefined' && !document.hasFocus()) {
+        console.warn('[TauriBridge] startDrag suppressed without focused document')
+        void appendDebugLogFromBridge('[NativeDrag] blocked reason=document-unfocused')
+        return
+    }
+
+    if (typeof navigator !== 'undefined' && 'userActivation' in navigator) {
+        const activation = (navigator as Navigator & { userActivation?: { isActive?: boolean } }).userActivation
+        if (activation && activation.isActive === false) {
+            console.warn('[TauriBridge] startDrag suppressed without user activation')
+            void appendDebugLogFromBridge('[NativeDrag] blocked reason=no-user-activation')
+            return
+        }
+    }
+
     const normalizedPaths = (filePaths ?? [])
         .map((filePath) => decodeMediaProtocolPath(String(filePath || '')))
         .filter((filePath) => filePath.length > 0)
 
-    if (normalizedPaths.length === 0) return
+    if (normalizedPaths.length === 0) {
+        void appendDebugLogFromBridge('[NativeDrag] blocked reason=no-normalized-paths')
+        return
+    }
 
+    void appendDebugLogFromBridge(`[NativeDrag] start items=${JSON.stringify(normalizedPaths)}`)
     await startNativeDrag({
         item: normalizedPaths,
         icon: TRANSPARENT_DRAG_ICON,
         mode: 'copy',
     })
+    void appendDebugLogFromBridge(`[NativeDrag] success items=${JSON.stringify(normalizedPaths)}`)
 }
 
 function normalizeMediaRecord(media: any): any {
@@ -253,7 +496,9 @@ function normalizeMediaRecord(media: any): any {
 
     const next: any = { ...media }
     if (typeof next.thumbnail_path === 'string' && next.thumbnail_path) {
-        next.thumbnail_path = toPlayableSrc(next.thumbnail_path) as any
+        next.thumbnail_path = isRenderableThumbnailPath(next.file_type, next.thumbnail_path)
+            ? toPlayableSrc(next.thumbnail_path) as any
+            : ''
     }
     if (Array.isArray(next.parents)) {
         next.parents = next.parents.map((item: any) => normalizeMediaRecord(item))
@@ -527,6 +772,47 @@ function normalizeFsPath(input: string): string {
     return String(input || '').replace(/\\/g, '/').toLowerCase().trim()
 }
 
+function isSameOrChildPath(candidatePath: string, basePath: string): boolean {
+    const candidate = normalizeFsPath(candidatePath).replace(/\/+$/, '')
+    const base = normalizeFsPath(basePath).replace(/\/+$/, '')
+    if (!candidate || !base) return false
+    return candidate === base || candidate.startsWith(`${base}/`)
+}
+
+function getKnownLibraryPaths(config: any): string[] {
+    const paths = new Set<string>()
+    const activeLibrary = toLibraryEntry(config?.activeLibraryPath)
+    if (activeLibrary?.path) {
+        paths.add(activeLibrary.path)
+    }
+    for (const lib of mergeLocalLibraries(config)) {
+        if (lib?.path) {
+            paths.add(lib.path)
+        }
+    }
+    return Array.from(paths)
+}
+
+export function setAutoImportBridgeReady(ready: boolean): void {
+    autoImportBridgeReady = Boolean(ready)
+}
+
+export function suppressNativeFileDragFor(durationMs: number): void {
+    const nextUntil = Date.now() + Math.max(0, Number(durationMs) || 0)
+    nativeFileDragSuppressedUntil = Math.max(nativeFileDragSuppressedUntil, nextUntil)
+    void appendDebugLogFromBridge(`[NativeDrag] suppress durationMs=${durationMs} until=${nativeFileDragSuppressedUntil}`)
+}
+
+export function setNativeFileDragEnabled(enabled: boolean): void {
+    nativeFileDragEnabled = Boolean(enabled)
+    void appendDebugLogFromBridge(`[NativeDrag] enabled=${nativeFileDragEnabled}`)
+}
+
+export function setShellActionsEnabled(enabled: boolean): void {
+    shellActionsEnabled = Boolean(enabled)
+    void appendDebugLogFromBridge(`[ShellDebug] enabled=${shellActionsEnabled}`)
+}
+
 async function setupNativeDropBridge(): Promise<void> {
     if (nativeDropUnlisten) return
     try {
@@ -565,6 +851,7 @@ async function setupNativeDropBridge(): Promise<void> {
 }
 
 async function pollAutoImport(): Promise<void> {
+    if (!autoImportBridgeReady) return
     if (autoImportPollRunning) return
     autoImportPollRunning = true
     try {
@@ -572,29 +859,32 @@ async function pollAutoImport(): Promise<void> {
         const autoImport = config?.autoImport
         const watchPaths = Array.isArray(autoImport?.watchPaths) ? autoImport.watchPaths : []
         const activeWatchIds = new Set<string>()
-        let importedPathSet: Set<string> | null = null
+        const importedPathSetByLibrary = new Map<string, Set<string>>()
+        const knownLibraryPaths = getKnownLibraryPaths(config)
 
-        const getImportedPathSet = async (): Promise<Set<string>> => {
-            if (importedPathSet) return importedPathSet
-            let mediaList: any[] = []
+        const getImportedPathSet = async (libraryPath: string): Promise<Set<string>> => {
+            const normalizedLibraryPath = normalizeFsPath(libraryPath)
+            if (!normalizedLibraryPath) return new Set<string>()
+            if (importedPathSetByLibrary.has(normalizedLibraryPath)) {
+                return importedPathSetByLibrary.get(normalizedLibraryPath) as Set<string>
+            }
+            let importedPaths: string[] = []
             try {
                 const result = await invoke<any>('sidecar_request', {
-                    method: 'get_media_files',
-                    params: {},
+                    method: 'get_imported_paths_for_library',
+                    params: { libraryPath },
                 })
-                mediaList = Array.isArray(result) ? result : []
+                importedPaths = Array.isArray(result) ? result : []
             } catch {
-                mediaList = []
+                importedPaths = []
             }
-            importedPathSet = new Set(
-                mediaList
-                    .flatMap((m) => ([
-                        normalizeFsPath(String(m?.file_path || '')),
-                        normalizeFsPath(String(m?.import_source_path || '')),
-                    ]))
-                    .filter((p) => p.length > 0),
+            const pathSet = new Set(
+                importedPaths
+                    .map((entry) => normalizeFsPath(String(entry || '')))
+                    .filter((entry) => entry.length > 0),
             )
-            return importedPathSet
+            importedPathSetByLibrary.set(normalizedLibraryPath, pathSet)
+            return pathSet
         }
 
         for (const watch of watchPaths) {
@@ -602,6 +892,15 @@ async function pollAutoImport(): Promise<void> {
             const watchPath = String(watch?.path || '').trim()
             const enabled = Boolean(watch?.enabled)
             if (!watchId || !watchPath || !enabled) continue
+
+            if (knownLibraryPaths.some((libraryPath) => (
+                isSameOrChildPath(watchPath, libraryPath) ||
+                isSameOrChildPath(libraryPath, watchPath)
+            ))) {
+                console.warn('[TauriBridge] Skipping auto-import watch path overlapping library:', watchPath)
+                autoImportSeenByWatchId.delete(watchId)
+                continue
+            }
 
             activeWatchIds.add(watchId)
 
@@ -619,17 +918,26 @@ async function pollAutoImport(): Promise<void> {
             const currentSet = new Set<string>()
             for (const item of scanned) {
                 const filePath = normalizeFsPath(String(item?.file_path || ''))
+                if (knownLibraryPaths.some((libraryPath) => isSameOrChildPath(filePath, libraryPath))) {
+                    continue
+                }
                 if (filePath) currentSet.add(filePath)
             }
 
             const prevSet = autoImportSeenByWatchId.get(watchId)
             if (!prevSet) {
                 autoImportSeenByWatchId.set(watchId, currentSet)
-                const knownImported = await getImportedPathSet()
+                const targetLibraryPath = toLibraryEntry(watch?.targetLibraryId)?.path
+                    || toLibraryEntry(config?.activeLibraryPath)?.path
+                    || ''
+                const knownImported = await getImportedPathSet(targetLibraryPath)
                 const existingNotImported = scanned
                     .map((item) => String(item?.file_path || '').trim())
                     .filter((rawPath) => {
                         const key = normalizeFsPath(rawPath)
+                        if (knownLibraryPaths.some((libraryPath) => isSameOrChildPath(key, libraryPath))) {
+                            return false
+                        }
                         return key.length > 0 && !knownImported.has(key)
                     })
                 if (existingNotImported.length > 0) {
@@ -648,6 +956,7 @@ async function pollAutoImport(): Promise<void> {
                 const rawPath = String(item?.file_path || '').trim()
                 const key = normalizeFsPath(rawPath)
                 if (!key) continue
+                if (knownLibraryPaths.some((libraryPath) => isSameOrChildPath(key, libraryPath))) continue
                 if (!prevSet.has(key)) newPaths.push(rawPath)
             }
 
@@ -677,7 +986,6 @@ function setupAutoImportPolling(): void {
     autoImportPollTimer = setInterval(() => {
         void pollAutoImport()
     }, 8000)
-    void pollAutoImport()
 }
 export function initTauriDesktopBridge(): void {
     if (!isTauriRuntime()) return
@@ -830,18 +1138,26 @@ export function initTauriDesktopBridge(): void {
             return fallback
         },
         refreshLibrary: async () => {
-            try {
-                await emitBridgeEvent(TAURI_EVENTS.REFRESH_PROGRESS, { current: 0, total: 1 })
-                await invoke('sidecar_request', {
-                    method: 'refresh_library',
-                    params: null,
-                })
-                await emitBridgeEvent(TAURI_EVENTS.REFRESH_PROGRESS, { current: 1, total: 1 })
-                return true
-            } catch {
-                await emitBridgeEvent(TAURI_EVENTS.REFRESH_PROGRESS, { current: 1, total: 1 })
-                return false
+            if (pendingRefreshLibraryPromise) {
+                return pendingRefreshLibraryPromise
             }
+            pendingRefreshLibraryPromise = (async () => {
+                try {
+                    await emitBridgeEvent(TAURI_EVENTS.REFRESH_PROGRESS, { current: 0, total: 1 })
+                    await invoke('sidecar_request', {
+                        method: 'refresh_library',
+                        params: null,
+                    })
+                    await emitBridgeEvent(TAURI_EVENTS.REFRESH_PROGRESS, { current: 1, total: 1 })
+                    return true
+                } catch {
+                    await emitBridgeEvent(TAURI_EVENTS.REFRESH_PROGRESS, { current: 1, total: 1 })
+                    return false
+                } finally {
+                    pendingRefreshLibraryPromise = null
+                }
+            })()
+            return pendingRefreshLibraryPromise
         },
         getMediaFiles: async (page?: number, limit?: number, filters?: any) => {
             try {
@@ -1184,8 +1500,13 @@ export function initTauriDesktopBridge(): void {
                     method: 'import_media',
                     params: { filePaths: filePaths ?? [], options: options ?? {} },
                 })
+                if (!Array.isArray(result)) {
+                    console.warn('[TauriBridge] import_media returned a non-array result:', result)
+                    return []
+                }
                 return Array.isArray(result) ? result.map((m) => normalizeMediaRecord(m)) : []
-            } catch {
+            } catch (error) {
+                console.error('[TauriBridge] import_media failed:', error)
                 return []
             }
         },
@@ -1471,22 +1792,16 @@ export function initTauriDesktopBridge(): void {
             await openUrl(url)
         },
         openPath: async (filePath: string) => {
-            await invoke('sidecar_request', {
-                method: 'file_open_path',
-                params: { filePath: decodeMediaProtocolPath(filePath) },
-            })
+            logShellActionDebug('raw-api-blocked', 'openPath', filePath)
+            throw new Error('Use openPathFromUserAction() for shell-open requests')
         },
         showItemInFolder: async (filePath: string) => {
-            await invoke('sidecar_request', {
-                method: 'file_show_item_in_folder',
-                params: { filePath: decodeMediaProtocolPath(filePath) },
-            })
+            logShellActionDebug('raw-api-blocked', 'showItemInFolder', filePath)
+            throw new Error('Use showItemInFolderFromUserAction() for shell-open requests')
         },
         openWith: async (filePath: string) => {
-            await invoke('sidecar_request', {
-                method: 'file_open_with',
-                params: { filePath: decodeMediaProtocolPath(filePath) },
-            })
+            logShellActionDebug('raw-api-blocked', 'openWith', filePath)
+            throw new Error('Use openWithFromUserAction() for shell-open requests')
         },
         copyFile: async (filePath: string) => {
             await invoke('sidecar_request', {
@@ -1538,22 +1853,44 @@ export function initTauriDesktopBridge(): void {
             try {
                 const config = await getStoredClientConfig()
                 const enabled = Boolean(config?.discordRichPresenceEnabled)
-                await invoke('sidecar_request', {
+                console.debug('[DiscordPresence] update requested', { enabled, activity: activity ?? {} })
+                appendBridgeDebugLog(`[DiscordPresence] update requested enabled=${enabled} activity=${JSON.stringify(activity ?? {})}`)
+                const rustBypassReason = shouldBypassRustDiscordPath(activity)
+                if (rustBypassReason === 'deduped') {
+                    console.debug('[DiscordPresence] skipped duplicate update')
+                    appendBridgeDebugLog('[DiscordPresence] skipped duplicate update')
+                    return
+                }
+                const result = await invoke<boolean>('sidecar_request', {
                     method: 'discord_update_activity',
                     params: { enabled, activity: activity ?? {} },
                 })
-            } catch {
-                // Keep UI flow even when Discord RPC is unavailable.
+                if (result !== true) {
+                    throw new Error('sidecar discord update returned false')
+                }
+                console.debug('[DiscordPresence] sidecar update succeeded')
+                appendBridgeDebugLog('[DiscordPresence] sidecar update succeeded')
+            } catch (error) {
+                console.error('[DiscordPresence] update failed:', error)
+                appendBridgeDebugLog(`[DiscordPresence] update failed error=${error instanceof Error ? error.message : String(error)}`)
             }
         },
         clearDiscordActivity: async () => {
             try {
-                await invoke('sidecar_request', {
+                console.debug('[DiscordPresence] clear requested')
+                appendBridgeDebugLog('[DiscordPresence] clear requested')
+                const result = await invoke<boolean>('sidecar_request', {
                     method: 'discord_clear_activity',
                     params: null,
                 })
-            } catch {
-                // Ignore when Discord RPC is unavailable.
+                if (result !== true) {
+                    throw new Error('sidecar discord clear returned false')
+                }
+                console.debug('[DiscordPresence] sidecar clear succeeded')
+                appendBridgeDebugLog('[DiscordPresence] sidecar clear succeeded')
+            } catch (error) {
+                console.error('[DiscordPresence] clear failed:', error)
+                appendBridgeDebugLog(`[DiscordPresence] clear failed error=${error instanceof Error ? error.message : String(error)}`)
             }
         },
         checkForUpdates: async () => {
@@ -1608,6 +1945,9 @@ export function initTauriDesktopBridge(): void {
                     : { success: false, message: 'Invalid download update response' }
                 if (normalized.success) {
                     pendingDownloadedUpdatePath = typeof normalized.path === 'string' ? normalized.path : null
+                    if (pendingDownloadedUpdatePath) {
+                        localStorage.setItem(PENDING_UPDATE_PATH_KEY, pendingDownloadedUpdatePath)
+                    }
                     await emitBridgeEvent(TAURI_EVENTS.UPDATE_STATUS, { status: 'update-downloaded', info: normalized })
                 } else {
                     await emitBridgeEvent(TAURI_EVENTS.UPDATE_STATUS, { status: 'error', info: normalized })
@@ -1622,13 +1962,15 @@ export function initTauriDesktopBridge(): void {
             }
         },
         quitAndInstall: async () => {
+            const installerPath = pendingDownloadedUpdatePath || localStorage.getItem(PENDING_UPDATE_PATH_KEY)
             const launched = await invoke<any>('sidecar_request', {
                 method: 'quit_and_install',
-                params: { path: pendingDownloadedUpdatePath },
+                params: { path: installerPath },
             })
             if (!launched) {
                 throw new Error('Failed to launch update installer')
             }
+            localStorage.removeItem(PENDING_UPDATE_PATH_KEY)
             // Allow installer bootstrap first, then close app so file lock does not block update.
             await new Promise((resolve) => setTimeout(resolve, 350))
             await invoke('window_close')

@@ -14,6 +14,7 @@ import { loadPluginScripts } from '../api/plugin-system'
 
 interface PlayerProps {
     media: MediaFile
+    playbackStartToken?: number
     onBack: () => void
     onNext?: () => void
     onPrev?: () => void
@@ -41,6 +42,7 @@ interface PlayerProps {
 
 export const Player: React.FC<PlayerProps> = ({
     media,
+    playbackStartToken = 0,
     onBack,
     onNext,
     onPrev,
@@ -89,6 +91,7 @@ export const Player: React.FC<PlayerProps> = ({
         buffered
     } = usePlayer({
         media,
+        playbackStartToken,
         onNext,
         onPrev,
         onPlayFirst,
@@ -102,6 +105,14 @@ export const Player: React.FC<PlayerProps> = ({
 
     // 繧ｪ繝ｼ繝舌・繝ｬ繧､Canvas縺ｮ謠冗判邂｡逅・
     const overlayCanvasRef = useRef<HTMLCanvasElement>(null)
+    const overlayCanvasLayoutRef = useRef<{
+        width: number
+        height: number
+        displayWidth: number
+        displayHeight: number
+        offsetLeft: number
+        offsetTop: number
+    } | null>(null)
 
     // 繧ｪ繝ｼ繝舌・繝ｬ繧､逕ｨ繧ｳ繝ｳ繝・く繧ｹ繝医・蜷梧悄
 
@@ -340,6 +351,21 @@ export const Player: React.FC<PlayerProps> = ({
     }, [media?.id]) // media.id縺ｮ縺ｿ縺ｫ萓晏ｭ假ｼ医が繝悶ず繧ｧ繧ｯ繝亥盾辣ｧ螟画峩縺ｫ繧医ｋ蜀阪ヨ繝ｪ繧ｬ繝ｼ繧帝亟豁｢・・
 
     useEffect(() => {
+        const mediaElement = videoRef.current || audioRef.current
+        if (!mediaElement) return
+        if (playbackStartToken > 0 || (pipWindowMode && pipInitialState?.isPlaying === true)) return
+        const stopPlayback = () => {
+            mediaElement.pause()
+            mediaElement.currentTime = 0
+        }
+        stopPlayback()
+        mediaElement.addEventListener('loadedmetadata', stopPlayback, { once: true })
+        return () => {
+            mediaElement.removeEventListener('loadedmetadata', stopPlayback)
+        }
+    }, [media?.id, playbackStartToken, pipWindowMode, pipInitialState?.isPlaying])
+
+    useEffect(() => {
         setVideoVisualReady(!isVideo)
     }, [media?.id, isVideo])
     // Buffered Time State is now managed in usePlayer
@@ -511,39 +537,95 @@ export const Player: React.FC<PlayerProps> = ({
     useEffect(() => {
         if (!media) return
 
+        let lastSentSignature = ''
+        let lastTimeUpdateSyncAt = 0
+        let retryTimer: number | null = null
+        let hasObservedPlayback = false
+        const expectedMediaUrl = toMediaUrl(media.file_path)
+
+        const normalizeMediaUrl = (value: string | null | undefined): string => {
+            if (!value) return ''
+            try {
+                return new URL(value, window.location.href).href
+            } catch {
+                return value
+            }
+        }
+
+        const elementMatchesCurrentMedia = (el: HTMLVideoElement | HTMLAudioElement | null): boolean => {
+            if (!el) return false
+            const actualUrl = normalizeMediaUrl(el.currentSrc || el.src || el.getAttribute('src'))
+            if (!actualUrl) return true
+            return actualUrl === normalizeMediaUrl(expectedMediaUrl)
+        }
+
+        const scheduleRetry = () => {
+            if (retryTimer !== null) return
+            retryTimer = window.setTimeout(() => {
+                retryTimer = null
+                updateDiscord()
+            }, 150)
+        }
+
         const updateDiscord = () => {
             const el = videoRef.current || audioRef.current
+            if (el && !elementMatchesCurrentMedia(el)) {
+                scheduleRetry()
+                return
+            }
             // 螳滄圀縺ｮ隕∫ｴ縺ｮ迥ｶ諷九ｒ蜆ｪ蜈亥叙蠕・
             const curTime = el ? el.currentTime : currentTime
-            const dur = el ? el.duration : duration
+            const dur = el
+                ? (Number.isFinite(el.duration) && el.duration > 0 ? el.duration : (media.duration || duration))
+                : (media.duration || duration)
             const rate = el ? el.playbackRate : playbackRate
+            const activityKind = media.file_type === 'audio' ? 'listening' : 'watching'
+            const activeLabel = media.file_type === 'audio' ? 'Listening' : 'Watching'
+            const resolvedPlaying = (el ? (!el.paused && !el.ended) : isPlaying) || (playbackStartToken > 0 && !hasObservedPlayback)
+            const basePayload = {
+                kind: activityKind,
+                details: media.file_name,
+                largeImageKey: 'monitor_icon',
+                largeImageText: 'Obscura'
+            }
 
             // 迥ｶ諷九↓蠢懊§縺溘い繧ｯ繝・ぅ繝薙ユ繧｣譖ｴ譁ｰ
 
-            if (isPlaying) {
+            if (resolvedPlaying) {
                 const now = Date.now()
                 // 谿九ｊ譎る俣繧定ｨ育ｮ・
-                const remainingSec = (dur - curTime) / (rate || 1)
-                const endTimestamp = Math.floor(now + remainingSec * 1000)
-
-                api.updateDiscordActivity({
-                    details: media.file_name,
-                    state: 'Playing',
-                    endTimestamp: (dur && isFinite(endTimestamp)) ? endTimestamp : undefined,
-                    largeImageKey: 'app_icon',
-                    largeImageText: 'Obscura',
+                const safeRate = rate && Number.isFinite(rate) && rate > 0 ? rate : 1
+                const elapsedMs = Math.max(0, curTime) * 1000 / safeRate
+                const remainingMs = Number.isFinite(dur)
+                    ? Math.max(0, dur - curTime) * 1000 / safeRate
+                    : NaN
+                const startTimestamp = Math.floor(now - elapsedMs)
+                const endTimestamp = Math.floor(now + remainingMs)
+                const payload = {
+                    ...basePayload,
+                    state: activeLabel,
+                    startTimestamp: Number.isFinite(startTimestamp) ? startTimestamp : undefined,
+                    endTimestamp: Number.isFinite(endTimestamp) ? endTimestamp : undefined,
                     smallImageKey: 'play_icon',
-                    smallImageText: 'Playing'
-                })
+                    smallImageText: activeLabel
+                }
+                const signature = JSON.stringify(payload)
+                if (signature === lastSentSignature) return
+                lastSentSignature = signature
+                api.updateDiscordActivity(payload)
             } else {
-                api.updateDiscordActivity({
-                    details: media.file_name,
+                const payload = {
+                    ...basePayload,
                     state: 'Paused',
-                    largeImageKey: 'app_icon',
-                    largeImageText: 'Obscura',
                     smallImageKey: 'pause_icon',
-                    smallImageText: 'Paused'
-                })
+                    smallImageText: 'Paused',
+                    startTimestamp: undefined,
+                    endTimestamp: undefined
+                }
+                const signature = JSON.stringify(payload)
+                if (signature === lastSentSignature) return
+                lastSentSignature = signature
+                api.updateDiscordActivity(payload)
             }
         }
 
@@ -559,12 +641,52 @@ export const Player: React.FC<PlayerProps> = ({
                 // 蜊倥↓蜀榊ｮ溯｡後☆繧九・
                 updateDiscord()
             }
+            const handlePlaybackStateChanged = () => {
+                updateDiscord()
+            }
+            const handleTimeUpdate = () => {
+                if (el.currentTime > 0 || !el.paused) {
+                    hasObservedPlayback = true
+                }
+                const now = Date.now()
+                if (now - lastTimeUpdateSyncAt < 5000) return
+                lastTimeUpdateSyncAt = now
+                updateDiscord()
+            }
+            const handlePlaying = () => {
+                hasObservedPlayback = true
+                updateDiscord()
+            }
             el.addEventListener('seeked', handleSeeked)
+            el.addEventListener('play', handlePlaybackStateChanged)
+            el.addEventListener('playing', handlePlaying)
+            el.addEventListener('pause', handlePlaybackStateChanged)
+            el.addEventListener('ended', handlePlaybackStateChanged)
+            el.addEventListener('loadedmetadata', handlePlaybackStateChanged)
+            el.addEventListener('durationchange', handlePlaybackStateChanged)
+            el.addEventListener('ratechange', handlePlaybackStateChanged)
+            el.addEventListener('timeupdate', handleTimeUpdate)
             return () => {
+                if (retryTimer !== null) {
+                    window.clearTimeout(retryTimer)
+                }
                 el.removeEventListener('seeked', handleSeeked)
+                el.removeEventListener('play', handlePlaybackStateChanged)
+                el.removeEventListener('playing', handlePlaying)
+                el.removeEventListener('pause', handlePlaybackStateChanged)
+                el.removeEventListener('ended', handlePlaybackStateChanged)
+                el.removeEventListener('loadedmetadata', handlePlaybackStateChanged)
+                el.removeEventListener('durationchange', handlePlaybackStateChanged)
+                el.removeEventListener('ratechange', handlePlaybackStateChanged)
+                el.removeEventListener('timeupdate', handleTimeUpdate)
             }
         }
-    }, [media, isPlaying, playbackRate]) // currentTime繧貞性繧√↑縺・％縺ｨ縺ｧ驕主臆縺ｪ譖ｴ譁ｰ繧帝亟縺・
+        return () => {
+            if (retryTimer !== null) {
+                window.clearTimeout(retryTimer)
+            }
+        }
+    }, [media, playbackStartToken, isPlaying, playbackRate]) // currentTimeを含めないことで過剰な更新を防ぐ
 
 
 
@@ -1009,7 +1131,6 @@ export const Player: React.FC<PlayerProps> = ({
 
         let animationFrameId: number
         const render = () => {
-            handleResize()
             const overlays = (window as any).__obscura_player_overlays as Map<string, any>
             if (overlays) {
                 const canvas = overlayCanvasRef.current
@@ -1077,9 +1198,16 @@ export const Player: React.FC<PlayerProps> = ({
                 return
             }
 
-            if (canvas.width !== newWidth || canvas.height !== newHeight ||
-                canvas.style.width !== `${displayWidth}px` || canvas.style.height !== `${displayHeight}px` ||
-                canvas.style.left !== `${offsetLeft}px` || canvas.style.top !== `${offsetTop}px`) {
+            const previousLayout = overlayCanvasLayoutRef.current
+            const sameLayout = previousLayout
+                && previousLayout.width === newWidth
+                && previousLayout.height === newHeight
+                && Math.abs(previousLayout.displayWidth - displayWidth) < 0.5
+                && Math.abs(previousLayout.displayHeight - displayHeight) < 0.5
+                && Math.abs(previousLayout.offsetLeft - offsetLeft) < 0.5
+                && Math.abs(previousLayout.offsetTop - offsetTop) < 0.5
+
+            if (!sameLayout) {
                 canvas.width = newWidth
                 canvas.height = newHeight
                 canvas.style.position = 'absolute'
@@ -1087,6 +1215,14 @@ export const Player: React.FC<PlayerProps> = ({
                 canvas.style.top = `${offsetTop}px`
                 canvas.style.width = `${displayWidth}px`
                 canvas.style.height = `${displayHeight}px`
+                overlayCanvasLayoutRef.current = {
+                    width: newWidth,
+                    height: newHeight,
+                    displayWidth,
+                    displayHeight,
+                    offsetLeft,
+                    offsetTop,
+                }
                 console.log(`[Player] Canvas resized to ${newWidth}x${newHeight} (CSS: ${displayWidth}x${displayHeight})`)
             }
         }
@@ -1115,6 +1251,7 @@ export const Player: React.FC<PlayerProps> = ({
             if (resizeRetryFrameId !== null) {
                 cancelAnimationFrame(resizeRetryFrameId)
             }
+            overlayCanvasLayoutRef.current = null
             resizeObserver.disconnect()
             window.removeEventListener('resize', handleResize)
         }
@@ -1277,7 +1414,8 @@ export const Player: React.FC<PlayerProps> = ({
                                 src={fileUrl}
                                 crossOrigin="anonymous"
                                 className="player-video"
-                                autoPlay
+                                draggable={false}
+                                autoPlay={playbackStartToken > 0}
                                 preload="auto"
                                 style={{
                                     gridArea: '1 / 1 / 2 / 2',
@@ -1291,6 +1429,7 @@ export const Player: React.FC<PlayerProps> = ({
                                     imageRendering: videoScaling === 'pixelated' ? 'pixelated' : 'auto',
                                     zIndex: 1
                                 }}
+                                onDragStart={(e) => e.preventDefault()}
                                 onLoadedMetadata={(e) => {
                                     const v = e.currentTarget;
                                     setVideoSize({ width: v.videoWidth, height: v.videoHeight });
@@ -1359,6 +1498,8 @@ export const Player: React.FC<PlayerProps> = ({
                                 ref={audioRef}
                                 src={fileUrl}
                                 crossOrigin="anonymous"
+                                draggable={false}
+                                onDragStart={(e) => e.preventDefault()}
                                 onEnded={() => {
                                     if (usesNativeAudio) return
                                     if (autoPlayEnabled) {
@@ -1478,7 +1619,9 @@ export const Player: React.FC<PlayerProps> = ({
                                     <img
                                         src={previewImage}
                                         alt="preview"
+                                        draggable={false}
                                         style={{ imageRendering: imageScaling === 'pixelated' ? 'pixelated' : 'auto' }}
+                                        onDragStart={(e) => e.preventDefault()}
                                     />
                                 </div>
                             )}

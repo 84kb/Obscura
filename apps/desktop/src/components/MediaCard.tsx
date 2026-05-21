@@ -2,7 +2,7 @@
 import { MediaFile, ItemInfoType } from '@obscura/core'
 import { api } from '../api'
 import './MediaCard.css'
-import { toMediaUrl } from '../utils/fileUrl'
+import { createObjectUrlFromLocalImagePath, isLocalAssetUrl, toThumbnailUrl } from '../utils/fileUrl'
 import { enqueueThumbnailLoad } from '../utils/thumbnailLoadQueue'
 
 const thumbnailUrlCache = new Map<string, string>()
@@ -57,6 +57,12 @@ export function MediaCard({
     const [isLoaded, setIsLoaded] = useState(false)
     const mouseDownHandled = useRef(false) // MouseDown縺ｧ驕ｸ謚槫・逅・ｒ陦後▲縺溘°繧定ｿｽ霍｡
     const pendingThumbnailLoadRef = useRef<{ release: () => void, cancel: () => void } | null>(null)
+    const objectUrlRef = useRef<string | null>(null)
+    const objectUrlCleanupTimerRef = useRef<number | null>(null)
+    const releasePendingThumbnailLoad = () => {
+        pendingThumbnailLoadRef.current?.release()
+        pendingThumbnailLoadRef.current = null
+    }
 
     // 繧ｵ繝繝阪う繝ｫ縺後↑縺・ｴ蜷医・閾ｪ蜍慕函謌舌ｒ繝医Μ繧ｬ繝ｼ・亥刀雉ｪ蜆ｪ蜈医Δ繝ｼ繝峨・蝣ｴ蜷医・縺ｿ・・
     useEffect(() => {
@@ -77,8 +83,22 @@ export function MediaCard({
         if (!media.thumbnail_path) return
 
         // Use already generated thumbnail as-is. Do not trigger resize/generation on render.
-        const resolved = toMediaUrl(media.thumbnail_path)
-        thumbnailUrlCache.set(cacheKey, resolved)
+        const resolved = toThumbnailUrl(media.thumbnail_path)
+
+        const revokeObjectUrl = () => {
+            if (objectUrlCleanupTimerRef.current !== null) {
+                window.clearTimeout(objectUrlCleanupTimerRef.current)
+                objectUrlCleanupTimerRef.current = null
+            }
+            if (objectUrlRef.current) {
+                const staleUrl = objectUrlRef.current
+                objectUrlRef.current = null
+                objectUrlCleanupTimerRef.current = window.setTimeout(() => {
+                    URL.revokeObjectURL(staleUrl)
+                    objectUrlCleanupTimerRef.current = null
+                }, 30000)
+            }
+        }
 
         const startLoad = () => {
             const perf = (window as any).__obscuraRandomPerf
@@ -87,7 +107,31 @@ export function MediaCard({
                 const elapsed = performance.now() - Number(perf.start || 0)
                 console.log(`[Perf][Random] first thumbnail request in ${elapsed.toFixed(1)}ms (mediaId=${media.id})`)
             }
-            setThumbnailUrl(resolved)
+            if (!isLocalAssetUrl(resolved)) {
+                thumbnailUrlCache.set(cacheKey, resolved)
+                setThumbnailUrl(resolved)
+                releasePendingThumbnailLoad()
+                return
+            }
+
+            void createObjectUrlFromLocalImagePath(media.thumbnail_path)
+                .then((safeUrl) => {
+                    if (!safeUrl) {
+                        releasePendingThumbnailLoad()
+                        return
+                    }
+                    revokeObjectUrl()
+                    if (safeUrl !== resolved) {
+                        objectUrlRef.current = safeUrl
+                    }
+                    setThumbnailUrl(safeUrl)
+                    releasePendingThumbnailLoad()
+                })
+                .catch((error) => {
+                    console.warn('[MediaCard] Failed to resolve safe thumbnail URL:', error)
+                    setThumbnailUrl(null)
+                    releasePendingThumbnailLoad()
+                })
         }
 
         if (priorityLoad) {
@@ -99,6 +143,7 @@ export function MediaCard({
         return () => {
             pendingThumbnailLoadRef.current?.cancel()
             pendingThumbnailLoadRef.current = null
+            revokeObjectUrl()
         }
     }, [media.id, media.thumbnail_path, thumbnailMode, priorityLoad])
 
@@ -206,33 +251,32 @@ export function MediaCard({
     // info縺瑚｡ｨ遉ｺ縺輔ｌ繧九°縺ｩ縺・°
     const hasVisibleInfo = showName || (showItemInfo && getItemInfo())
 
-    // 繝阪う繝・ぅ繝悶ヵ繧｡繧､繝ｫ繝峨Λ繝・げ髢句ｧ・
     const handleDragStart = (e: React.DragEvent) => {
         const dragPaths = [media.file_path]
         const dragMediaIds = onDragGetMediaIds ? onDragGetMediaIds(String(media.id)) : [media.id]
         console.log('[MediaCard] Drag start triggered for:', dragPaths)
+        const element = e.currentTarget as HTMLDivElement
+        const dragArmed = element.dataset.dragArmed === '1'
 
-        if (e.shiftKey) {
-            onInternalDragStart?.(dragMediaIds)
-            e.stopPropagation()
-            e.dataTransfer.effectAllowed = 'move'
-            e.dataTransfer.dropEffect = 'move'
-            e.dataTransfer.setData('application/x-obscura-media-ids', JSON.stringify(dragMediaIds))
+        if (!dragArmed || !e.shiftKey) {
+            e.preventDefault()
             return
         }
 
-        e.preventDefault()
         onInternalDragStart?.(dragMediaIds)
-        if (api.startDrag) {
-            console.log('[MediaCard] Calling startDrag IPC with', dragPaths.length, 'files')
-            api.startDrag(dragPaths)
-        } else {
-            console.error('[MediaCard] api.startDrag not available')
-        }
+        e.stopPropagation()
+        e.dataTransfer.effectAllowed = 'move'
+        e.dataTransfer.dropEffect = 'move'
+        e.dataTransfer.setData('application/x-obscura-media-ids', JSON.stringify(dragMediaIds))
     }
 
     // 繝峨Λ繝・げ邨ゆｺ・凾
     const handleDragEnd = (e: React.DragEvent) => {
+        const element = e.currentTarget as HTMLDivElement
+        element.draggable = false
+        delete element.dataset.dragArmed
+        delete element.dataset.dragStartX
+        delete element.dataset.dragStartY
         onInternalDragEnd?.()
     }
 
@@ -240,6 +284,11 @@ export function MediaCard({
     // 縺九▽縲∵悴驕ｸ謚槭い繧､繝・Β縺ｮ蝣ｴ蜷医・蜊ｳ蠎ｧ縺ｫ驕ｸ謚樒憾諷九↓縺吶ｋ・医ラ繝ｩ繝・げ髢句ｧ九↓髢薙↓蜷医ｏ縺帙ｋ縺溘ａ・・
     const handleMouseDown = (e: React.MouseEvent) => {
         if (e.button === 0) { // 蟾ｦ繧ｯ繝ｪ繝・け縺ｮ縺ｿ
+            const element = e.currentTarget as HTMLDivElement
+            element.draggable = false
+            element.dataset.dragArmed = '0'
+            element.dataset.dragStartX = String(e.clientX)
+            element.dataset.dragStartY = String(e.clientY)
             e.stopPropagation()
 
             if (!isSelected) {
@@ -255,6 +304,60 @@ export function MediaCard({
         }
     }
 
+    const handleMouseMove = (e: React.MouseEvent) => {
+        if ((e.buttons & 1) !== 1) return
+        const element = e.currentTarget as HTMLDivElement
+        if (element.dataset.nativeDragStarted === '1') return
+        if (element.dataset.dragArmed === '1') return
+        const startX = Number(element.dataset.dragStartX)
+        const startY = Number(element.dataset.dragStartY)
+        if (!Number.isFinite(startX) || !Number.isFinite(startY)) return
+        if (Math.hypot(e.clientX - startX, e.clientY - startY) < 6) return
+
+        const wantsNativeFileDrag = e.altKey && !e.shiftKey
+        if (wantsNativeFileDrag) {
+            element.dataset.nativeDragStarted = '1'
+            const dragPaths = onDragGetPaths ? onDragGetPaths(String(media.id)) : [media.file_path]
+            const dragMediaIds = onDragGetMediaIds ? onDragGetMediaIds(String(media.id)) : [media.id]
+            onInternalDragStart?.(dragMediaIds)
+            if (api.startDrag) {
+                console.log('[MediaCard] Starting native drag directly with', dragPaths.length, 'files')
+                api.startDrag(dragPaths)
+            }
+            window.setTimeout(() => {
+                resetDragIntent(element)
+                onInternalDragEnd?.()
+            }, 0)
+            return
+        }
+
+        if (!e.shiftKey) {
+            return
+        }
+
+        element.dataset.dragArmed = '1'
+        element.dataset.obscuraAllowNativeDrag = '1'
+        element.draggable = true
+    }
+
+    const resetDragIntent = (element: HTMLDivElement) => {
+        element.draggable = false
+        delete element.dataset.dragArmed
+        delete element.dataset.obscuraAllowNativeDrag
+        delete element.dataset.nativeDragStarted
+        delete element.dataset.dragStartX
+        delete element.dataset.dragStartY
+    }
+
+    const handleMouseUp = (e: React.MouseEvent) => {
+        resetDragIntent(e.currentTarget as HTMLDivElement)
+    }
+
+    const handleMouseLeave = (e: React.MouseEvent) => {
+        if ((e.buttons & 1) === 1) return
+        resetDragIntent(e.currentTarget as HTMLDivElement)
+    }
+
     const handleClick = (e: React.MouseEvent) => {
         // MouseDown縺ｧ縺吶〒縺ｫ蜃ｦ逅・ｸ医∩縺ｮ蝣ｴ蜷医・繧ｹ繧ｭ繝・・
         if (mouseDownHandled.current) {
@@ -266,8 +369,7 @@ export function MediaCard({
 
     const handleThumbnailLoad = () => {
         setIsLoaded(true)
-        pendingThumbnailLoadRef.current?.release()
-        pendingThumbnailLoadRef.current = null
+        releasePendingThumbnailLoad()
         const perf = (window as any).__obscuraRandomPerf
         if (!perf || perf.firstThumbLogged) return
         perf.firstThumbLogged = true
@@ -284,8 +386,7 @@ export function MediaCard({
     }
 
     const handleThumbnailError = () => {
-        pendingThumbnailLoadRef.current?.release()
-        pendingThumbnailLoadRef.current = null
+        releasePendingThumbnailLoad()
     }
 
     const imgLoadingMode: 'eager' | 'lazy' = priorityLoad ? 'eager' : 'lazy'
@@ -297,10 +398,13 @@ export function MediaCard({
             onClick={handleClick}
             onDoubleClick={onDoubleClick}
             onContextMenu={handleContextMenu}
-            draggable
+            draggable={false}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
             onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseLeave}
             style={{ width }}
             {...props}
         >

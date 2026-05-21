@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { MediaFile } from '@obscura/core'
-import { toMediaUrl } from '../utils/fileUrl'
+import { toThumbnailUrl } from '../utils/fileUrl'
 import './DuplicateModal.css'
 
 interface DuplicateModalProps {
@@ -26,10 +26,10 @@ export const DuplicateModal: React.FC<DuplicateModalProps> = ({ duplicate, onRes
     const { newMedia, existingMedia } = duplicate
 
     // 既存ファイルのサムネイルURL
-    const existingThumbUrl = toMediaUrl(existingMedia.thumbnail_path)
+    const existingThumbUrl = toThumbnailUrl(existingMedia.thumbnail_path)
 
     // 新規ファイルのサムネイルURL (すでにインポート済みなので thumbnail_path がある)
-    const newThumbUrl = toMediaUrl(newMedia.thumbnail_path)
+    const newThumbUrl = toThumbnailUrl(newMedia.thumbnail_path)
 
     const handleConfirm = () => {
         if (selectedOption === 'existing') {
@@ -54,7 +54,7 @@ export const DuplicateModal: React.FC<DuplicateModalProps> = ({ duplicate, onRes
                     <div className={`duplicate-card existing ${selectedOption === 'existing' ? 'active' : ''}`} onClick={() => setSelectedOption('existing')}>
                         <div className="preview-container">
                             {existingThumbUrl ? (
-                                <img src={existingThumbUrl} alt="Existing" />
+                                <img src={existingThumbUrl} alt="Existing" draggable={false} onDragStart={(e) => e.preventDefault()} />
                             ) : (
                                 <div className="no-preview">No Preview</div>
                             )}
@@ -81,7 +81,7 @@ export const DuplicateModal: React.FC<DuplicateModalProps> = ({ duplicate, onRes
                     <div className={`duplicate-card new ${selectedOption === 'new' ? 'active' : ''}`} onClick={() => setSelectedOption('new')}>
                         <div className="preview-container">
                             {newThumbUrl ? (
-                                <img src={newThumbUrl} alt="New" />
+                                <img src={newThumbUrl} alt="New" draggable={false} onDragStart={(e) => e.preventDefault()} />
                             ) : (
                                 <div className="no-preview">No Preview</div>
                             )}

@@ -3,11 +3,13 @@ import { MediaFile, Tag, TagGroup, Folder, FilterOptions, Library, RemoteLibrary
 import { useNotification } from '../contexts/NotificationContext'
 import { api } from '../api'
 import { getAuthQuery } from '../utils/auth'
+import { appendBridgeDebugLog } from '../utils/tauriDesktopBridge'
 
 export function useLibrary(options?: { showSubfolderContent?: boolean }) {
     const MEDIA_LOAD_TIMEOUT_MS = 60000
     const STARTUP_METADATA_TIMEOUT_MS = 15000
     const STARTUP_OVERLAY_TIMEOUT_MS = 12000
+    const METADATA_REQUEST_TIMEOUT_MS = 10000
     const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([])
     const [tags, setTags] = useState<Tag[]>([])
     const [tagGroups, setTagGroups] = useState<TagGroup[]>([])
@@ -17,11 +19,15 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
     const [loadingProgress, setLoadingProgress] = useState(0)
     const isInitialLoadDone = useRef(false)
     const previousLibraryLoadKey = useRef<string | null>(null)
-    const startupRefreshAttemptedKey = useRef<string | null>(null)
     const startupLoadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const startupOverlayFailSafeTriggeredRef = useRef(false)
     const [startupLoading, setStartupLoading] = useState(true)
     const [initialLibraryResolved, setInitialLibraryResolved] = useState(false)
+    const [startupMetadataReady, setStartupMetadataReady] = useState({
+        tags: false,
+        tagGroups: false,
+        folders: false,
+    })
     const [activeLibrary, setActiveLibrary] = useState<Library | null>(null)
     const [activeRemoteLibrary, setActiveRemoteLibrary] = useState<RemoteLibrary | null>(null)
     const [myUserToken, setMyUserToken] = useState<string>('')
@@ -70,9 +76,38 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
     })
     const foldersRef = useRef<Folder[]>([])
 
+    const markStartupMetadataReady = useCallback((key: 'tags' | 'tagGroups' | 'folders') => {
+        setStartupMetadataReady((prev) => (
+            prev[key]
+                ? prev
+                : { ...prev, [key]: true }
+        ))
+    }, [])
+
+    const runWithTimeout = useCallback(async <T,>(
+        task: Promise<T>,
+        timeoutMs: number,
+        label: string,
+    ): Promise<T> => {
+        return await Promise.race([
+            task,
+            new Promise<T>((_, reject) => {
+                setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs)
+            }),
+        ])
+    }, [])
+
     useEffect(() => {
         foldersRef.current = folders
     }, [folders])
+
+    useEffect(() => {
+        setStartupMetadataReady({
+            tags: false,
+            tagGroups: false,
+            folders: false,
+        })
+    }, [activeLibrary, activeRemoteLibrary])
 
     // ソート設定読み込み・保存のヘルパー
     const getLibraryIdForConfig = useCallback(() => {
@@ -155,13 +190,21 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
     // フォルダー (ex-Genre) 読み込み
     const loadFolders = useCallback(async () => {
         try {
-            const loadedFolders = await api.getFolders()
+            appendBridgeDebugLog('[StartupMetadata] loadFolders start')
+            const loadedFolders = await runWithTimeout(
+                api.getFolders(),
+                METADATA_REQUEST_TIMEOUT_MS,
+                'getFolders',
+            )
             setFolders(Array.isArray(loadedFolders) ? loadedFolders : [])
         } catch (error) {
+            appendBridgeDebugLog(`[StartupMetadata] loadFolders failed error=${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`)
             console.error('Failed to load folders:', error)
-            setFolders([])
+        } finally {
+            appendBridgeDebugLog('[StartupMetadata] loadFolders complete')
+            markStartupMetadataReady('folders')
         }
-    }, [])
+    }, [markStartupMetadataReady, runWithTimeout])
 
 
     // フォルダー (ex-Genre) 作成
@@ -513,31 +556,57 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
     // タグ読み込み
     const loadTags = useCallback(async () => {
         try {
-            const loadedTags = await api.getTags()
+            appendBridgeDebugLog('[StartupMetadata] loadTags start')
+            const loadedTags = await runWithTimeout(
+                api.getTags(),
+                METADATA_REQUEST_TIMEOUT_MS,
+                'getTags',
+            )
             setTags(Array.isArray(loadedTags) ? loadedTags : [])
         } catch (error) {
+            appendBridgeDebugLog(`[StartupMetadata] loadTags failed error=${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`)
             console.error('Failed to load tags:', error)
+        } finally {
+            appendBridgeDebugLog('[StartupMetadata] loadTags complete')
+            markStartupMetadataReady('tags')
         }
-    }, [])
+    }, [markStartupMetadataReady, runWithTimeout])
 
     // タググループ（親タグカテゴリ等）読み込み
     const loadTagGroups = useCallback(async () => {
         try {
-            const loadedGroups = await api.getTagGroups()
+            appendBridgeDebugLog('[StartupMetadata] loadTagGroups start')
+            const loadedGroups = await runWithTimeout(
+                api.getTagGroups(),
+                METADATA_REQUEST_TIMEOUT_MS,
+                'getTagGroups',
+            )
             setTagGroups(Array.isArray(loadedGroups) ? loadedGroups : [])
         } catch (error) {
+            appendBridgeDebugLog(`[StartupMetadata] loadTagGroups failed error=${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`)
             console.error('Failed to load tag groups:', error)
+        } finally {
+            appendBridgeDebugLog('[StartupMetadata] loadTagGroups complete')
+            markStartupMetadataReady('tagGroups')
         }
-    }, [])
+    }, [markStartupMetadataReady, runWithTimeout])
 
     const loadStartupMetadata = useCallback(async () => {
+        appendBridgeDebugLog('[StartupMetadata] loadStartupMetadata start')
         await Promise.race([
             Promise.all([loadTags(), loadTagGroups(), loadFolders()]),
             new Promise<void>((resolve) => {
                 setTimeout(resolve, STARTUP_METADATA_TIMEOUT_MS)
             }),
         ])
+        appendBridgeDebugLog('[StartupMetadata] loadStartupMetadata settled')
     }, [loadTags, loadTagGroups, loadFolders])
+
+    const libraryMetadataReady = useMemo(() => (
+        initialLibraryResolved &&
+        startupMetadataReady.tags &&
+        startupMetadataReady.folders
+    ), [initialLibraryResolved, startupMetadataReady.folders, startupMetadataReady.tags])
 
 
     // フォルダー選択とスキャン
@@ -954,8 +1023,11 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
             }
 
             const importedFiles = await (api.importMedia as any)(filePaths, options)
+            if (!Array.isArray(importedFiles) || importedFiles.length === 0) {
+                throw new Error('metadata.json を作成できず、インポートは完了しませんでした。')
+            }
             removeNotification(notificationId)
-            addNotification({ type: 'success', title: 'インポート完了', message: `${filePaths.length}個のファイルを追加しました。` })
+            addNotification({ type: 'success', title: 'インポート完了', message: `${importedFiles.length}個のファイルを追加しました。` })
             await loadMediaFiles()
             return importedFiles
         } catch (error) {
@@ -1661,22 +1733,9 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
             try {
                 if (isFirstLoad || isLibrarySwitchLoad) setLoadingProgress(20)
                 const shouldUseFastPreview = !activeRemoteLibrary && (isFirstLoad || isLibrarySwitchLoad)
-                let loadedCount = await loadMediaFiles(true, false, shouldUseFastPreview ? { __fastPreview: true } : null)
-
-                if (
-                    !activeRemoteLibrary &&
-                    currentLibraryLoadKey &&
-                    loadedCount === 0 &&
-                    startupRefreshAttemptedKey.current !== currentLibraryLoadKey
-                ) {
-                    startupRefreshAttemptedKey.current = currentLibraryLoadKey
-                    try {
-                        setLoadingProgress(30)
-                        await api.refreshLibrary()
-                        loadedCount = await loadMediaFiles(true, false)
-                    } catch (e) {
-                        console.error('Failed to refresh empty startup library:', e)
-                    }
+                const loadedCount = await loadMediaFiles(true, false, shouldUseFastPreview ? { __fastPreview: true } : null)
+                if (!activeRemoteLibrary && currentLibraryLoadKey && loadedCount === 0) {
+                    appendBridgeDebugLog(`[StartupMetadata] startup-refresh-skipped library=${currentLibraryLoadKey}`)
                 }
 
                 previousLibraryLoadKey.current = currentLibraryLoadKey
@@ -1728,20 +1787,6 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
         }
     }, [loadMediaFiles, loadTags, loadTagGroups, loadFolders])
 
-    // Auto-import completion listener
-    useEffect(() => {
-        if (!api.on) return
-
-        const removeListener = api.on('auto-import-complete', () => {
-            console.log('[useLibrary] Auto-import complete event received. Refreshing library...')
-            refreshAll()
-        })
-
-        return () => {
-            if (removeListener) removeListener()
-        }
-    }, [refreshAll])
-
     return useMemo(() => ({
         mediaFiles: filteredMediaFiles,
         allMediaFiles: mediaFiles,
@@ -1752,6 +1797,7 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
         loading,
         loadingProgress,
         startupLoading,
+        libraryMetadataReady,
         activeLibrary,
         hasActiveLibrary: activeLibrary !== null,
         filterOptions,
@@ -1827,7 +1873,7 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
         hasMore,
         loadingTime
     }), [
-        filteredMediaFiles, mediaFiles, tags, tagGroups, folders, libraries, loading, activeLibrary,
+        filteredMediaFiles, mediaFiles, tags, tagGroups, folders, libraries, loading, startupLoading, libraryMetadataReady, activeLibrary,
         filterOptions, setFilterOptions, createLibrary, switchLibrary, selectAndScanFolder,
         createTag, deleteTag, createFolder, deleteFolder, addTagToMedia, removeTagFromMedia,
         addTagsToMedia, addFolderToMedia, removeFolderFromMedia, moveToTrash, restoreFromTrash, deletePermanently,

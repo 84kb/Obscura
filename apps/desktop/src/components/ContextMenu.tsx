@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useCallback } from 'react'
 import { MediaFile, Folder, RemoteLibrary } from '@obscura/core'
 import { useFloatingPosition } from '../hooks/useFloatingPosition'
 import './ContextMenu.css'
@@ -24,6 +24,7 @@ interface ContextMenuProps {
     onAddToLibrary?: (libraryId: string) => void
     isRemote?: boolean
     onRefreshMetadata?: () => void
+    onArmShellAction?: (action: 'open-default' | 'open-with' | 'show-in-explorer') => void
 }
 
 export function ContextMenu({
@@ -46,9 +47,59 @@ export function ContextMenu({
     remoteLibraries,
     onAddToLibrary,
     isRemote,
-    onRefreshMetadata
+    onRefreshMetadata,
+    onArmShellAction
 }: ContextMenuProps) {
     const menuRef = useRef<HTMLDivElement>(null)
+    const openedAtRef = useRef(typeof performance !== 'undefined' ? performance.now() : Date.now())
+    const armedActionRef = useRef<{ id: string; at: number; clientX: number; clientY: number } | null>(null)
+
+    const armMenuAction = useCallback((event: React.MouseEvent, actionId: string) => {
+        event.preventDefault()
+        event.stopPropagation()
+
+        const elapsedMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - openedAtRef.current
+        if (!event.isTrusted || event.button !== 0 || elapsedMs < 150) {
+            armedActionRef.current = null
+            return
+        }
+
+        armedActionRef.current = {
+            id: actionId,
+            at: typeof performance !== 'undefined' ? performance.now() : Date.now(),
+            clientX: event.clientX,
+            clientY: event.clientY,
+        }
+        if (
+            actionId === 'open-default' ||
+            actionId === 'open-with' ||
+            actionId === 'show-in-explorer'
+        ) {
+            onArmShellAction?.(actionId)
+        }
+    }, [onArmShellAction])
+
+    const handleMenuAction = useCallback((event: React.MouseEvent, actionId: string, action: () => void) => {
+        event.preventDefault()
+        event.stopPropagation()
+
+        const armedAction = armedActionRef.current
+        armedActionRef.current = null
+
+        if (!event.isTrusted || event.button !== 0 || !armedAction || armedAction.id !== actionId) {
+            return
+        }
+
+        const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+        const elapsedMs = now - armedAction.at
+        const movedPx = Math.hypot(event.clientX - armedAction.clientX, event.clientY - armedAction.clientY)
+        if (elapsedMs > 500 || movedPx > 6 || !document.hasFocus()) {
+            armedActionRef.current = null
+            return
+        }
+
+        action()
+    }, [])
 
     // クリック外で閉じる
     useEffect(() => {
@@ -64,12 +115,19 @@ export function ContextMenu({
             }
         }
 
+        const handleBlur = () => {
+            armedActionRef.current = null
+        }
+
         document.addEventListener('mousedown', handleClickOutside)
         document.addEventListener('keydown', handleEscape)
+        window.addEventListener('blur', handleBlur)
 
         return () => {
+            armedActionRef.current = null
             document.removeEventListener('mousedown', handleClickOutside)
             document.removeEventListener('keydown', handleEscape)
+            window.removeEventListener('blur', handleBlur)
         }
     }, [onClose])
 
@@ -84,8 +142,18 @@ export function ContextMenu({
             ref={menuRef}
             className="context-menu"
             style={{ left: x, top: y }}
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onContextMenu={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+            }}
         >
-            <div className={`context-menu-item ${isRemote ? 'disabled' : ''}`} onClick={!isRemote ? onOpenDefault : undefined}>
+            <div
+                className={`context-menu-item ${isRemote ? 'disabled' : ''}`}
+                onMouseDown={!isRemote ? (e) => armMenuAction(e, 'open-default') : undefined}
+                onMouseUp={!isRemote ? (e) => handleMenuAction(e, 'open-default', onOpenDefault) : undefined}
+            >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
                     <polyline points="15 3 21 3 21 9" />
@@ -94,7 +162,11 @@ export function ContextMenu({
                 <span>規定のアプリで開く</span>
             </div>
 
-            <div className={`context-menu-item ${isRemote ? 'disabled' : ''}`} onClick={!isRemote ? onOpenWith : undefined}>
+            <div
+                className={`context-menu-item ${isRemote ? 'disabled' : ''}`}
+                onMouseDown={!isRemote ? (e) => armMenuAction(e, 'open-with') : undefined}
+                onMouseUp={!isRemote ? (e) => handleMenuAction(e, 'open-with', onOpenWith) : undefined}
+            >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
                     <line x1="9" y1="3" x2="9" y2="21" />
@@ -102,7 +174,11 @@ export function ContextMenu({
                 <span>他のプログラムで開く</span>
             </div>
 
-            <div className={`context-menu-item ${isRemote ? 'disabled' : ''}`} onClick={!isRemote ? onShowInExplorer : undefined}>
+            <div
+                className={`context-menu-item ${isRemote ? 'disabled' : ''}`}
+                onMouseDown={!isRemote ? (e) => armMenuAction(e, 'show-in-explorer') : undefined}
+                onMouseUp={!isRemote ? (e) => handleMenuAction(e, 'show-in-explorer', onShowInExplorer) : undefined}
+            >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                 </svg>
@@ -132,7 +208,8 @@ export function ContextMenu({
                                 <div
                                     key={folder.id}
                                     className={`context-menu-item context-menu-folder-item ${isChecked ? 'checked' : ''}`}
-                                    onClick={() => onAddToFolder(folder.id)}
+                                    onMouseDown={(e) => armMenuAction(e, `folder:${folder.id}`)}
+                                    onMouseUp={(e) => handleMenuAction(e, `folder:${folder.id}`, () => onAddToFolder(folder.id))}
                                 >
                                     <span className={`context-menu-checkbox ${isChecked ? 'checked' : ''}`} aria-hidden="true">
                                         {isChecked && (
@@ -170,7 +247,8 @@ export function ContextMenu({
                                         <div
                                             key={lib.path}
                                             className="context-menu-item"
-                                            onClick={() => onAddToLibrary(lib.path)}
+                                            onMouseDown={(e) => armMenuAction(e, `library-path:${lib.path}`)}
+                                            onMouseUp={(e) => handleMenuAction(e, `library-path:${lib.path}`, () => onAddToLibrary(lib.path))}
                                         >
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                                 <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
@@ -192,7 +270,8 @@ export function ContextMenu({
                                         <div
                                             key={lib.id}
                                             className="context-menu-item"
-                                            onClick={() => onAddToLibrary(lib.id)}
+                                            onMouseDown={(e) => armMenuAction(e, `library-id:${lib.id}`)}
+                                            onMouseUp={(e) => handleMenuAction(e, `library-id:${lib.id}`, () => onAddToLibrary(lib.id))}
                                         >
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                                 <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
@@ -215,7 +294,11 @@ export function ContextMenu({
 
             <div className="context-menu-separator" />
 
-            <div className="context-menu-item" onClick={onRename}>
+            <div
+                className="context-menu-item"
+                onMouseDown={(e) => armMenuAction(e, 'rename')}
+                onMouseUp={(e) => handleMenuAction(e, 'rename', onRename)}
+            >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
@@ -225,7 +308,11 @@ export function ContextMenu({
 
             {
                 onRefreshMetadata && (
-                    <div className="context-menu-item" onClick={onRefreshMetadata}>
+                    <div
+                        className="context-menu-item"
+                        onMouseDown={(e) => armMenuAction(e, 'refresh-metadata')}
+                        onMouseUp={(e) => handleMenuAction(e, 'refresh-metadata', onRefreshMetadata)}
+                    >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M23 4v6h-6" />
                             <path d="M1 20v-6h6" />
@@ -238,7 +325,11 @@ export function ContextMenu({
 
             {
                 onExport && (
-                    <div className="context-menu-item" onClick={() => onExport(media)}>
+                    <div
+                        className="context-menu-item"
+                        onMouseDown={(e) => armMenuAction(e, 'export')}
+                        onMouseUp={(e) => handleMenuAction(e, 'export', () => onExport(media))}
+                    >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                             <polyline points="7 10 12 15 17 10" />
@@ -251,7 +342,11 @@ export function ContextMenu({
 
             {
                 onDownload && (
-                    <div className="context-menu-item" onClick={onDownload}>
+                    <div
+                        className="context-menu-item"
+                        onMouseDown={(e) => armMenuAction(e, 'download')}
+                        onMouseUp={(e) => handleMenuAction(e, 'download', onDownload)}
+                    >
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                             <polyline points="7 10 12 15 17 10" />
@@ -262,7 +357,11 @@ export function ContextMenu({
                 )
             }
 
-            <div className="context-menu-item" onClick={onCopy}>
+            <div
+                className="context-menu-item"
+                onMouseDown={(e) => armMenuAction(e, 'copy')}
+                onMouseUp={(e) => handleMenuAction(e, 'copy', onCopy)}
+            >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
@@ -270,7 +369,11 @@ export function ContextMenu({
                 <span>コピー</span>
             </div>
 
-            <div className="context-menu-item" onClick={onCopyPath}>
+            <div
+                className="context-menu-item"
+                onMouseDown={(e) => armMenuAction(e, 'copy-path')}
+                onMouseUp={(e) => handleMenuAction(e, 'copy-path', onCopyPath)}
+            >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
                     <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
@@ -280,7 +383,11 @@ export function ContextMenu({
 
             <div className="context-menu-separator" />
 
-            <div className="context-menu-item danger" onClick={onMoveToTrash}>
+            <div
+                className="context-menu-item danger"
+                onMouseDown={(e) => armMenuAction(e, 'move-to-trash')}
+                onMouseUp={(e) => handleMenuAction(e, 'move-to-trash', onMoveToTrash)}
+            >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <polyline points="3 6 5 6 21 6" />
                     <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />

@@ -23,13 +23,15 @@ import './styles/index.css'
 import './styles/drag-overlay.css'
 import { LoadingOverlay } from './components/LoadingOverlay'
 import { getAuthHeaders, getAuthQuery } from './utils/auth'
-import { toMediaUrl } from './utils/fileUrl'
+import { toMediaUrl, toThumbnailUrl } from './utils/fileUrl'
 import { api } from './api'
 import { initializePluginSystem, loadPluginScripts } from './api/plugin-system'
 import { t as i18nT, AppLanguage } from './i18n'
 import { getBundledReleaseNotes } from './releaseNotes'
 import { usePlugins } from './hooks/usePlugins'
 import { PluginMount } from './components/PluginMount'
+import { emit } from '@tauri-apps/api/event'
+import { appendBridgeDebugLog, openPathFromUserAction, openWithFromUserAction, setAutoImportBridgeReady, setNativeFileDragEnabled, setShellActionsEnabled, showItemInFolderFromUserAction, suppressNativeFileDragFor } from './utils/tauriDesktopBridge'
 
 const ENABLE_RANDOM_THUMB_PREFETCH = false
 const FILTER_PRESETS_STORAGE_KEY = 'obscura_filter_presets'
@@ -442,6 +444,7 @@ function AppContent() {
         loading,
         loadingProgress,
         startupLoading,
+        libraryMetadataReady,
         loadMore,
         hasMore
     } = useLibrary({ showSubfolderContent: viewSettings.showSubfolderContent })
@@ -900,7 +903,7 @@ function AppContent() {
         console.log(`[Perf][Random] switch start t=${start.toFixed(1)}ms`)
     }, [filterOptions.filterType])
 
-    // Warm up local asset thumbnail pipeline once to reduce first random-tab thumbnail latency.
+    // Avoid eager local thumbnail image loads at startup on Windows WebView.
     useEffect(() => {
         if (assetThumbWarmupDoneRef.current) return
         if (!allMediaFiles || allMediaFiles.length === 0) return
@@ -911,20 +914,33 @@ function AppContent() {
         })
         if (!candidate?.thumbnail_path) return
 
-        const url = toMediaUrl(candidate.thumbnail_path)
-        if (!url.includes('asset.localhost')) return
-
+        const url = toThumbnailUrl(candidate.thumbnail_path)
         assetThumbWarmupDoneRef.current = true
-        const start = performance.now()
-        const img = new Image()
-        const done = (status: 'ok' | 'err') => {
-            const elapsed = performance.now() - start
-            console.log(`[Perf][Thumb] asset warmup ${status} in ${elapsed.toFixed(1)}ms`)
+        if (url.includes('asset.localhost')) {
+            console.log('[Perf][Thumb] skipped startup asset warmup for local thumbnail pipeline')
         }
-        img.onload = () => done('ok')
-        img.onerror = () => done('err')
-        img.src = url
     }, [allMediaFiles])
+
+    useEffect(() => {
+        const handleNativeMediaDragStartCapture = (event: DragEvent) => {
+            const target = event.target as HTMLElement | null
+            if (!target) return
+            if (target.closest('[data-obscura-allow-native-drag="1"]')) return
+
+            const draggableMediaSurface = target.closest(
+                '.media-card, .list-view-row, .list-view-thumbnail, .inspector-preview-container, .playlist-thumbnail, .relation-thumbnail, .picker-result-thumbnail, .duplicate-card, .player-video, .player-audio-visual',
+            )
+            if (!draggableMediaSurface) return
+
+            event.preventDefault()
+            event.stopPropagation()
+        }
+
+        document.addEventListener('dragstart', handleNativeMediaDragStartCapture, true)
+        return () => {
+            document.removeEventListener('dragstart', handleNativeMediaDragStartCapture, true)
+        }
+    }, [])
 
     useEffect(() => {
         if (filterOptions.filterType !== 'random') return
@@ -958,7 +974,7 @@ function AppContent() {
         let loadedCount = 0
 
         const loadOne = (rawPath: string) => {
-            const url = toMediaUrl(rawPath)
+            const url = toThumbnailUrl(rawPath)
             if (prefetchedRandomThumbsRef.current.has(url)) return
             prefetchedRandomThumbsRef.current.add(url)
 
@@ -1249,6 +1265,7 @@ function AppContent() {
 
     // 再生中のメディア(プレイヤー用)
     const [playingMedia, setPlayingMedia] = useState<MediaFile | null>(null)
+    const [playbackStartToken, setPlaybackStartToken] = useState(0)
 
     // Discord RPC: Idle State Handling
     useEffect(() => {
@@ -1262,9 +1279,10 @@ function AppContent() {
                 api.clearDiscordActivity().catch((_) => { })
             } else {
                 api.updateDiscordActivity({
+                    kind: 'watching',
                     details: 'Browsing Library',
                     state: libName,
-                    largeImageKey: 'app_icon',
+                    largeImageKey: 'monitor_icon',
                     largeImageText: 'Obscura'
                 }).catch(err => console.error('Failed to update idle activity:', err))
             }
@@ -1420,6 +1438,7 @@ function AppContent() {
     const [showLibraryModal, setShowLibraryModal] = useState(false)
     const [isDragging, setIsDragging] = useState(false)
     const [releaseNotesModal, setReleaseNotesModal] = useState<ReleaseNotesModalState | null>(null)
+    const [deleteConfirmIds, setDeleteConfirmIds] = useState<number[]>([])
     const [externalDropFolderId, setExternalDropFolderId] = useState<number | null>(null)
     const isInternalDrag = useRef(false)
     const internalDraggedMediaIdsRef = useRef<number[]>([])
@@ -1552,6 +1571,26 @@ function AppContent() {
     const activeLibraryRef = useRef(activeLibrary)
     const activeRemoteLibraryRef = useRef(activeRemoteLibrary)
     const allMediaFilesRef = useRef(allMediaFiles)
+    const autoImportQueueRef = useRef<Promise<void>>(Promise.resolve())
+    const libraryMetadataReadyRef = useRef(libraryMetadataReady)
+    const autoImportInFlightRef = useRef(0)
+
+    const waitForLibraryMetadataReady = useCallback(async (timeoutMs = 15000) => {
+        if (libraryMetadataReadyRef.current) {
+            return true
+        }
+
+        const startedAt = Date.now()
+        while (!libraryMetadataReadyRef.current) {
+            if (Date.now() - startedAt >= timeoutMs) {
+                console.warn('[App] Proceeding with auto-import before metadata became ready')
+                return false
+            }
+            await new Promise((resolve) => window.setTimeout(resolve, 150))
+        }
+
+        return true
+    }, [])
 
     const beginInternalMediaDrag = useCallback((mediaIds?: number[]) => {
         internalDraggedMediaIdsRef.current = Array.isArray(mediaIds)
@@ -1697,6 +1736,34 @@ function AppContent() {
     useEffect(() => {
         allMediaFilesRef.current = allMediaFiles
     }, [allMediaFiles])
+
+    useEffect(() => {
+        libraryMetadataReadyRef.current = libraryMetadataReady
+    }, [libraryMetadataReady])
+
+    useEffect(() => {
+        if (!startupLoading && libraryMetadataReady) {
+            return
+        }
+
+        suppressNativeFileDragFor(1500)
+        const timer = window.setInterval(() => {
+            suppressNativeFileDragFor(1500)
+        }, 500)
+        return () => window.clearInterval(timer)
+    }, [startupLoading, libraryMetadataReady])
+
+    useEffect(() => {
+        setNativeFileDragEnabled(!startupLoading && libraryMetadataReady && autoImportInFlightRef.current === 0)
+    }, [startupLoading, libraryMetadataReady])
+
+    useEffect(() => {
+        setShellActionsEnabled(!startupLoading && libraryMetadataReady && autoImportInFlightRef.current === 0)
+    }, [startupLoading, libraryMetadataReady])
+
+    useEffect(() => {
+        setAutoImportBridgeReady(Boolean(libraryMetadataReady && !startupLoading))
+    }, [libraryMetadataReady, startupLoading])
 
     // ドラッグ＆ドロップ状態のグローバル管理
     useEffect(() => {
@@ -2009,18 +2076,6 @@ function AppContent() {
             }
         }
 
-        const handleAutoImportComplete = (_: any, files: string[]) => {
-            const safeFiles = Array.isArray(files) ? files : []
-            console.log('[App] Auto-import completed:', safeFiles.length)
-            refreshLibrary()
-            addNotification({
-                type: 'success',
-                title: tr('Auto import complete', 'Auto import complete'),
-                message: tr(`Imported ${safeFiles.length} files`, `Imported ${safeFiles.length} files`),
-                duration: 5000
-            })
-        }
-
         const handleAutoImportCollision = (_: any, data: { newMedia: MediaFile; existingMedia: MediaFile }) => {
             console.log('[App] Auto-import collision detected:', data)
             // 重複解決キューに追加し、コールバックは不要（自動でDBに残るか消えるか決まるため）
@@ -2034,7 +2089,18 @@ function AppContent() {
             }])
         }
 
-        const handleAutoImportTrigger = async (_: any, payload: any) => {
+        const runAutoImportTrigger = async (_: any, payload: any) => {
+            autoImportInFlightRef.current += 1
+            appendBridgeDebugLog(`[AutoImport] start inFlight=${autoImportInFlightRef.current} payload=${JSON.stringify({
+                filePaths: Array.isArray(payload?.filePaths) ? payload.filePaths : [],
+                targetLibraryId: payload?.targetLibraryId ?? null,
+            })}`)
+            setNativeFileDragEnabled(false)
+            setShellActionsEnabled(false)
+            closeContextMenu()
+            endInternalMediaDrag()
+            clearExternalDragState()
+            suppressNativeFileDragFor(3000)
             const safeFilePaths = Array.isArray(payload?.filePaths)
                 ? payload.filePaths.filter((p: unknown): p is string => typeof p === 'string' && p.trim().length > 0)
                 : []
@@ -2043,55 +2109,62 @@ function AppContent() {
             if (safeFilePaths.length === 0) return
 
             const normalizePath = (p: string) => p.replace(/\\/g, '/').toLowerCase()
-            const existingPaths = new Set(
-                allMediaFilesRef.current.flatMap((m: any) => {
-                    const currentPath = typeof m?.file_path === 'string' ? normalizePath(m.file_path) : ''
-                    const sourcePath = typeof m?.import_source_path === 'string' ? normalizePath(m.import_source_path) : ''
-                    return [currentPath, sourcePath].filter(Boolean)
-                }),
-            )
-            const newFilePaths = safeFilePaths.filter((p: string) => !existingPaths.has(normalizePath(p)))
-            const skippedPaths = safeFilePaths.filter((p: string) => !newFilePaths.includes(p))
-
-            if (skippedPaths.length > 0) {
-                void api.deleteFileSystemFiles(skippedPaths).catch((e) => {
-                    console.warn('Failed to clean skipped auto-import files:', skippedPaths, e)
-                })
-            }
-
-            if (newFilePaths.length === 0) {
-                console.log('[App] Auto-import skipped because all files already exist')
-                return
-            }
+            const importFilePaths = safeFilePaths
 
             const previousLibraryPath = activeRemoteLibraryRef.current
                 ? await api.getRemoteCachePath(activeRemoteLibraryRef.current.id)
                 : activeLibraryRef.current?.path || null
             const importLibraryPath = targetLibraryPath || previousLibraryPath
-
+            const normalizedPreviousLibraryPath = previousLibraryPath ? normalizePath(previousLibraryPath) : ''
+            const normalizedImportLibraryPath = importLibraryPath ? normalizePath(importLibraryPath) : ''
+            let completedAutoImportPaths: string[] = []
+            let completedAutoImportCount = 0
             if (!importLibraryPath) {
                 console.warn('[App] Auto-import skipped because no target library is available')
+                appendBridgeDebugLog('[AutoImport] skipped reason=no-target-library')
                 return
             }
 
             try {
-                if (previousLibraryPath !== importLibraryPath) {
+                appendBridgeDebugLog(`[AutoImport] wait-metadata previousLibrary=${previousLibraryPath || ''} importLibrary=${importLibraryPath || ''} fileCount=${importFilePaths.length}`)
+                await waitForLibraryMetadataReady()
+                if (normalizedPreviousLibraryPath !== normalizedImportLibraryPath) {
+                    appendBridgeDebugLog(`[AutoImport] switching-library path=${importLibraryPath}`)
                     await api.setActiveLibrary(importLibraryPath)
                 }
-                await (api.importMedia as any)(newFilePaths, { deleteSource: true, importSource: 'auto-import' })
+                appendBridgeDebugLog(`[AutoImport] importMedia-call fileCount=${importFilePaths.length}`)
+                const importedMedia = await (api.importMedia as any)(importFilePaths, { deleteSource: true, importSource: 'auto-import' })
+                const importedList = Array.isArray(importedMedia) ? importedMedia : []
+                appendBridgeDebugLog(`[AutoImport] importMedia-result imported=${importedList.length}`)
+                const importedSourcePaths = importedList
+                    .map((media: any) => String(media?.import_source_path || media?.file_path || '').trim())
+                    .filter((filePath: string) => filePath.length > 0)
 
-                if (!activeRemoteLibraryRef.current && activeLibraryRef.current?.path === importLibraryPath) {
-                    refreshLibrary()
+                if (importedList.length === 0) {
+                    throw new Error('Auto-import finished without any completed metadata records')
                 }
 
-                addNotification({
-                    type: 'success',
-                    title: tr('Auto import complete', 'Auto import complete'),
-                    message: tr(`Imported ${newFilePaths.length} files`, `Imported ${newFilePaths.length} files`),
-                    duration: 4000
-                })
+                for (const media of importedList) {
+                    const duplicates = await checkEntryDuplicates(media.id)
+                    if (duplicates.length === 0) continue
+                    console.log('[App] Auto-import duplicates queued after import:', media.id, duplicates.length)
+                    setDuplicateQueue(prev => [
+                        ...prev,
+                        ...duplicates.map((duplicate: any) => ({
+                            ...duplicate,
+                            onResolve: async (resolvedMedia: MediaFile) => {
+                                console.log('[App] Auto-import duplicate resolved. Winner:', resolvedMedia.id)
+                            },
+                        })),
+                    ])
+                }
+
+                completedAutoImportPaths = importedSourcePaths.length > 0 ? importedSourcePaths : importFilePaths
+                completedAutoImportCount = importedList.length
+
             } catch (error) {
                 console.error('Auto-import failed:', error)
+                appendBridgeDebugLog(`[AutoImport] failed error=${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`)
                 addNotification({
                     type: 'error',
                     title: tr('Auto import failed', 'Auto import failed'),
@@ -2099,18 +2172,40 @@ function AppContent() {
                     duration: 5000
                 })
             } finally {
-                if (previousLibraryPath && previousLibraryPath !== importLibraryPath) {
+                autoImportInFlightRef.current = Math.max(0, autoImportInFlightRef.current - 1)
+                appendBridgeDebugLog(`[AutoImport] finally completedCount=${completedAutoImportCount} inFlight=${autoImportInFlightRef.current} restoreLibrary=${previousLibraryPath || ''}`)
+                if (previousLibraryPath && normalizedPreviousLibraryPath !== normalizedImportLibraryPath) {
                     await api.setActiveLibrary(previousLibraryPath).catch((e: any) => {
                         console.warn('Failed to restore previous library after auto-import:', e)
+                        appendBridgeDebugLog(`[AutoImport] restore-library-failed error=${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`)
                     })
                 }
+                if (completedAutoImportCount > 0) {
+                    closeContextMenu()
+                    endInternalMediaDrag()
+                    clearExternalDragState()
+                    suppressNativeFileDragFor(2000)
+                    appendBridgeDebugLog(`[AutoImport] emit-complete count=${completedAutoImportCount} paths=${JSON.stringify(completedAutoImportPaths)}`)
+                    await emit('auto-import-complete', completedAutoImportPaths)
+                    await finalizeAutoImportUi(completedAutoImportCount)
+                }
+                const reenableGuard = !startupLoading && libraryMetadataReadyRef.current && autoImportInFlightRef.current === 0
+                appendBridgeDebugLog(`[AutoImport] reenable guard=${reenableGuard} startupLoading=${startupLoading} metadataReady=${libraryMetadataReadyRef.current} inFlight=${autoImportInFlightRef.current}`)
+                setNativeFileDragEnabled(reenableGuard)
+                setShellActionsEnabled(reenableGuard)
             }
+        }
+
+        const handleAutoImportTrigger = (event: any, payload: any) => {
+            autoImportQueueRef.current = autoImportQueueRef.current
+                .catch(() => undefined)
+                .then(() => runAutoImportTrigger(event, payload))
+            return autoImportQueueRef.current
         }
 
         // イベントリスナー登録
         let unsubscribeTrigger: (() => void) | undefined
         let unsubscribeAutoImportTrigger: (() => void) | undefined
-        let unsubscribeAutoImport: (() => void) | undefined
         let unsubscribeAutoImportCollision: (() => void) | undefined
         let unsubscribeExportProgress: (() => void) | undefined
         let unsubscribeNativeDragOver: (() => void) | undefined
@@ -2123,7 +2218,6 @@ function AppContent() {
             unsubscribeAutoImportTrigger = api.on('auto-import-trigger', (e: any, payload: any) => {
                 void handleAutoImportTrigger(e, payload)
             })
-            unsubscribeAutoImport = api.on('auto-import-complete', (_e: any, files: string[]) => handleAutoImportComplete(null, files))
             unsubscribeAutoImportCollision = api.on('auto-import-collision', (_e: any, data: any) => handleAutoImportCollision(null, data))
             unsubscribeExportProgress = api.on('export-progress', (_e: any, data: { id: string, progress: number }) => {
                 // data passed as second arg usually
@@ -2186,11 +2280,9 @@ function AppContent() {
             })
         }
 
-        // クリーンアップ
         return () => {
             if (unsubscribeTrigger) unsubscribeTrigger()
             if (unsubscribeAutoImportTrigger) unsubscribeAutoImportTrigger()
-            if (unsubscribeAutoImport) unsubscribeAutoImport()
             if (unsubscribeAutoImportCollision) unsubscribeAutoImportCollision()
             if (unsubscribeExportProgress) unsubscribeExportProgress()
             if (unsubscribeNativeDragOver) unsubscribeNativeDragOver()
@@ -2198,7 +2290,7 @@ function AppContent() {
             if (unsubscribeNativeDragDrop) unsubscribeNativeDragDrop()
             if (unsubscribeMetadataRefreshDebug) unsubscribeMetadataRefreshDebug()
         }
-    }, [importMedia, refreshLibrary, addNotification, endInternalMediaDrag, applyExternalDropZone, clearExternalDragState, resolveExternalDropZoneFromNativePosition, dragDropImportOptions])
+    }, [importMedia, refreshLibrary, addNotification, endInternalMediaDrag, applyExternalDropZone, clearExternalDragState, resolveExternalDropZoneFromNativePosition, dragDropImportOptions, waitForLibraryMetadataReady, startupLoading])
 
     // 表示設定
     // viewSettings保存
@@ -2387,6 +2479,8 @@ function AppContent() {
 
     // コンテキストメニュー
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; media: MediaFile } | null>(null)
+    const previousMediaFilesRef = useRef(mediaFiles)
+    const shellActionIntentRef = useRef<{ action: 'open-default' | 'open-with' | 'show-in-explorer'; mediaId: number; expiresAt: number } | null>(null)
 
     // mediaFilesが更新されたら選択中メディアと再生中メディアを最新のデータで更新
     useEffect(() => {
@@ -2406,7 +2500,6 @@ function AppContent() {
     }, [mediaFiles])
 
     // DELETEキーでゴミ箱へ移動（ゴミ箱表示時は完全削除）
-    const [deleteConfirmIds, setDeleteConfirmIds] = useState<number[]>([])
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -2509,13 +2602,16 @@ function AppContent() {
     const handleMediaDoubleClick = useCallback((media: MediaFile) => {
         saveCurrentLibraryScrollPosition()
         setPlayingMedia(media)
+        setPlaybackStartToken((prev) => prev + 1)
         setSelectedMediaIds([media.id]) // 再生時も単一選択に
         setLastSelectedId(media.id)
         updateLastPlayed(media.id)
     }, [saveCurrentLibraryScrollPosition, updateLastPlayed])
 
     const handleClosePlayer = useCallback(() => {
+        api.clearDiscordActivity().catch((_) => { })
         setPlayingMedia(null)
+        setPlaybackStartToken(0)
         restoreCurrentLibraryScrollPosition()
     }, [restoreCurrentLibraryScrollPosition])
 
@@ -2537,27 +2633,100 @@ function AppContent() {
         setLastSelectedId(media.id)
     }, [])
 
-    const closeContextMenu = () => {
+    const closeContextMenu = useCallback(() => {
+        shellActionIntentRef.current = null
         setContextMenu(null)
-    }
+    }, [])
+
+    const armContextMenuShellAction = useCallback((action: 'open-default' | 'open-with' | 'show-in-explorer') => {
+        const mediaId = contextMenu?.media?.id
+        if (!Number.isFinite(mediaId)) {
+            shellActionIntentRef.current = null
+            return
+        }
+        shellActionIntentRef.current = {
+            action,
+            mediaId: Number(mediaId),
+            expiresAt: Date.now() + 1500,
+        }
+    }, [contextMenu])
+
+    const consumeContextMenuShellAction = useCallback((action: 'open-default' | 'open-with' | 'show-in-explorer', mediaId: number) => {
+        const intent = shellActionIntentRef.current
+        shellActionIntentRef.current = null
+        return Boolean(
+            intent &&
+            intent.action === action &&
+            intent.mediaId === mediaId &&
+            intent.expiresAt >= Date.now()
+        )
+    }, [])
+
+    useEffect(() => {
+        if (previousMediaFilesRef.current !== mediaFiles && contextMenu) {
+            closeContextMenu()
+        }
+        previousMediaFilesRef.current = mediaFiles
+    }, [mediaFiles, contextMenu, closeContextMenu])
+
+    useEffect(() => {
+        if (!contextMenu) return
+
+        const handleWindowBlurClose = () => {
+            closeContextMenu()
+        }
+
+        window.addEventListener('blur', handleWindowBlurClose)
+        return () => window.removeEventListener('blur', handleWindowBlurClose)
+    }, [contextMenu, closeContextMenu])
+
+    const finalizeAutoImportUi = useCallback(async (importedCount: number) => {
+        appendBridgeDebugLog(`[AutoImport] finalize-start importedCount=${importedCount}`)
+        closeContextMenu()
+        endInternalMediaDrag()
+        clearExternalDragState()
+        suppressNativeFileDragFor(1500)
+        appendBridgeDebugLog('[AutoImport] refreshLibrary-skipped reason=avoid-images-rescan')
+        await reloadLibrary()
+        appendBridgeDebugLog('[AutoImport] reloadLibrary-complete')
+        addNotification({
+            type: 'success',
+            title: tr('Auto import complete', 'Auto import complete'),
+            message: tr(`Imported ${importedCount} files`, `Imported ${importedCount} files`),
+            duration: 4000
+        })
+        appendBridgeDebugLog(`[AutoImport] finalize-success importedCount=${importedCount}`)
+    }, [addNotification, clearExternalDragState, closeContextMenu, endInternalMediaDrag, reloadLibrary])
 
     const handleOpenDefault = async () => {
         if (contextMenu?.media) {
-            await api.openPath(contextMenu.media.file_path)
+            if (!consumeContextMenuShellAction('open-default', contextMenu.media.id)) {
+                closeContextMenu()
+                return
+            }
+            await openPathFromUserAction(contextMenu.media.file_path)
         }
         closeContextMenu()
     }
 
     const handleOpenWith = async () => {
         if (contextMenu?.media) {
-            await api.openWith(contextMenu.media.file_path)
+            if (!consumeContextMenuShellAction('open-with', contextMenu.media.id)) {
+                closeContextMenu()
+                return
+            }
+            await openWithFromUserAction(contextMenu.media.file_path)
         }
         closeContextMenu()
     }
 
     const handleShowInExplorer = async () => {
         if (contextMenu?.media) {
-            await api.showItemInFolder(contextMenu.media.file_path)
+            if (!consumeContextMenuShellAction('show-in-explorer', contextMenu.media.id)) {
+                closeContextMenu()
+                return
+            }
+            await showItemInFolderFromUserAction(contextMenu.media.file_path)
         }
         closeContextMenu()
     }
@@ -2980,6 +3149,7 @@ function AppContent() {
             <div className="player-overlay-container">
                 <Player
                     media={playingMedia}
+                    playbackStartToken={playbackStartToken}
                     onBack={handleClosePlayer}
                     onNext={() => {
                         const currentIndex = mediaFiles.findIndex(m => m.id === playingMedia.id)
@@ -2987,6 +3157,7 @@ function AppContent() {
                         if (hasNext) {
                             const nextMedia = mediaFiles[currentIndex + 1]
                             setPlayingMedia(nextMedia)
+                            setPlaybackStartToken((prev) => prev + 1)
                             setSelectedMediaIds([nextMedia.id])
                             setLastSelectedId(nextMedia.id)
                             updateLastPlayed(nextMedia.id)
@@ -2998,6 +3169,7 @@ function AppContent() {
                         if (hasPrev) {
                             const prevMedia = mediaFiles[currentIndex - 1]
                             setPlayingMedia(prevMedia)
+                            setPlaybackStartToken((prev) => prev + 1)
                             setSelectedMediaIds([prevMedia.id])
                             setLastSelectedId(prevMedia.id)
                             updateLastPlayed(prevMedia.id)
@@ -3020,6 +3192,7 @@ function AppContent() {
                         if (mediaFiles.length > 0) {
                             const firstMedia = mediaFiles[0]
                             setPlayingMedia(firstMedia)
+                            setPlaybackStartToken((prev) => prev + 1)
                             setSelectedMediaIds([firstMedia.id])
                             setLastSelectedId(firstMedia.id)
                             updateLastPlayed(firstMedia.id)
@@ -3351,6 +3524,7 @@ function AppContent() {
                     onPlay={(media) => {
                         saveCurrentLibraryScrollPosition()
                         setPlayingMedia(media)
+                        setPlaybackStartToken((prev) => prev + 1)
                         setSelectedMediaIds([media.id])
                         setLastSelectedId(media.id)
                         updateLastPlayed(media.id)
@@ -3361,6 +3535,7 @@ function AppContent() {
                     onRestoreFiles={restoreFilesFromTrash}
                     onDeletePermanently={deletePermanently}
                     onDeleteFilesPermanently={deleteFilesPermanently}
+                    onRequestPermanentDeleteConfirmation={(ids: number[]) => setDeleteConfirmIds(ids)}
                     onClose={handleCloseInspector}
                     onRenameMedia={renameMedia}
                     onUpdateRating={updateRating}
@@ -3398,6 +3573,7 @@ function AppContent() {
                             <h3>{tr('アップデート完了', 'Update Complete')}</h3>
                         </div>
                         <div className="app-modal-body">
+                            <p>{`🎉 version ${releaseNotesModal.version} updated`}</p>
                             <p>{tr(`バージョン ${releaseNotesModal.version} に更新されました。`, `Updated to version ${releaseNotesModal.version}.`)}</p>
                             <div className="release-notes-content">
                                 {releaseNotesModal.releaseNotes || tr('変更履歴は取得できませんでした。', 'Release notes could not be loaded.')}
@@ -3423,6 +3599,7 @@ function AppContent() {
                     onOpenDefault={handleOpenDefault}
                     onOpenWith={handleOpenWith}
                     onShowInExplorer={handleShowInExplorer}
+                    onArmShellAction={armContextMenuShellAction}
                     onAddToFolder={handleAddToFolder}
                     availableLibraries={availableLibraries}
                     remoteLibraries={clientConfig?.remoteLibraries || []}
@@ -3496,14 +3673,11 @@ function AppContent() {
                     cancelLabel={i18nT(uiLanguage, 'common.cancel')}
                     isDestructive={true}
                     onConfirm={async () => {
-                        if (filterOptions.filterType === 'trash') {
-                            await deleteFilesPermanently(deleteConfirmIds)
-                        } else {
-                            await moveFilesToTrash(deleteConfirmIds)
-                        }
+                        const ids = [...deleteConfirmIds]
+                        setDeleteConfirmIds([])
+                        await deleteFilesPermanently(ids)
                         setSelectedMediaIds([])
                         setLastSelectedId(null)
-                        setDeleteConfirmIds([])
                     }}
                     onCancel={() => setDeleteConfirmIds([])}
                 />

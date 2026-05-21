@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react'
 import { MediaFile } from '@obscura/core'
 import { MediaCard } from './MediaCard'
-import { api } from '../api'
+import { showItemInFolderFromUserAction } from '../utils/tauriDesktopBridge'
 import './DuplicateResultModal.css'
 
 interface DuplicateResultModalProps {
@@ -32,10 +32,10 @@ const DuplicateGroup = ({ group }: { group: MediaFile[] }) => {
                     <div key={media.id} className="duplicate-item-wrapper">
                         <MediaCard
                             media={media}
-                            onClick={() => {
+                            onClick={async () => {
                                 // 選択ロジックなどを入れるならここ
                                 // 現状は確認用なので、クリックしたらエクスプローラーで開くなどが便利かも
-                                api.showItemInFolder(media.file_path)
+                                await showItemInFolderFromUserAction(media.file_path)
                             }}
                             onDoubleClick={() => { }}
                             onContextMenu={() => { }}

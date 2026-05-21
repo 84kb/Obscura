@@ -1,5 +1,6 @@
 import { ObscuraPlugin, AppSettings, MediaFile, PlayerOverlayContext, ObscuraAPI } from '@obscura/core';
 import { api } from './index';
+import { openPathFromUserAction } from '../utils/tauriDesktopBridge';
 
 const ENABLE_PLUGIN_SCRIPT_FETCH = true;
 const ENABLE_PLUGIN_SCRIPT_EXECUTION = true;
@@ -29,7 +30,6 @@ const loadAssociatedDataCached = async (mediaFilePath: string) => {
 
 export function initializePluginSystem() {
     if (window.ObscuraAPI) {
-        console.warn('[PluginSystem] ObscuraAPI is already initialized.');
         return;
     }
 
@@ -218,7 +218,7 @@ export function initializePluginSystem() {
                 return await loadAssociatedDataCached(mediaFilePath);
             },
             openPath: async (path: string) => {
-                await api.openPath(path);
+                await openPathFromUserAction(path);
             },
             openExternal: async (url: string) => {
                 await api.openExternal(url);
@@ -254,6 +254,15 @@ export function initializePluginSystem() {
 
 
     console.log('[PluginSystem] window.ObscuraAPI initialized.');
+}
+
+const hot = (import.meta as ImportMeta & { hot?: { dispose: (callback: () => void) => void } }).hot
+
+if (hot) {
+    hot.dispose(() => {
+        delete (window as any).ObscuraAPI;
+        delete (window as any).__obscura_player_overlays;
+    });
 }
 
 /**

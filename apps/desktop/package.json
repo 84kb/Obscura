@@ -1,6 +1,6 @@
 {
   "name": "@obscura/desktop",
-  "version": "0.8.18",
+  "version": "0.8.22",
   "private": true,
   "main": "dist-tauri/index.html",
   "scripts": {

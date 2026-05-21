@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useContext, useCallback, useMemo, useState, u
 import { TableVirtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { MediaFile, ViewSettings, FilterOptions } from '@obscura/core'
 import { formatSize, formatDate } from '../utils/format'
-import { toMediaUrl } from '../utils/fileUrl'
+import { createObjectUrlFromLocalImagePath, isLocalAssetUrl, toThumbnailUrl } from '../utils/fileUrl'
 import { enqueueThumbnailLoad } from '../utils/thumbnailLoadQueue'
 import { ShortcutContext, useShortcut } from '../contexts/ShortcutContext'
 import { api } from '../api'
@@ -88,6 +88,12 @@ const ListThumbnail: React.FC<{ media: MediaFile, thumbnailMode: 'speed' | 'qual
     const [src, setSrc] = useState<string | null>(null);
     const [isLoaded, setIsLoaded] = useState(false);
     const pendingThumbnailLoadRef = useRef<{ release: () => void, cancel: () => void } | null>(null);
+    const objectUrlRef = useRef<string | null>(null);
+    const objectUrlCleanupTimerRef = useRef<number | null>(null);
+    const releasePendingThumbnailLoad = () => {
+        pendingThumbnailLoadRef.current?.release()
+        pendingThumbnailLoadRef.current = null
+    }
 
     useEffect(() => {
         pendingThumbnailLoadRef.current?.cancel()
@@ -106,16 +112,54 @@ const ListThumbnail: React.FC<{ media: MediaFile, thumbnailMode: 'speed' | 'qual
         if (!media.thumbnail_path) return
 
         // Use pre-generated thumbnail directly. Avoid runtime resize query.
-        const resolved = toMediaUrl(media.thumbnail_path)
-        listThumbnailUrlCache.set(cacheKey, resolved)
+        const resolved = toThumbnailUrl(media.thumbnail_path)
+        const revokeObjectUrl = () => {
+            if (objectUrlCleanupTimerRef.current !== null) {
+                window.clearTimeout(objectUrlCleanupTimerRef.current)
+                objectUrlCleanupTimerRef.current = null
+            }
+            if (objectUrlRef.current) {
+                const staleUrl = objectUrlRef.current
+                objectUrlRef.current = null
+                objectUrlCleanupTimerRef.current = window.setTimeout(() => {
+                    URL.revokeObjectURL(staleUrl)
+                    objectUrlCleanupTimerRef.current = null
+                }, 30000)
+            }
+        }
 
         pendingThumbnailLoadRef.current = enqueueThumbnailLoad(() => {
-            setSrc(resolved)
+            if (!isLocalAssetUrl(resolved)) {
+                listThumbnailUrlCache.set(cacheKey, resolved)
+                setSrc(resolved)
+                releasePendingThumbnailLoad()
+                return
+            }
+
+            void createObjectUrlFromLocalImagePath(media.thumbnail_path)
+                .then((safeUrl) => {
+                    if (!safeUrl) {
+                        releasePendingThumbnailLoad()
+                        return
+                    }
+                    revokeObjectUrl()
+                    if (safeUrl !== resolved) {
+                        objectUrlRef.current = safeUrl
+                    }
+                    setSrc(safeUrl)
+                    releasePendingThumbnailLoad()
+                })
+                .catch((error) => {
+                    console.warn('[LibraryList] Failed to resolve safe thumbnail URL:', error)
+                    setSrc(null)
+                    releasePendingThumbnailLoad()
+                })
         })
 
         return () => {
             pendingThumbnailLoadRef.current?.cancel()
             pendingThumbnailLoadRef.current = null
+            revokeObjectUrl()
         }
     }, [media.id, media.thumbnail_path, thumbnailMode]);
 
@@ -135,6 +179,7 @@ const ListThumbnail: React.FC<{ media: MediaFile, thumbnailMode: 'speed' | 'qual
                     src={src}
                     alt=""
                     className="list-view-thumbnail"
+                    draggable={false}
                     loading="lazy"
                     style={{
                         position: 'absolute',
@@ -148,12 +193,11 @@ const ListThumbnail: React.FC<{ media: MediaFile, thumbnailMode: 'speed' | 'qual
                     }}
                     onLoad={() => {
                         setIsLoaded(true)
-                        pendingThumbnailLoadRef.current?.release()
-                        pendingThumbnailLoadRef.current = null
+                        releasePendingThumbnailLoad()
                     }}
+                    onDragStart={(e) => e.preventDefault()}
                     onError={() => {
-                        pendingThumbnailLoadRef.current?.release()
-                        pendingThumbnailLoadRef.current = null
+                        releasePendingThumbnailLoad()
                     }}
                 />
             )}
@@ -405,22 +449,89 @@ export const LibraryList: React.FC<LibraryListProps> = ({
                     onClick={(e) => context.onSelect(media, e)}
                     onDoubleClick={() => context.onDoubleClick(media)}
                     onContextMenu={(e) => context.onContextMenu(media, e)}
-                    draggable={true}
-                    onDragStart={(e) => {
-                        const dragIds = isSelected ? context.selectedIds : [media.id]
-                        if (e.shiftKey) {
-                            e.stopPropagation()
+                    draggable={false}
+                    onMouseDown={(e) => {
+                        if (e.button !== 0) return
+                        const row = e.currentTarget as HTMLTableRowElement
+                        row.draggable = false
+                        row.dataset.dragArmed = '0'
+                        row.dataset.dragStartX = String(e.clientX)
+                        row.dataset.dragStartY = String(e.clientY)
+                    }}
+                    onMouseMove={(e) => {
+                        if ((e.buttons & 1) !== 1) return
+                        const row = e.currentTarget as HTMLTableRowElement
+                        if (row.dataset.nativeDragStarted === '1') return
+                        if (row.dataset.dragArmed === '1') return
+                        const startX = Number(row.dataset.dragStartX)
+                        const startY = Number(row.dataset.dragStartY)
+                        if (!Number.isFinite(startX) || !Number.isFinite(startY)) return
+                        if (Math.hypot(e.clientX - startX, e.clientY - startY) < 6) return
+
+                        const wantsNativeFileDrag = e.altKey && !e.shiftKey
+                        if (wantsNativeFileDrag) {
+                            row.dataset.nativeDragStarted = '1'
+                            const dragIds = isSelected ? context.selectedIds : [media.id]
                             onInternalDragStart?.(dragIds)
-                            e.dataTransfer.effectAllowed = 'move'
-                            e.dataTransfer.dropEffect = 'move'
-                            e.dataTransfer.setData('application/x-obscura-media-ids', JSON.stringify(dragIds))
+                            api.startDrag([media.file_path])
+                            window.setTimeout(() => {
+                                row.draggable = false
+                                delete row.dataset.dragArmed
+                                delete row.dataset.obscuraAllowNativeDrag
+                                delete row.dataset.nativeDragStarted
+                                delete row.dataset.dragStartX
+                                delete row.dataset.dragStartY
+                                onInternalDragEnd?.()
+                            }, 0)
                             return
                         }
-                        e.preventDefault()
-                        onInternalDragStart?.(dragIds)
-                        api.startDrag([media.file_path])
+
+                        if (!e.shiftKey) {
+                            return
+                        }
+
+                        row.dataset.dragArmed = '1'
+                        row.dataset.obscuraAllowNativeDrag = '1'
+                        row.draggable = true
                     }}
-                    onDragEnd={() => {
+                    onMouseUp={(e) => {
+                        const row = e.currentTarget as HTMLTableRowElement
+                        row.draggable = false
+                        delete row.dataset.dragArmed
+                        delete row.dataset.obscuraAllowNativeDrag
+                        delete row.dataset.dragStartX
+                        delete row.dataset.dragStartY
+                    }}
+                    onMouseLeave={(e) => {
+                        if ((e.buttons & 1) === 1) return
+                        const row = e.currentTarget as HTMLTableRowElement
+                        row.draggable = false
+                        delete row.dataset.dragArmed
+                        delete row.dataset.obscuraAllowNativeDrag
+                        delete row.dataset.dragStartX
+                        delete row.dataset.dragStartY
+                    }}
+                    onDragStart={(e) => {
+                        const row = e.currentTarget as HTMLTableRowElement
+                        if (row.dataset.dragArmed !== '1' || !e.shiftKey) {
+                            e.preventDefault()
+                            return
+                        }
+                        const dragIds = isSelected ? context.selectedIds : [media.id]
+                        e.stopPropagation()
+                        onInternalDragStart?.(dragIds)
+                        e.dataTransfer.effectAllowed = 'move'
+                        e.dataTransfer.dropEffect = 'move'
+                        e.dataTransfer.setData('application/x-obscura-media-ids', JSON.stringify(dragIds))
+                    }}
+                    onDragEnd={(e) => {
+                        const row = e.currentTarget as HTMLTableRowElement
+                        row.draggable = false
+                        delete row.dataset.dragArmed
+                        delete row.dataset.obscuraAllowNativeDrag
+                        delete row.dataset.nativeDragStarted
+                        delete row.dataset.dragStartX
+                        delete row.dataset.dragStartY
                         onInternalDragEnd?.()
                     }}
                 />

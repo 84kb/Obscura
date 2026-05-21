@@ -1,5 +1,10 @@
 ﻿#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use async_trait::async_trait;
+use discord_sdk::{
+    activity::{ActivityBuilder, ActivityKind, Assets, Button},
+    Discord, DiscordApp, DiscordMsg, Event, Subscriptions,
+};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
@@ -9,14 +14,19 @@ use std::sync::{
     Arc, Mutex,
 };
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
 use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source};
+use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow, Window};
+use tauri::{plugin::Builder as TauriPluginBuilder, AppHandle, Emitter, Manager, State, WebviewWindow, Window};
+use tokio::sync::{Mutex as AsyncMutex, Notify};
+
+const DISCORD_CLIENT_ID: i64 = 1462710290322952234;
+const DISCORD_RUST_PATH_COOLDOWN_MS: u64 = 30_000;
 
 #[derive(Serialize)]
 struct BasicResult {
@@ -55,8 +65,89 @@ struct NativeAudioState {
     desired_volume: Mutex<f32>,
 }
 
+struct DiscordPresenceState {
+    client: AsyncMutex<Option<Discord>>,
+    command_lock: AsyncMutex<()>,
+    rust_path_cooldown_until: AsyncMutex<Option<Instant>>,
+    ready: Arc<AtomicBool>,
+    ready_notify: Arc<Notify>,
+}
+
+struct DiscordPresenceHandler {
+    ready: Arc<AtomicBool>,
+    ready_notify: Arc<Notify>,
+}
+
+#[async_trait]
+impl discord_sdk::DiscordHandler for DiscordPresenceHandler {
+    async fn on_message(&self, msg: DiscordMsg) {
+        match msg {
+            DiscordMsg::Event(Event::Ready(_)) => {
+                self.ready.store(true, Ordering::SeqCst);
+                self.ready_notify.notify_waiters();
+            }
+            DiscordMsg::Event(Event::Disconnected { .. }) => {
+                self.ready.store(false, Ordering::SeqCst);
+                self.ready_notify.notify_waiters();
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Default for DiscordPresenceState {
+    fn default() -> Self {
+        Self {
+            client: AsyncMutex::new(None),
+            command_lock: AsyncMutex::new(()),
+            rust_path_cooldown_until: AsyncMutex::new(None),
+            ready: Arc::new(AtomicBool::new(false)),
+            ready_notify: Arc::new(Notify::new()),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct DiscordActivityButtonPayload {
+    label: Option<String>,
+    url: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct DiscordActivityPayload {
+    kind: Option<String>,
+    details: Option<String>,
+    state: Option<String>,
+    start_timestamp: Option<i64>,
+    end_timestamp: Option<i64>,
+    large_image_key: Option<String>,
+    large_image_text: Option<String>,
+    small_image_key: Option<String>,
+    small_image_text: Option<String>,
+    instance: Option<bool>,
+    buttons: Option<Vec<DiscordActivityButtonPayload>>,
+}
+
 fn emit_audio_event<T: Serialize + Clone>(app: &AppHandle, event: &str, payload: T) {
     let _ = app.emit(event, payload);
+}
+
+fn append_discord_presence_log(app: &AppHandle, line: &str) {
+    let base_dir = match app.path().app_data_dir() {
+        Ok(path) => path,
+        Err(_) => return,
+    };
+    if fs::create_dir_all(&base_dir).is_err() {
+        return;
+    }
+    let path = base_dir.join("discord-presence.log");
+    let message = format!("{line}\n");
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut file| file.write_all(message.as_bytes()));
 }
 
 fn stop_native_audio_locked(playback: &mut Option<NativeAudioPlayback>) {
@@ -251,6 +342,282 @@ async fn native_audio_set_volume(
         playback.sink.set_volume(normalized);
     }
     Ok(())
+}
+
+fn parse_discord_activity_kind(kind: Option<&str>) -> ActivityKind {
+    match kind
+        .map(|value| value.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("listening") => ActivityKind::Listening,
+        Some("watching") => ActivityKind::Watching,
+        Some("competing") => ActivityKind::Competing,
+        Some("streaming") => ActivityKind::Streaming,
+        _ => ActivityKind::Playing,
+    }
+}
+
+fn normalize_discord_text(value: Option<&str>) -> Option<String> {
+    let trimmed = value?.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn normalize_discord_timestamp(timestamp: Option<i64>) -> Option<i64> {
+    let raw = timestamp?;
+    if raw <= 0 {
+        return None;
+    }
+
+    if raw >= 1_000_000_000_000 {
+        Some(raw / 1000)
+    } else {
+        Some(raw)
+    }
+}
+
+fn build_discord_button(payload: &DiscordActivityButtonPayload) -> Option<Button> {
+    let label = normalize_discord_text(payload.label.as_deref())?;
+    let url = normalize_discord_text(payload.url.as_deref())?;
+    Some(Button { label, url })
+}
+
+fn build_discord_activity(payload: &DiscordActivityPayload) -> ActivityBuilder {
+    let mut builder = ActivityBuilder::new().kind(parse_discord_activity_kind(payload.kind.as_deref()));
+
+    if let Some(details) = normalize_discord_text(payload.details.as_deref()) {
+        builder = builder.details(details);
+    }
+
+    if let Some(state) = normalize_discord_text(payload.state.as_deref()) {
+        builder = builder.state(state);
+    }
+
+    if let Some(start_timestamp) = normalize_discord_timestamp(payload.start_timestamp) {
+        builder = builder.start_timestamp(start_timestamp);
+    }
+
+    if let Some(end_timestamp) = normalize_discord_timestamp(payload.end_timestamp) {
+        builder = builder.end_timestamp(end_timestamp);
+    }
+
+    let mut assets = Assets::default();
+    if let Some(key) = normalize_discord_text(payload.large_image_key.as_deref()) {
+        assets = assets.large(key, normalize_discord_text(payload.large_image_text.as_deref()));
+    }
+    if let Some(key) = normalize_discord_text(payload.small_image_key.as_deref()) {
+        assets = assets.small(key, normalize_discord_text(payload.small_image_text.as_deref()));
+    }
+    if assets.large_image.is_some() || assets.small_image.is_some() {
+        builder = builder.assets(assets);
+    }
+
+    builder = builder.instance(payload.instance.unwrap_or(false));
+
+    if let Some(buttons) = payload.buttons.as_ref() {
+        for button in buttons.iter().filter_map(build_discord_button).take(2) {
+            builder = builder.button(button);
+        }
+    }
+
+    builder
+}
+
+async fn get_or_connect_discord_client(
+    discord_state: &DiscordPresenceState,
+) -> Result<(), String> {
+    let mut guard = discord_state.client.lock().await;
+    if guard.is_some() {
+        return Ok(());
+    }
+
+    discord_state.ready.store(false, Ordering::SeqCst);
+    *guard = Some(
+        Discord::new(
+            DiscordApp::PlainId(DISCORD_CLIENT_ID),
+            Subscriptions::ACTIVITY,
+            Box::new(DiscordPresenceHandler {
+                ready: discord_state.ready.clone(),
+                ready_notify: discord_state.ready_notify.clone(),
+            }),
+        )
+        .map_err(|e| format!("failed to initialize discord presence: {e}"))?,
+    );
+
+    Ok(())
+}
+
+async fn wait_for_discord_ready(discord_state: &DiscordPresenceState) -> Result<(), String> {
+    if discord_state.ready.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+
+    let notified = discord_state.ready_notify.notified();
+    if discord_state.ready.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+
+    tokio::time::timeout(Duration::from_millis(3500), notified)
+        .await
+        .map_err(|_| "discord presence ready handshake timed out".to_string())?;
+
+    if discord_state.ready.load(Ordering::SeqCst) {
+        Ok(())
+    } else {
+        Err("discord presence disconnected before ready".to_string())
+    }
+}
+
+async fn disconnect_discord_client(discord_state: &DiscordPresenceState) {
+    discord_state.ready.store(false, Ordering::SeqCst);
+    discord_state.ready_notify.notify_waiters();
+    let client = {
+        let mut guard = discord_state.client.lock().await;
+        guard.take()
+    };
+
+    if let Some(client) = client {
+        let _ = tokio::time::timeout(Duration::from_millis(750), client.clear_activity()).await;
+        let _ = tokio::time::timeout(Duration::from_millis(750), client.disconnect()).await;
+    }
+}
+
+async fn is_discord_rust_path_in_cooldown(discord_state: &DiscordPresenceState) -> bool {
+    let guard = discord_state.rust_path_cooldown_until.lock().await;
+    guard.as_ref().is_some_and(|until| Instant::now() < *until)
+}
+
+async fn arm_discord_rust_path_cooldown(discord_state: &DiscordPresenceState) {
+    let mut guard = discord_state.rust_path_cooldown_until.lock().await;
+    *guard = Some(Instant::now() + Duration::from_millis(DISCORD_RUST_PATH_COOLDOWN_MS));
+}
+
+async fn clear_discord_rust_path_cooldown(discord_state: &DiscordPresenceState) {
+    let mut guard = discord_state.rust_path_cooldown_until.lock().await;
+    *guard = None;
+}
+
+fn take_discord_client_nowait(discord_state: &DiscordPresenceState) -> Option<Discord> {
+    discord_state.client.try_lock().ok().and_then(|mut guard| guard.take())
+}
+
+async fn update_discord_activity_once(
+    discord_state: &DiscordPresenceState,
+    payload: &DiscordActivityPayload,
+) -> Result<(), String> {
+    get_or_connect_discord_client(discord_state).await?;
+    wait_for_discord_ready(discord_state).await?;
+    let guard = discord_state.client.lock().await;
+    let client = guard
+        .as_ref()
+        .ok_or_else(|| "discord presence client not available".to_string())?;
+    tokio::time::timeout(
+        Duration::from_millis(1500),
+        client.update_activity(build_discord_activity(payload)),
+    )
+        .await
+        .map_err(|_| "discord presence update timed out".to_string())?
+        .map(|_| ())
+        .map_err(|e| format!("failed to update discord presence: {e}"))
+}
+
+#[tauri::command]
+async fn discord_update_activity(
+    app: AppHandle,
+    discord_state: State<'_, DiscordPresenceState>,
+    enabled: bool,
+    activity: Option<DiscordActivityPayload>,
+) -> Result<bool, String> {
+    let _command_guard = discord_state
+        .command_lock
+        .try_lock()
+        .map_err(|_| "discord rust path busy".to_string())?;
+    append_discord_presence_log(&app, &format!("[discord_update_activity] enabled={enabled}"));
+    if !enabled {
+        let guard = discord_state.client.lock().await;
+        if let Some(client) = guard.as_ref() {
+            let _ = client.clear_activity().await;
+        }
+        append_discord_presence_log(&app, "[discord_update_activity] skipped because disabled");
+        return Ok(true);
+    }
+
+    let payload = activity.unwrap_or(DiscordActivityPayload {
+        kind: None,
+        details: None,
+        state: None,
+        start_timestamp: None,
+        end_timestamp: None,
+        large_image_key: None,
+        large_image_text: None,
+        small_image_key: None,
+        small_image_text: None,
+        instance: None,
+        buttons: None,
+    });
+
+    append_discord_presence_log(
+        &app,
+        &format!(
+            "[discord_update_activity] sending kind={:?} details={:?} state={:?} start={:?} end={:?} instance={:?} button_count={}",
+            payload.kind,
+            payload.details,
+            payload.state,
+            normalize_discord_timestamp(payload.start_timestamp),
+            normalize_discord_timestamp(payload.end_timestamp),
+            payload.instance,
+            payload.buttons.as_ref().map(|buttons| buttons.len()).unwrap_or(0)
+        ),
+    );
+    if is_discord_rust_path_in_cooldown(&discord_state).await {
+        append_discord_presence_log(
+            &app,
+            "[discord_update_activity] rust path cooldown active, delegating to frontend sidecar fallback",
+        );
+        return Err("discord rust path cooldown active".to_string());
+    }
+    if let Err(first_error) = update_discord_activity_once(&discord_state, &payload).await {
+        append_discord_presence_log(
+            &app,
+            &format!("[discord_update_activity] first attempt failed, reconnecting: {first_error}"),
+        );
+        disconnect_discord_client(&discord_state).await;
+        if let Err(second_error) = update_discord_activity_once(&discord_state, &payload).await {
+            append_discord_presence_log(
+                &app,
+                &format!("[discord_update_activity] second attempt failed, retrying with sidecar-like payload: {second_error}"),
+            );
+            disconnect_discord_client(&discord_state).await;
+            arm_discord_rust_path_cooldown(&discord_state).await;
+            return Err(second_error);
+        }
+    }
+    clear_discord_rust_path_cooldown(&discord_state).await;
+    append_discord_presence_log(&app, "[discord_update_activity] success");
+    Ok(true)
+}
+
+#[tauri::command]
+async fn discord_clear_activity(
+    app: AppHandle,
+    discord_state: State<'_, DiscordPresenceState>,
+) -> Result<bool, String> {
+    append_discord_presence_log(&app, "[discord_clear_activity] requested");
+    let guard = discord_state.client.lock().await;
+    if let Some(client) = guard.as_ref() {
+        client
+            .clear_activity()
+            .await
+            .map_err(|e| format!("failed to clear discord presence: {e}"))?;
+        append_discord_presence_log(&app, "[discord_clear_activity] success");
+    } else {
+        append_discord_presence_log(&app, "[discord_clear_activity] skipped because client missing");
+    }
+
+    Ok(true)
 }
 
 fn client_config_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -502,6 +869,24 @@ fn sidecar_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(sidecar_dir)
 }
 
+fn append_webview_guard_log(app: &AppHandle, line: &str) {
+    let Ok(base_dir) = app.path().app_data_dir() else {
+        return;
+    };
+
+    if !base_dir.exists() && fs::create_dir_all(&base_dir).is_err() {
+        return;
+    }
+
+    let log_path = base_dir.join("webview-navigation.log");
+    let message = format!("{line}\n");
+    let _ = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+        .and_then(|mut file| file.write_all(message.as_bytes()));
+}
+
 fn ensure_sidecar_running(app: &AppHandle, state: &SidecarState) -> Result<(), String> {
     let mut guard = state
         .process
@@ -624,8 +1009,7 @@ async fn sidecar_start(app: AppHandle, sidecar: State<'_, SidecarState>) -> Resu
     })
 }
 
-#[tauri::command]
-async fn sidecar_stop(sidecar: State<'_, SidecarState>) -> Result<BasicResult, String> {
+fn stop_sidecar_process(sidecar: &SidecarState) -> Result<(), String> {
     let mut guard = sidecar
         .process
         .lock()
@@ -636,9 +1020,15 @@ async fn sidecar_stop(sidecar: State<'_, SidecarState>) -> Result<BasicResult, S
             .child
             .kill()
             .map_err(|e| format!("failed to kill sidecar: {e}"))?;
-        let _ = proc_ref.child.wait();
         *guard = None;
     }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn sidecar_stop(sidecar: State<'_, SidecarState>) -> Result<BasicResult, String> {
+    stop_sidecar_process(&sidecar)?;
 
     Ok(BasicResult {
         success: true,
@@ -783,7 +1173,18 @@ fn window_toggle_maximize(window: Window) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn window_close(window: Window) -> Result<(), String> {
+fn window_close(
+    window: Window,
+    sidecar: State<'_, SidecarState>,
+    discord_state: State<'_, DiscordPresenceState>,
+) -> Result<(), String> {
+    if let Some(client) = take_discord_client_nowait(&discord_state) {
+        tauri::async_runtime::spawn(async move {
+            let _ = tokio::time::timeout(Duration::from_millis(750), client.clear_activity()).await;
+            let _ = tokio::time::timeout(Duration::from_millis(750), client.disconnect()).await;
+        });
+    }
+    let _ = stop_sidecar_process(&sidecar);
     window.close().map_err(|e| e.to_string())
 }
 
@@ -822,10 +1223,58 @@ fn main() {
     tauri::Builder::default()
         .manage(SidecarState::default())
         .manage(NativeAudioState::default())
+        .manage(DiscordPresenceState::default())
         .setup(|app| {
             let _ = sidecar_start(app.handle().clone(), app.state::<SidecarState>());
             Ok(())
         })
+        .plugin(
+            TauriPluginBuilder::<tauri::Wry>::new("webview-navigation-guard")
+                .on_navigation(|webview, url| {
+                    let scheme = url.scheme().to_ascii_lowercase();
+                    let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
+                    let path = url.path().to_ascii_lowercase();
+                    let looks_like_media_asset = (scheme == "file"
+                        || ((scheme == "http" || scheme == "https") && host == "asset.localhost"))
+                        && [
+                            ".mp4",
+                            ".m4v",
+                            ".mov",
+                            ".mkv",
+                            ".webm",
+                            ".avi",
+                            ".wmv",
+                            ".mp3",
+                            ".wav",
+                            ".flac",
+                            ".aac",
+                            ".ogg",
+                            ".m4a",
+                        ]
+                        .iter()
+                        .any(|ext| path.ends_with(ext));
+
+                    if looks_like_media_asset {
+                        append_webview_guard_log(
+                            &webview.app_handle(),
+                            &format!(
+                                "[webview-navigation-guard] blocked media navigation on webview '{}' => {}",
+                                webview.label(),
+                                url
+                            ),
+                        );
+                        eprintln!(
+                            "[webview-navigation-guard] blocked media navigation on webview '{}' => {}",
+                            webview.label(),
+                            url
+                        );
+                        return false;
+                    }
+
+                    true
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -848,6 +1297,8 @@ fn main() {
             native_audio_stop,
             native_audio_seek,
             native_audio_set_volume,
+            discord_update_activity,
+            discord_clear_activity,
             read_client_config,
             write_client_config,
         ])

@@ -2,6 +2,7 @@
 import React from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { t as i18nT, AppLanguage } from '../i18n'
+import { toThumbnailUrl } from '../utils/fileUrl'
 
 // --- Types ---
 export interface InspectorSectionProps {
@@ -398,7 +399,7 @@ export const PlaylistSectionContent = ({
                     >
                         <div className="playlist-thumbnail">
                             {item.thumbnail_path ? (
-                                <img src={toMediaUrl(item.thumbnail_path)} alt={item.file_name} />
+                                <img src={toThumbnailUrl(item.thumbnail_path)} alt={item.file_name} draggable={false} onDragStart={(e) => e.preventDefault()} />
                             ) : (
                                 <div className="playlist-placeholder">
                                     <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
@@ -470,7 +471,7 @@ export const RelationSectionContent = ({
                         <div key={parent.id} className="relation-item-card">
                             <div className="relation-thumbnail" onClick={() => onSelectMedia(parent)}>
                                 {parent.thumbnail_path ? (
-                                    <img src={toMediaUrl(parent.thumbnail_path)} alt="" />
+                                    <img src={toThumbnailUrl(parent.thumbnail_path)} alt="" draggable={false} onDragStart={(e) => e.preventDefault()} />
                                 ) : (
                                     <div className="relation-placeholder">No Img</div>
                                 )}
@@ -504,7 +505,7 @@ export const RelationSectionContent = ({
                         <div key={child.id} className="relation-item-card small">
                             <div className="relation-thumbnail" onClick={() => onSelectMedia(child)}>
                                 {child.thumbnail_path ? (
-                                    <img src={toMediaUrl(child.thumbnail_path)} alt="" />
+                                    <img src={toThumbnailUrl(child.thumbnail_path)} alt="" draggable={false} onDragStart={(e) => e.preventDefault()} />
                                 ) : (
                                     <div className="relation-placeholder"></div>
                                 )}
@@ -643,7 +644,7 @@ export const MediaPicker = ({
                         <div key={item.id} className="picker-result-item">
                             <div className="picker-result-thumbnail">
                                 {item.thumbnail_path ? (
-                                    <img src={toMediaUrl(item.thumbnail_path)} alt="" />
+                                    <img src={toThumbnailUrl(item.thumbnail_path)} alt="" draggable={false} onDragStart={(e) => e.preventDefault()} />
                                 ) : (
                                     <div className="picker-thumbnail-placeholder" />
                                 )}

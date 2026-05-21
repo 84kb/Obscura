@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { MediaFile } from '@obscura/core'
 import { api } from '../api'
-import { toMediaUrl } from '../utils/fileUrl'
+import { toThumbnailUrl } from '../utils/fileUrl'
 // Reuse existing styles to match the standard duplicate warning
 import './DuplicateModal.css'
 
@@ -62,8 +62,8 @@ export const DuplicateResolutionModal: React.FC<DuplicateResolutionModalProps> =
         return null
     }
 
-    const thumbA = toMediaUrl(fileA.thumbnail_path)
-    const thumbB = toMediaUrl(fileB.thumbnail_path)
+    const thumbA = toThumbnailUrl(fileA.thumbnail_path)
+    const thumbB = toThumbnailUrl(fileB.thumbnail_path)
 
     const handleConfirm = async () => {
         if (isProcessing) return
@@ -118,7 +118,7 @@ export const DuplicateResolutionModal: React.FC<DuplicateResolutionModalProps> =
                     >
                         <div className="preview-container">
                             {thumbA ? (
-                                <img src={thumbA} alt="File A" />
+                                <img src={thumbA} alt="File A" draggable={false} onDragStart={(e) => e.preventDefault()} />
                             ) : (
                                 <div className="no-preview">No Preview</div>
                             )}
@@ -149,7 +149,7 @@ export const DuplicateResolutionModal: React.FC<DuplicateResolutionModalProps> =
                     >
                         <div className="preview-container">
                             {thumbB ? (
-                                <img src={thumbB} alt="File B" />
+                                <img src={thumbB} alt="File B" draggable={false} onDragStart={(e) => e.preventDefault()} />
                             ) : (
                                 <div className="no-preview">No Preview</div>
                             )}
