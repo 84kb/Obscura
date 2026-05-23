@@ -68,6 +68,18 @@ const RELEASE_NOTES: Record<string, ReleaseNotesEntry> = {
         ].join("\n"),
     },
     */
+    "0.8.24": {
+        ja: [
+            "[修正] ライブラリ内のメディアを通常ドラッグしたとき、Discord や X などの外部アプリへネイティブファイルドラッグとして渡せるように修正しました。",
+            "[変更] ライブラリ内のアプリ内ドラッグ&ドロップ操作は Shift を押しながら行う仕様に整理しました。",
+            "[修正] 一覧表示で複数選択したメディアを外部アプリへドラッグした際、選択したファイル一式をまとめて渡すように修正しました。",
+        ].join("\n"),
+        en: [
+            "[Fix] Library media can now be dragged normally into external apps such as Discord and X as native file drags.",
+            "[Change] Internal drag-and-drop within the library is now consistently performed with Shift held.",
+            "[Fix] List view now includes all selected files when dragging media out to external apps.",
+        ].join("\n"),
+    },
     "0.8.23": {
         ja: [
             "[修正] Discord Rich Presence の sidecar 接続を安定化し、`discord-rpc` の固定 pipe 0 依存をやめて、実際に応答している Discord IPC pipe へ接続するようにしました。Discord Canary / PTB 環境でも表示されやすくなります。",

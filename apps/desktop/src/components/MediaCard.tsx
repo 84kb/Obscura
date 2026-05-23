@@ -314,8 +314,8 @@ export function MediaCard({
         if (!Number.isFinite(startX) || !Number.isFinite(startY)) return
         if (Math.hypot(e.clientX - startX, e.clientY - startY) < 6) return
 
-        const wantsNativeFileDrag = e.altKey && !e.shiftKey
-        if (wantsNativeFileDrag) {
+        const wantsInternalDrag = e.shiftKey
+        if (!wantsInternalDrag) {
             element.dataset.nativeDragStarted = '1'
             const dragPaths = onDragGetPaths ? onDragGetPaths(String(media.id)) : [media.file_path]
             const dragMediaIds = onDragGetMediaIds ? onDragGetMediaIds(String(media.id)) : [media.id]
@@ -328,10 +328,6 @@ export function MediaCard({
                 resetDragIntent(element)
                 onInternalDragEnd?.()
             }, 0)
-            return
-        }
-
-        if (!e.shiftKey) {
             return
         }
 

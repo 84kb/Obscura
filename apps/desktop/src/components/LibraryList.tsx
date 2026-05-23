@@ -468,12 +468,16 @@ export const LibraryList: React.FC<LibraryListProps> = ({
                         if (!Number.isFinite(startX) || !Number.isFinite(startY)) return
                         if (Math.hypot(e.clientX - startX, e.clientY - startY) < 6) return
 
-                        const wantsNativeFileDrag = e.altKey && !e.shiftKey
-                        if (wantsNativeFileDrag) {
+                        const wantsInternalDrag = e.shiftKey
+                        if (!wantsInternalDrag) {
                             row.dataset.nativeDragStarted = '1'
                             const dragIds = isSelected ? context.selectedIds : [media.id]
                             onInternalDragStart?.(dragIds)
-                            api.startDrag([media.file_path])
+                            const dragPaths = (isSelected
+                                ? context.mediaFiles.filter((item) => context.selectedIds.includes(item.id))
+                                : [media]
+                            ).map((item) => item.file_path)
+                            api.startDrag(dragPaths)
                             window.setTimeout(() => {
                                 row.draggable = false
                                 delete row.dataset.dragArmed
@@ -483,10 +487,6 @@ export const LibraryList: React.FC<LibraryListProps> = ({
                                 delete row.dataset.dragStartY
                                 onInternalDragEnd?.()
                             }, 0)
-                            return
-                        }
-
-                        if (!e.shiftKey) {
                             return
                         }
 

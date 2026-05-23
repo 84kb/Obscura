@@ -429,6 +429,18 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
         }
     }, [activeRemoteLibrary, activeLibrary, transformRemoteMedia, myUserToken, isUserTokenLoaded, addNotification])
 
+    const waitForMediaLoadIdle = useCallback(async (timeoutMs = 10000) => {
+        const startedAt = Date.now()
+        while (loadingRef.current) {
+            if (Date.now() - startedAt >= timeoutMs) {
+                console.warn('[useLibrary] Timed out waiting for media load to become idle')
+                return false
+            }
+            await new Promise((resolve) => window.setTimeout(resolve, 100))
+        }
+        return true
+    }, [])
+
     const loadMore = useCallback(() => {
         // no-op in full-fetch compatibility mode
     }, [])
@@ -1553,6 +1565,7 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
 
     // ライブラリの再読み込み (ソフトリロード + 再ランダム化)
     const reloadLibrary = useCallback(async () => {
+        await waitForMediaLoadIdle()
         // ランダムモードならシードを更新
         if (filterOptions.filterType === 'random' || filterOptions.sortOrder === 'random') {
             setRandomSeed(Date.now())
@@ -1564,7 +1577,7 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
             loadTags(),
             loadFolders()
         ])
-    }, [filterOptions.filterType, filterOptions.sortOrder, loadMediaFiles, loadTags, loadFolders])
+    }, [filterOptions.filterType, filterOptions.sortOrder, loadMediaFiles, loadTags, loadFolders, waitForMediaLoadIdle])
 
     // ライブラリ統計
     const libraryStats = useMemo(() => {
@@ -1776,6 +1789,7 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
     // 全データの一括更新
     const refreshAll = useCallback(async () => {
         try {
+            await waitForMediaLoadIdle()
             await Promise.all([
                 loadMediaFiles(true),
                 loadTags(),
@@ -1785,7 +1799,7 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
         } catch (e) {
             console.error('Failed to refresh library:', e)
         }
-    }, [loadMediaFiles, loadTags, loadTagGroups, loadFolders])
+    }, [loadMediaFiles, loadTags, loadTagGroups, loadFolders, waitForMediaLoadIdle])
 
     return useMemo(() => ({
         mediaFiles: filteredMediaFiles,
