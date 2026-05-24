@@ -10,6 +10,28 @@ type ReleaseNotesEntry = {
 };
 
 const RELEASE_NOTES: Record<string, ReleaseNotesEntry> = {
+    "0.8.25": {
+        ja: [
+            "[修正] 右クリックコンテキストメニュー全体の表示アニメーションを無効化し、フォルダ・ライブラリアイテムとも表示後に少し上へずれる不自然な挙動をなくしました。",
+            "[修正] コンテキストメニューの表示アニメーション後に位置を再計算するようにし、画面下端付近で下限余白が 0px やマイナスになる場合がある問題を修正しました。",
+            "[修正] ライブラリ内アイテムのコンテキストメニューにもフォルダ右クリックと同じ 4px の下限余白を適用し、タグ・フォルダーピッカーの下限余白も同じ値で統一しました。",
+            "[修正] インスペクターの「ブラウザで開く」をクリック完了待ちではなく押下時点で起動するようにし、外部ブラウザが開くまでの体感遅延を減らしました。",
+            "[修正] ライブラリカードとリスト行のネイティブファイルドラッグで、OS 側のドラッグ開始 Promise が完了するまでドラッグ状態を維持するようにし、`[MediaCard] Starting native drag directly...` が出ても実際のドラッグが始まらないケースを減らしました。",
+            "[変更] `startDrag` のデスクトップ API を非同期完了まで待てる Promise 返却に統一し、ドラッグ開始直後に UI 側が状態を片付けてしまう競合を防ぐようにしました。",
+            "[修正] インスペクターのタグピッカーとフォルダーピッカーが画面下にはみ出す場合に、ライブラリ右クリックメニューと同じ下限余白を保って上方向へ収めるようにしました。",
+            "[変更] ライブラリ切り替えメニューとライブラリ右クリックメニューが画面下端に近い場合でも、ウィンドウ下部に余白を残した位置へ自動調整するようにしました。",
+        ].join("\n"),
+        en: [
+            "[Fix] Disabled open animations for right-click context menus so folder and library item menus no longer shift upward after appearing.",
+            "[Fix] Context menus now recalculate their position after the open animation so bottom padding no longer collapses to 0px or negative values near the window edge.",
+            "[Fix] Applied the same 4px bottom padding to the library item context menu and unified the Inspector tag/folder picker bottom padding with the folder context menu value.",
+            "[Fix] The Inspector `Open in browser` action now fires on pointer press instead of waiting for click completion, reducing perceived delay before the external browser opens.",
+            "[Fix] Native file drags from library cards and list rows now keep drag state alive until the OS drag-start promise settles, reducing cases where `[MediaCard] Starting native drag directly...` appears but no real drag begins.",
+            "[Change] Unified the desktop `startDrag` API to return a Promise so callers can wait for drag startup instead of tearing down UI drag state immediately.",
+            "[Fix] Kept the Inspector tag picker and folder picker inside the viewport by applying the same bottom padding behavior used by library context menus.",
+            "[Change] Library switch menus and library context menus now keep a small gap from the bottom edge instead of pinning flush to the window.",
+        ].join("\n"),
+    },
     /* legacy 0.8.23 notes kept temporarily for cleanup context
     "0.8.23": {
         ja: [

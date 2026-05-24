@@ -461,6 +461,7 @@ export const LibraryList: React.FC<LibraryListProps> = ({
                     onMouseMove={(e) => {
                         if ((e.buttons & 1) !== 1) return
                         const row = e.currentTarget as HTMLTableRowElement
+                        if (row.dataset.nativeDragPending === '1') return
                         if (row.dataset.nativeDragStarted === '1') return
                         if (row.dataset.dragArmed === '1') return
                         const startX = Number(row.dataset.dragStartX)
@@ -470,6 +471,7 @@ export const LibraryList: React.FC<LibraryListProps> = ({
 
                         const wantsInternalDrag = e.shiftKey
                         if (!wantsInternalDrag) {
+                            row.dataset.nativeDragPending = '1'
                             row.dataset.nativeDragStarted = '1'
                             const dragIds = isSelected ? context.selectedIds : [media.id]
                             onInternalDragStart?.(dragIds)
@@ -477,16 +479,16 @@ export const LibraryList: React.FC<LibraryListProps> = ({
                                 ? context.mediaFiles.filter((item) => context.selectedIds.includes(item.id))
                                 : [media]
                             ).map((item) => item.file_path)
-                            api.startDrag(dragPaths)
-                            window.setTimeout(() => {
+                            void api.startDrag(dragPaths).finally(() => {
                                 row.draggable = false
                                 delete row.dataset.dragArmed
                                 delete row.dataset.obscuraAllowNativeDrag
+                                delete row.dataset.nativeDragPending
                                 delete row.dataset.nativeDragStarted
                                 delete row.dataset.dragStartX
                                 delete row.dataset.dragStartY
                                 onInternalDragEnd?.()
-                            }, 0)
+                            })
                             return
                         }
 
@@ -499,6 +501,7 @@ export const LibraryList: React.FC<LibraryListProps> = ({
                         row.draggable = false
                         delete row.dataset.dragArmed
                         delete row.dataset.obscuraAllowNativeDrag
+                        delete row.dataset.nativeDragPending
                         delete row.dataset.dragStartX
                         delete row.dataset.dragStartY
                     }}
@@ -508,6 +511,7 @@ export const LibraryList: React.FC<LibraryListProps> = ({
                         row.draggable = false
                         delete row.dataset.dragArmed
                         delete row.dataset.obscuraAllowNativeDrag
+                        delete row.dataset.nativeDragPending
                         delete row.dataset.dragStartX
                         delete row.dataset.dragStartY
                     }}
@@ -529,6 +533,7 @@ export const LibraryList: React.FC<LibraryListProps> = ({
                         row.draggable = false
                         delete row.dataset.dragArmed
                         delete row.dataset.obscuraAllowNativeDrag
+                        delete row.dataset.nativeDragPending
                         delete row.dataset.nativeDragStarted
                         delete row.dataset.dragStartX
                         delete row.dataset.dragStartY

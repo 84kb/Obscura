@@ -59,6 +59,7 @@ export function MediaCard({
     const pendingThumbnailLoadRef = useRef<{ release: () => void, cancel: () => void } | null>(null)
     const objectUrlRef = useRef<string | null>(null)
     const objectUrlCleanupTimerRef = useRef<number | null>(null)
+    const nativeDragInFlightRef = useRef(false)
     const releasePendingThumbnailLoad = () => {
         pendingThumbnailLoadRef.current?.release()
         pendingThumbnailLoadRef.current = null
@@ -307,6 +308,7 @@ export function MediaCard({
     const handleMouseMove = (e: React.MouseEvent) => {
         if ((e.buttons & 1) !== 1) return
         const element = e.currentTarget as HTMLDivElement
+        if (nativeDragInFlightRef.current) return
         if (element.dataset.nativeDragStarted === '1') return
         if (element.dataset.dragArmed === '1') return
         const startX = Number(element.dataset.dragStartX)
@@ -316,18 +318,23 @@ export function MediaCard({
 
         const wantsInternalDrag = e.shiftKey
         if (!wantsInternalDrag) {
+            nativeDragInFlightRef.current = true
             element.dataset.nativeDragStarted = '1'
             const dragPaths = onDragGetPaths ? onDragGetPaths(String(media.id)) : [media.file_path]
             const dragMediaIds = onDragGetMediaIds ? onDragGetMediaIds(String(media.id)) : [media.id]
             onInternalDragStart?.(dragMediaIds)
             if (api.startDrag) {
                 console.log('[MediaCard] Starting native drag directly with', dragPaths.length, 'files')
-                api.startDrag(dragPaths)
-            }
-            window.setTimeout(() => {
+                void api.startDrag(dragPaths).finally(() => {
+                    nativeDragInFlightRef.current = false
+                    resetDragIntent(element)
+                    onInternalDragEnd?.()
+                })
+            } else {
+                nativeDragInFlightRef.current = false
                 resetDragIntent(element)
                 onInternalDragEnd?.()
-            }, 0)
+            }
             return
         }
 
@@ -337,6 +344,7 @@ export function MediaCard({
     }
 
     const resetDragIntent = (element: HTMLDivElement) => {
+        nativeDragInFlightRef.current = false
         element.draggable = false
         delete element.dataset.dragArmed
         delete element.dataset.obscuraAllowNativeDrag

@@ -102,7 +102,7 @@ export interface IMediaLibraryAPI {
     getAuditLogs(libraryPath?: string): Promise<AuditLogEntry[]>;
 
     // ネイティブファイルドラッグ（同期的）
-    startDrag(filePaths: string[]): void;
+    startDrag(filePaths: string[]): Promise<void>;
 
     // === ネットワーク共有 ===
     // サーバー設定

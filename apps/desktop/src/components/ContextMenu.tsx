@@ -50,6 +50,7 @@ export function ContextMenu({
     onRefreshMetadata,
     onArmShellAction
 }: ContextMenuProps) {
+    const floatingMenuPadding = 4
     const menuRef = useRef<HTMLDivElement>(null)
     const openedAtRef = useRef(typeof performance !== 'undefined' ? performance.now() : Date.now())
     const armedActionRef = useRef<{ id: string; at: number; clientX: number; clientY: number } | null>(null)
@@ -132,7 +133,7 @@ export function ContextMenu({
     }, [onClose])
 
     // メニュー位置を画面内に収める
-    useFloatingPosition(menuRef, x, y, true)
+    useFloatingPosition(menuRef, x, y, true, floatingMenuPadding)
 
     // フォルダーに追加済みかどうか
     const mediaFolderIds = media.folders?.map(f => f.id) || []

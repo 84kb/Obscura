@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { MediaFile, Tag, Folder, MediaComment, SharedUser, ObscuraPlugin, AppSettings, ExtensionInfoRow, ExtensionInspectorSection, ExtensionInspectorSectionBlock } from '@obscura/core'
 import './Inspector.css'
@@ -87,6 +87,7 @@ export function Inspector({
     settings,
     language = 'ja',
 }: InspectorProps) {
+    const pickerViewportPadding = 4
     const { addNotification } = useNotification()
     const tr = (ja: string, en: string) => (language === 'en' ? en : ja)
 
@@ -483,6 +484,30 @@ export function Inspector({
         }
         setShowFolderInput(!showFolderInput)
     }
+
+    useLayoutEffect(() => {
+        if (!showTagInput || !tagPickerRef.current) return
+
+        const rect = tagPickerRef.current.getBoundingClientRect()
+        const adjustedTop = Math.max(
+            pickerViewportPadding,
+            Math.min(rect.top, window.innerHeight - rect.height - pickerViewportPadding)
+        )
+
+        tagPickerRef.current.style.top = `${adjustedTop}px`
+    }, [allTags.length, pickerViewportPadding, showTagInput, tagInput, tagPickerPos])
+
+    useLayoutEffect(() => {
+        if (!showFolderInput || !folderPickerRef.current) return
+
+        const rect = folderPickerRef.current.getBoundingClientRect()
+        const adjustedTop = Math.max(
+            pickerViewportPadding,
+            Math.min(rect.top, window.innerHeight - rect.height - pickerViewportPadding)
+        )
+
+        folderPickerRef.current.style.top = `${adjustedTop}px`
+    }, [allFolders.length, folderInput, folderPickerPos, pickerViewportPadding, showFolderInput])
 
     const formatDate = (dateString: string) => {
         return new Date(dateString).toLocaleString('ja-JP', {
@@ -1253,9 +1278,18 @@ export function Inspector({
                                                 </button>
                                                 <button
                                                     className="url-action-btn"
-                                                    onClick={(e) => {
+                                                    onMouseDown={(e) => {
+                                                        if (e.button !== 0 || !url) return
+                                                        e.preventDefault();
                                                         e.stopPropagation();
-                                                        if (url) api.openExternal(url)
+                                                        void api.openExternal(url)
+                                                    }}
+                                                    onClick={(e) => {
+                                                        e.preventDefault();
+                                                        e.stopPropagation();
+                                                        if (url && e.detail === 0) {
+                                                            void api.openExternal(url)
+                                                        }
                                                     }}
                                                     title={i18nT(language, 'inspector.openInBrowser')}
                                                     disabled={!url}

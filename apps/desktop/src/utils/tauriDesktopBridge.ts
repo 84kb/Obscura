@@ -1812,8 +1812,8 @@ export function initTauriDesktopBridge(): void {
         copyToClipboard: async (text: string) => {
             await copyTextWithFallback(decodeMediaProtocolPath(text))
         },
-        startDrag: (filePaths: string[]) => {
-            void startNativeFileDrag(filePaths).catch((error) => {
+        startDrag: async (filePaths: string[]) => {
+            await startNativeFileDrag(filePaths).catch((error) => {
                 console.error('[TauriBridge] startDrag failed:', error)
             })
         },

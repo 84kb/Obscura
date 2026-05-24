@@ -327,7 +327,7 @@ export interface DesktopAPI {
     updateTagGroup: (tagId: number, groupId: number | null) => Promise<void>
     getAuditLogs: (libraryPath?: string) => Promise<AuditLogEntry[]>
 
-    // 繝阪う繝・ぅ繝悶ヵ繧｡繧､繝ｫ繝峨Λ繝・げ・亥酔譛溽噪・・    startDrag: (filePaths: string[]) => void
+    // 繝阪う繝・ぅ繝悶ヵ繧｡繧､繝ｫ繝峨Λ繝・げ・亥酔譛溽噪・・    startDrag: (filePaths: string[]) => Promise<void>
 
     // === 繝阪ャ繝医Ρ繝ｼ繧ｯ蜈ｱ譛・===
     // 繧ｵ繝ｼ繝舌・險ｭ螳・    getServerConfig: () => Promise<ServerConfig>

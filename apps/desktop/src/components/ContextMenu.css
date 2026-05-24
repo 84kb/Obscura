@@ -8,7 +8,7 @@
     overflow: visible;
     z-index: 10000;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-    animation: contextMenuFadeIn 0.15s ease-out;
+    animation: none;
 }
 
 @keyframes contextMenuFadeIn {

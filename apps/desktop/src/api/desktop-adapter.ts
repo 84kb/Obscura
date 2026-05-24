@@ -334,8 +334,8 @@ export class DesktopAdapter implements IMediaLibraryAPI {
         return this.api.getAuditLogs(libraryPath);
     }
 
-    startDrag(filePaths: string[]): void {
-        this.api.startDrag(filePaths);
+    async startDrag(filePaths: string[]): Promise<void> {
+        await this.api.startDrag(filePaths);
     }
 
     async getServerConfig(): Promise<ServerConfig> {

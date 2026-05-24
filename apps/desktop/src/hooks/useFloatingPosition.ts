@@ -16,7 +16,11 @@ export function useFloatingPosition(
     padding: number = 10
 ) {
     useLayoutEffect(() => {
-        if (isOpen && ref.current) {
+        if (!isOpen || !ref.current) return
+
+        const updatePosition = () => {
+            if (!ref.current) return
+
             const rect = ref.current.getBoundingClientRect()
             const viewportWidth = window.innerWidth
             const viewportHeight = window.innerHeight
@@ -40,6 +44,20 @@ export function useFloatingPosition(
 
             ref.current.style.left = `${adjustedX}px`
             ref.current.style.top = `${adjustedY}px`
+        }
+
+        updatePosition()
+
+        const firstFrame = window.requestAnimationFrame(updatePosition)
+        const secondFrame = window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(updatePosition)
+        })
+        const animationFallback = window.setTimeout(updatePosition, 180)
+
+        return () => {
+            window.cancelAnimationFrame(firstFrame)
+            window.cancelAnimationFrame(secondFrame)
+            window.clearTimeout(animationFallback)
         }
     }, [x, y, isOpen, ref, padding])
 }

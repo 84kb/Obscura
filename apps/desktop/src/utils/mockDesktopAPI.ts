@@ -206,7 +206,7 @@ export const mockDesktopAPI = {
     renameTagGroup: async (_id: number, _newName: string) => { },
     updateTagGroup: async (_tagId: number, _groupId: number | null) => { },
 
-    startDrag: (_filePaths: string[]) => { },
+    startDrag: async (_filePaths: string[]) => { },
 
     // Server
     getServerConfig: async (): Promise<ServerConfig> => ({

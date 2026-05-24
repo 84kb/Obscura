@@ -170,6 +170,7 @@ export function Sidebar({
     language = 'ja',
     hasActivePluginMainView = false
 }: SidebarProps) {
+    const floatingMenuPadding = 4
     const plugins = usePlugins()
     const parseDraggedMediaIds = (dataTransfer: DataTransfer): number[] => {
         const customData = dataTransfer.getData('application/x-obscura-media-ids')
@@ -337,13 +338,22 @@ export function Sidebar({
         folderContextMenuRef,
         contextMenu?.x || 0,
         contextMenu?.y || 0,
-        !!contextMenu
+        !!contextMenu,
+        floatingMenuPadding
+    )
+    useFloatingPosition(
+        libraryDropdownRef,
+        libraryMenuPos?.left || 0,
+        libraryMenuPos?.top || 0,
+        isLibraryMenuOpen && !!libraryMenuPos,
+        floatingMenuPadding
     )
     useFloatingPosition(
         libContextMenuRef,
         libContextMenu?.x || 0,
         libContextMenu?.y || 0,
-        !!libContextMenu
+        !!libContextMenu,
+        floatingMenuPadding
     )
 
     useEffect(() => {
