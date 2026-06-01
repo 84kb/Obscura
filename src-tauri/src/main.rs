@@ -1026,6 +1026,17 @@ fn stop_sidecar_process(sidecar: &SidecarState) -> Result<(), String> {
     Ok(())
 }
 
+fn stop_sidecar_process_nowait(sidecar: &SidecarState) {
+    let Ok(mut guard) = sidecar.process.try_lock() else {
+        return;
+    };
+
+    if let Some(proc_ref) = guard.as_mut() {
+        let _ = proc_ref.child.kill();
+        *guard = None;
+    }
+}
+
 #[tauri::command]
 async fn sidecar_stop(sidecar: State<'_, SidecarState>) -> Result<BasicResult, String> {
     stop_sidecar_process(&sidecar)?;
@@ -1178,14 +1189,17 @@ fn window_close(
     sidecar: State<'_, SidecarState>,
     discord_state: State<'_, DiscordPresenceState>,
 ) -> Result<(), String> {
+    let _ = window.close();
+
     if let Some(client) = take_discord_client_nowait(&discord_state) {
         tauri::async_runtime::spawn(async move {
             let _ = tokio::time::timeout(Duration::from_millis(750), client.clear_activity()).await;
             let _ = tokio::time::timeout(Duration::from_millis(750), client.disconnect()).await;
         });
     }
-    let _ = stop_sidecar_process(&sidecar);
-    window.close().map_err(|e| e.to_string())
+
+    stop_sidecar_process_nowait(&sidecar);
+    Ok(())
 }
 
 #[tauri::command]

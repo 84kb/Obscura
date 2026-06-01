@@ -175,6 +175,8 @@ export const mockDesktopAPI = {
     copyFrameToClipboard: async (_dataUrl: string) => true,
     saveCapturedFrame: async (_dataUrl: string) => true,
     setCapturedThumbnail: async (_mediaId: number, _dataUrl: string) => null,
+    setThumbnailFromUrl: async (_mediaId: number, _thumbnailUrl: string) => null,
+    fetchUrlMetadata: async (_url: string) => ({}),
     captureFrameDataUrl: async (_filePath: string, _timeSeconds: number) => null,
 
     // Comment
@@ -194,9 +196,11 @@ export const mockDesktopAPI = {
     renameMedia: async (_mediaId: number, _newName: string) => { },
     updateRating: async (_mediaId: number, _rating: number) => { },
     backfillMetadata: async () => 0,
+    updateTitle: async (_mediaId: number, _title: string | null) => { },
     updateArtist: async (_mediaId: number, _artist: string | null) => { },
     updateDescription: async (_mediaId: number, _description: string | null) => { },
     updateUrl: async (_mediaId: number, _url: string | null) => { },
+    applyMetadataToFile: async (_mediaId: number) => ({ success: true }),
     exportMedia: async (_mediaId: number, _options?: { notificationId?: string }) => ({ success: true }),
 
     // Tag Groups
@@ -249,6 +253,8 @@ export const mockDesktopAPI = {
         thumbnailMode: 'speed' as const,
         discordRichPresenceEnabled: false,
         libraryBackupRetention: 5,
+        enableGPUAcceleration: true,
+        duplicateDefaultAction: 'skip' as const,
         enableF12DeveloperTools: false,
         audioDevice: 'auto',
         exclusiveMode: false,
@@ -267,6 +273,8 @@ export const mockDesktopAPI = {
         thumbnailMode: 'speed' as const,
         discordRichPresenceEnabled: false,
         libraryBackupRetention: 5,
+        enableGPUAcceleration: true,
+        duplicateDefaultAction: 'skip' as const,
         enableF12DeveloperTools: false,
         audioDevice: 'auto',
         exclusiveMode: false,

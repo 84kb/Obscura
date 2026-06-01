@@ -857,6 +857,23 @@
     transition: all 0.2s;
 }
 
+.url-action-icon-btn {
+    flex: 0 0 30px;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border-radius: 6px;
+}
+
+.url-action-spin {
+    animation: url-action-spin 0.9s linear infinite;
+}
+
+@keyframes url-action-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
 .url-action-btn:hover {
     background: var(--bg-secondary);
     border-color: var(--primary);

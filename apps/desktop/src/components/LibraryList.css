@@ -98,6 +98,12 @@
     flex-shrink: 0;
 }
 
+.gpu-thumbnail-acceleration .list-view-thumbnail {
+    backface-visibility: hidden;
+    transform: translateZ(0);
+    will-change: opacity, transform;
+}
+
 .list-view-cell.rating-cell {
     color: #ffd700;
 }

@@ -94,6 +94,7 @@ const SHORTCUT_CATEGORIES: Record<ShortcutCategory, ShortcutAction[]> = {
 }
 
 const DEFAULT_INSPECTOR_SECTION_VISIBILITY = {
+    title: false,
     artist: true,
     description: true,
     relations: true,
@@ -273,6 +274,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRe
 
     // === クライアント設定 State ===
     const [clientConfig, setClientConfig] = useState<any>(initialClientConfig)
+    const [clientConfigLoadedFromDisk, setClientConfigLoadedFromDisk] = useState(false)
     const [activeLocalLibrary, setActiveLocalLibrary] = useState<Library | null>(null)
     const [libraryBackups, setLibraryBackups] = useState<{ id: string; createdAt: string; fileName: string; size: number }[]>([])
     const [backupBusy, setBackupBusy] = useState(false)
@@ -280,10 +282,10 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRe
     const [networkDataLoading, setNetworkDataLoading] = useState(false)
 
     useEffect(() => {
-        if (initialClientConfig) {
+        if (initialClientConfig && !clientConfigLoadedFromDisk) {
             setClientConfig(initialClientConfig)
         }
-    }, [initialClientConfig])
+    }, [initialClientConfig, clientConfigLoadedFromDisk])
 
     const loadNetworkData = useCallback(async (force = false) => {
         if (networkDataLoading) return
@@ -291,9 +293,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRe
 
         setNetworkDataLoading(true)
         try {
-            const clientConfigPromise = clientConfig
-                ? Promise.resolve(clientConfig)
-                : api.getClientConfig()
+            const clientConfigPromise = api.getClientConfig()
 
             const [config, running, users, cConfig, token, libs] = await Promise.all([
                 api.getServerConfig(),
@@ -308,6 +308,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRe
             setIsServerRunning(running)
             setSharedUsers(users)
             setClientConfig(cConfig)
+            setClientConfigLoadedFromDisk(true)
             setMyUserToken(token)
             setLibraries(libs)
             setNetworkDataLoaded(true)
@@ -316,13 +317,14 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRe
         } finally {
             setNetworkDataLoading(false)
         }
-    }, [clientConfig, networkDataLoaded, networkDataLoading])
+    }, [networkDataLoaded, networkDataLoading])
 
     // === テーマ設定 ===
     const updateClientConfig = useCallback(async (updates: Partial<ClientConfig>) => {
         try {
             const newConfig = await api.updateClientConfig(updates)
             setClientConfig(newConfig)
+            setClientConfigLoadedFromDisk(true)
         } catch (error) {
             console.error('Failed to update client config:', error)
         }
@@ -984,9 +986,10 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRe
                 await loadNetworkData()
             } else if (activeCategory === 'general' || activeCategory === 'import' || activeCategory === 'profile' || activeCategory === 'audio') {
                 try {
-                    if (!clientConfig) {
+                    if (!clientConfigLoadedFromDisk) {
                         const config = await api.getClientConfig()
                         setClientConfig(config)
+                        setClientConfigLoadedFromDisk(true)
                     }
                 } catch (e) {
                     console.error('Failed to load client config:', e)
@@ -994,7 +997,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRe
             }
         }
         loadData()
-    }, [activeCategory, clientConfig, loadNetworkData])
+    }, [activeCategory, clientConfigLoadedFromDisk, loadNetworkData])
 
     const syncServerRuntimeState = useCallback(async (expected?: boolean) => {
         let running = false
@@ -2048,6 +2051,30 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRe
                             <span className="slider"></span>
                         </label>
                     </div>
+
+                    <div className="settings-row">
+                        <div className="settings-info">
+                            <span className="settings-label">{tr('重複検知時のデフォルト', 'Default duplicate action')}</span>
+                            <span className="settings-description">
+                                {tr('重複が見つかった時に、確認ダイアログで最初に選択される処理を指定します。', 'Choose which action is preselected when a duplicate is found.')}
+                            </span>
+                        </div>
+                        <select
+                            className="settings-input"
+                            style={{ width: '220px', height: '32px' }}
+                            value={clientConfig?.duplicateDefaultAction || 'skip'}
+                            onChange={(e) => {
+                                const value = e.target.value as 'skip' | 'replace' | 'both'
+                                const newConfig = { ...clientConfig, duplicateDefaultAction: value } as ClientConfig
+                                setClientConfig(newConfig)
+                                updateClientConfig({ duplicateDefaultAction: value } as Partial<ClientConfig>)
+                            }}
+                        >
+                            <option value="skip">{tr('既存の項目を使用', 'Use existing item')}</option>
+                            <option value="replace">{tr('新しいファイルを使用', 'Use new file')}</option>
+                            <option value="both">{tr('両方保持', 'Keep both')}</option>
+                        </select>
+                    </div>
                 </div>
             </section>
 
@@ -2057,6 +2084,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRe
                     <div className="settings-row-vertical inspector-settings-group" style={{ gap: '12px' }}>
                         <span className="settings-label">{tr('表示するセクション', 'Visible Sections')}</span>
                         {[
+                            { key: 'title', label: tr('タイトル', 'Title'), desc: tr('ファイルに埋め込む Title メタデータの表示と編集', 'Show and edit Title metadata embedded into files') },
                             { key: 'artist', label: tr('アーティスト', 'Artist'), desc: tr('作者・投稿者などの表示と編集', 'Show and edit creator/uploader') },
                             { key: 'description', label: tr('説明', 'Description'), desc: tr('説明文の表示と編集', 'Show and edit description') },
                             { key: 'relations', label: tr('親子関係', 'Relations'), desc: tr('関連メディアのリンク表示', 'Show links to related media') },
@@ -2548,7 +2576,7 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRe
     }, [availableLibraries, tr])
 
     const renderImportSettings = () => {
-        if (!clientConfig) return <div className="loading">{tr('読み込み中...', 'Loading...')}</div>
+        if (!clientConfig || !clientConfigLoadedFromDisk) return <div className="loading">{tr('読み込み中...', 'Loading...')}</div>
 
         return (
             <div className="settings-page">
@@ -2573,6 +2601,39 @@ export function SettingsModal({ settings, onUpdateSettings, onClose, onLibraryRe
                             </div>
                             <span className="settings-description">
                                 {tr('サーバーからダウンロードするファイルのデフォルト保存先です。', 'Default save location for downloaded files.')}
+                            </span>
+                        </div>
+                    </div>
+                </section>
+
+                <section className="settings-section">
+                    <h4 className="section-title">{tr('メタデータ取得', 'Metadata fetch')}</h4>
+                    <div className="settings-card">
+                        <div className="settings-row-vertical">
+                            <span className="settings-label">{tr('Cookie 取得元ブラウザ', 'Cookie source browser')}</span>
+                            <select
+                                className="settings-input"
+                                value={clientConfig.metadataCookieBrowser || ''}
+                                onChange={(e) => {
+                                    const nextValue = e.target.value
+                                    const newConfig: ClientConfig = {
+                                        ...clientConfig,
+                                        metadataCookieBrowser: nextValue
+                                    }
+                                    setClientConfig(newConfig)
+                                    updateClientConfig({ metadataCookieBrowser: nextValue })
+                                }}
+                            >
+                                <option value="">{tr('使用しない', 'Do not use')}</option>
+                                <option value="chrome">Chrome</option>
+                                <option value="edge">Microsoft Edge</option>
+                                <option value="firefox">Firefox</option>
+                                <option value="brave">Brave</option>
+                                <option value="vivaldi">Vivaldi</option>
+                                <option value="opera">Opera</option>
+                            </select>
+                            <span className="settings-description">
+                                {tr('ニコニコ動画の年齢制限・ログイン必須動画からメタデータを取得する場合に使用します。yt-dlp が PATH または sidecar-data/bin に必要です。', 'Used when fetching metadata from age-restricted or login-required NicoNico videos. yt-dlp must be available in PATH or sidecar-data/bin.')}
                             </span>
                         </div>
                     </div>

@@ -25,9 +25,11 @@ export class AndroidAdapter implements IMediaLibraryAPI {
     async getMediaFiles(_page?: number, _limit?: number, _filters?: any): Promise<any> { return { media: [], total: 0 }; }
     async getMediaFile(_id: number): Promise<MediaFile | null> { return null; }
     async updateRating(_mediaId: number, _rating: number): Promise<void> { }
+    async updateTitle(_mediaId: number, _title: string | null): Promise<void> { }
     async updateArtist(_mediaId: number, _artist: string | null): Promise<void> { }
     async updateDescription(_mediaId: number, _description: string | null): Promise<void> { }
     async updateUrl(_mediaId: number, _url: string | null): Promise<void> { }
+    async applyMetadataToFile(_mediaId: number): Promise<{ success: boolean; message?: string; path?: string }> { return { success: false, message: 'Not supported' }; }
     async addMediaParent(_childId: number, _parentId: number): Promise<void> { }
     async removeMediaParent(_childId: number, _parentId: number): Promise<void> { }
     async renameMedia(_mediaId: number, _newName: string): Promise<MediaFile | null> { return null; }
@@ -77,6 +79,8 @@ export class AndroidAdapter implements IMediaLibraryAPI {
     async copyFrameToClipboard(_dataUrl: string): Promise<boolean> { return false; }
     async saveCapturedFrame(_dataUrl: string): Promise<boolean> { return false; }
     async setCapturedThumbnail(_mediaId: number, _dataUrl: string): Promise<string | null> { return null; }
+    async setThumbnailFromUrl(_mediaId: number, _thumbnailUrl: string): Promise<string | null> { return null; }
+    async fetchUrlMetadata(_url: string): Promise<any> { return {}; }
     async captureFrameDataUrl(_filePath: string, _timeSeconds: number): Promise<string | null> { return null; }
 
     async addComment(_mediaId: number, _text: string, _time: number): Promise<MediaComment> { throw new Error('Not implemented'); }

@@ -145,6 +145,7 @@ const readStoredFilterPresets = (): FilterPreset[] => {
 
 const DEFAULT_INSPECTOR_SETTINGS = {
     sectionVisibility: {
+        title: false,
         artist: true,
         description: true,
         relations: true,
@@ -424,6 +425,7 @@ function AppContent() {
         importMedia,
         libraryStats,
         updateRating,
+        updateTitle,
         updateArtist,
         renameMedia,
         updateDescription,
@@ -1422,6 +1424,12 @@ function AppContent() {
     const handleRefreshLibrary = async () => {
         setIsRefreshing(true)
         setRefreshProgress({ current: 0, total: 0 })
+        closeContextMenu()
+        endInternalMediaDrag()
+        clearExternalDragState()
+        suppressNativeFileDragFor(3000)
+        setNativeFileDragEnabled(false)
+        setShellActionsEnabled(false)
         try {
             await api.refreshLibrary()
             await refreshLibrary()
@@ -1430,6 +1438,9 @@ function AppContent() {
             alert(tr('Failed to refresh the library', 'Failed to refresh the library'))
         } finally {
             setIsRefreshing(false)
+            const reenableGuard = !startupLoading && libraryMetadataReadyRef.current && autoImportInFlightRef.current === 0
+            setNativeFileDragEnabled(reenableGuard)
+            setShellActionsEnabled(reenableGuard)
         }
     }
     const [showSettingsModal, setShowSettingsModal] = useState(false)
@@ -1560,10 +1571,22 @@ function AppContent() {
     const handleResetFilters = useCallback(() => {
         updateFilterOptions({
             ...createDefaultFilterOptions(),
+            filterType: filterOptions.filterType,
+            selectedFolders: filterOptions.selectedFolders,
+            searchQuery: filterOptions.searchQuery,
+            searchTargets: filterOptions.searchTargets,
             sortOrder: filterOptions.sortOrder,
             sortDirection: filterOptions.sortDirection
         })
-    }, [filterOptions.sortDirection, filterOptions.sortOrder, updateFilterOptions])
+    }, [
+        filterOptions.filterType,
+        filterOptions.searchQuery,
+        filterOptions.searchTargets,
+        filterOptions.selectedFolders,
+        filterOptions.sortDirection,
+        filterOptions.sortOrder,
+        updateFilterOptions,
+    ])
 
     // イベントリスナー内で最新の状態を参照するための Ref
     const isDraggingRef = useRef(isDragging)
@@ -2686,7 +2709,7 @@ function AppContent() {
         endInternalMediaDrag()
         clearExternalDragState()
         suppressNativeFileDragFor(1500)
-        appendBridgeDebugLog('[AutoImport] refreshLibrary-skipped reason=avoid-images-rescan')
+        appendBridgeDebugLog('[AutoImport] refreshLibrary-skipped reason=import-updated-index')
         await reloadLibrary()
         appendBridgeDebugLog('[AutoImport] reloadLibrary-complete')
         addNotification({
@@ -2773,6 +2796,47 @@ function AppContent() {
                 title: tr('Export failed', 'Export failed'),
                 message: e.message,
                 duration: 5000
+            })
+        }
+    }
+
+    const handleApplyMetadataToFile = async (media: MediaFile) => {
+        closeContextMenu()
+
+        const notificationId = addNotification({
+            type: 'progress',
+            title: tr('メタデータを適用中', 'Applying metadata'),
+            message: media.file_name,
+            progress: 0,
+            duration: 0
+        })
+
+        try {
+            const result = await api.applyMetadataToFile(media.id)
+            removeNotification(notificationId)
+
+            if (result.success) {
+                addNotification({
+                    type: 'success',
+                    title: tr('適用完了', 'Metadata applied'),
+                    message: tr('タイトル、投稿者、説明欄、URLを元動画ファイルに埋め込みました。', 'Embedded title, artist, description, and URL into the source video file.'),
+                    duration: 4000
+                })
+            } else {
+                addNotification({
+                    type: 'error',
+                    title: tr('適用に失敗しました', 'Failed to apply metadata'),
+                    message: result.message || tr('不明なエラー', 'Unknown error'),
+                    duration: 6000
+                })
+            }
+        } catch (e: any) {
+            removeNotification(notificationId)
+            addNotification({
+                type: 'error',
+                title: tr('適用に失敗しました', 'Failed to apply metadata'),
+                message: e?.message || String(e),
+                duration: 6000
             })
         }
     }
@@ -3272,7 +3336,10 @@ function AppContent() {
                         onToggleSidebar={() => handleUpdateViewSettings({ showSidebar: !viewSettings.showSidebar })}
                         onOpenSettings={() => setShowSettingsModal(true)}
                     />
-                    <div className={`library-drop-zone ${isDragging ? 'dragging' : ''}`} data-library-drop-zone="true">
+                    <div
+                        className={`library-drop-zone ${isDragging ? 'dragging' : ''} ${clientConfig?.enableGPUAcceleration !== false ? 'gpu-thumbnail-acceleration' : ''}`}
+                        data-library-drop-zone="true"
+                    >
                     {/* サブフォルダー表示 */}
                     {filterOptions.selectedFolders.length > 0 && (
                         <SubfolderGrid
@@ -3510,6 +3577,7 @@ function AppContent() {
                     onCreateFolder={createFolder}
                     onUpdateDescription={activeRemoteLibrary ? undefined : updateDescription} // TODO: Remote update
                     onUpdateUrl={activeRemoteLibrary ? undefined : updateUrl} // TODO: Remote update
+                    onUpdateTitle={updateTitle}
                     onUpdateArtist={updateArtist}
                     // Remote library relation update support depends on backend API implementation.
                     // Assuming local only for now unless remote API supports it.
@@ -3613,6 +3681,7 @@ function AppContent() {
                     onMoveToTrash={handleMoveToTrash}
                     onRefreshMetadata={!activeRemoteLibrary ? handleRefreshMetadata : undefined}
                     onExport={!activeRemoteLibrary ? handleExport : undefined}
+                    onApplyMetadataToFile={!activeRemoteLibrary ? handleApplyMetadataToFile : undefined}
                     onDownload={activeRemoteLibrary ? async () => {
                         if (!contextMenu?.media || !api) return
                         const media = contextMenu.media
@@ -3703,6 +3772,7 @@ function AppContent() {
             {duplicateQueue.length > 0 && (
                 <DuplicateModal
                     duplicate={duplicateQueue[0]}
+                    defaultAction={clientConfig?.duplicateDefaultAction || 'skip'}
                     onResolve={handleResolveDuplicate}
                 />
             )}

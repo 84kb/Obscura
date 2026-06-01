@@ -56,6 +56,20 @@
     opacity: 1;
 }
 
+.gpu-thumbnail-acceleration .media-card {
+    contain: layout paint style;
+}
+
+.gpu-thumbnail-acceleration .media-card-thumbnail,
+.gpu-thumbnail-acceleration .media-card-thumbnail-image {
+    backface-visibility: hidden;
+    transform: translateZ(0);
+}
+
+.gpu-thumbnail-acceleration .media-card-thumbnail-image {
+    will-change: opacity, transform;
+}
+
 /* ファイルタイプバッジ（左上・コンパクト・ダーク） */
 .media-card-badge {
     position: absolute;

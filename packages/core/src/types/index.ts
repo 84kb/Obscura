@@ -92,7 +92,7 @@ export interface FilterOptions {
     folderFilterMode: 'and' | 'or'
     filterType: 'all' | 'uncategorized' | 'untagged' | 'recent' | 'random' | 'trash' | 'tag_manager'
     fileType: 'all' | 'video' | 'audio' // 蜀・Κ繝輔ぅ繝ｫ繧ｿ繝ｪ繝ｳ繧ｰ逕ｨ縺ｨ縺励※谿九☆
-    sortOrder: 'name' | 'date' | 'size' | 'duration' | 'last_played' | 'rating' | 'modified' | 'artist' | 'tags' | 'random'
+    sortOrder: 'name' | 'title' | 'date' | 'size' | 'duration' | 'last_played' | 'rating' | 'modified' | 'artist' | 'tags' | 'random'
     sortDirection: 'asc' | 'desc'
     selectedRatings: number[] // 0-5, 0 means unrated
     excludedRatings: number[]
@@ -291,6 +291,8 @@ export interface DesktopAPI {
     copyFrameToClipboard: (dataUrl: string) => Promise<boolean>
     saveCapturedFrame: (dataUrl: string) => Promise<boolean>
     setCapturedThumbnail: (mediaId: number, dataUrl: string) => Promise<string | null>
+    setThumbnailFromUrl: (mediaId: number, thumbnailUrl: string) => Promise<string | null>
+    fetchUrlMetadata: (url: string) => Promise<UrlMetadataResult>
     captureFrameDataUrl: (filePath: string, timeSeconds: number) => Promise<string | null>
 
     // 繧ｳ繝｡繝ｳ繝・    addComment: (mediaId: number, text: string, time: number) => Promise<MediaComment>
@@ -306,6 +308,7 @@ export interface DesktopAPI {
     renameMedia: (mediaId: number, newName: string) => Promise<MediaFile | null>
     updateRating: (mediaId: number, rating: number) => Promise<void>
     backfillMetadata: () => Promise<number>
+    updateTitle: (mediaId: number, title: string | null) => Promise<void>
     updateArtist: (mediaId: number, artist: string | null) => Promise<void>
     updateDescription: (mediaId: number, description: string | null) => Promise<void>
     updateUrl: (mediaId: number, url: string | null) => Promise<void>
@@ -630,7 +633,7 @@ export interface ExtensionInspectorSection {
 
 export interface ExtensionInspectorSectionBlock {
     id: string
-    sectionId: 'artist' | 'description' | 'relations' | 'url' | 'tags' | 'folders' | 'info' | 'comments' | 'playlist'
+    sectionId: 'title' | 'artist' | 'description' | 'relations' | 'url' | 'tags' | 'folders' | 'info' | 'comments' | 'playlist'
     title?: string
     order?: number
     mount: (context: ExtensionMountContext & { media: MediaFile[] }) => ExtensionMountCleanup
@@ -785,6 +788,7 @@ export interface ClientConfig {
     myUserToken?: string
     autoImport: AutoImportConfig
     dragDropImportMoveSource?: boolean
+    metadataCookieBrowser?: string
     filterPresets?: {
         id: string
         name: string
@@ -799,11 +803,21 @@ export interface ClientConfig {
     libraryTransferSettings?: LibraryTransferSettings
     libraryBackupRetention?: number
     enableGPUAcceleration?: boolean
+    duplicateDefaultAction?: 'skip' | 'replace' | 'both'
     enableF12DeveloperTools?: boolean
     audioDevice?: string
     exclusiveMode?: boolean
     useMpvAudio?: boolean
     enableMpvForVideo?: boolean
+}
+
+export interface UrlMetadataResult {
+    provider?: string
+    title?: string
+    artist?: string
+    description?: string
+    thumbnailUrl?: string
+    message?: string
 }
 
 export interface AppSettings {
@@ -823,6 +837,7 @@ export interface AppSettings {
 }
 
 export interface InspectorSectionVisibility {
+    title: boolean
     artist: boolean
     description: boolean
     relations: boolean

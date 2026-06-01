@@ -193,6 +193,14 @@ export class DesktopAdapter implements IMediaLibraryAPI {
         return this.api.setCapturedThumbnail(mediaId, dataUrl);
     }
 
+    async setThumbnailFromUrl(mediaId: number, thumbnailUrl: string): Promise<string | null> {
+        return this.api.setThumbnailFromUrl(mediaId, thumbnailUrl);
+    }
+
+    async fetchUrlMetadata(url: string) {
+        return this.api.fetchUrlMetadata(url);
+    }
+
     async captureFrameDataUrl(filePath: string, timeSeconds: number): Promise<string | null> {
         return this.api.captureFrameDataUrl(filePath, timeSeconds);
     }
@@ -261,6 +269,10 @@ export class DesktopAdapter implements IMediaLibraryAPI {
         return this.api.backfillMetadata();
     }
 
+    async updateTitle(mediaId: number, title: string | null): Promise<void> {
+        return this.api.updateTitle(mediaId, title);
+    }
+
     async updateArtist(mediaId: number, artist: string | null): Promise<void> {
         return this.api.updateArtist(mediaId, artist);
     }
@@ -271,6 +283,10 @@ export class DesktopAdapter implements IMediaLibraryAPI {
 
     async updateUrl(mediaId: number, url: string | null): Promise<void> {
         return this.api.updateUrl(mediaId, url);
+    }
+
+    async applyMetadataToFile(mediaId: number): Promise<{ success: boolean; message?: string; path?: string }> {
+        return this.api.applyMetadataToFile(mediaId);
     }
 
     async addMediaParent(childId: number, parentId: number): Promise<void> {

@@ -1,4 +1,4 @@
-import { Library, MediaFile, Tag, TagGroup, Folder, MediaComment, AuditLogEntry, ServerConfig, ClientConfig, SharedUser, LibraryTransferSettings } from '@obscura/core';
+import { Library, MediaFile, Tag, TagGroup, Folder, MediaComment, AuditLogEntry, ServerConfig, ClientConfig, SharedUser, LibraryTransferSettings, UrlMetadataResult } from '@obscura/core';
 
 export interface IMediaLibraryAPI {
     listLibraryBackups(): Promise<{ id: string; createdAt: string; fileName: string; size: number }[]>;
@@ -57,6 +57,8 @@ export interface IMediaLibraryAPI {
     copyFrameToClipboard(dataUrl: string): Promise<boolean>;
     saveCapturedFrame(dataUrl: string): Promise<boolean>;
     setCapturedThumbnail(mediaId: number, dataUrl: string): Promise<string | null>;
+    setThumbnailFromUrl(mediaId: number, thumbnailUrl: string): Promise<string | null>;
+    fetchUrlMetadata(url: string): Promise<UrlMetadataResult>;
     captureFrameDataUrl(filePath: string, timeSeconds: number): Promise<string | null>;
 
     // コメント
@@ -78,9 +80,11 @@ export interface IMediaLibraryAPI {
     getSelectedMedia(): Promise<MediaFile[]>;
     updateRating(mediaId: number, rating: number): Promise<void>;
     backfillMetadata(): Promise<number>;
+    updateTitle(mediaId: number, title: string | null): Promise<void>;
     updateArtist(mediaId: number, artist: string | null): Promise<void>;
     updateDescription(mediaId: number, description: string | null): Promise<void>;
     updateUrl(mediaId: number, url: string | null): Promise<void>;
+    applyMetadataToFile(mediaId: number): Promise<{ success: boolean; message?: string; path?: string }>;
     addMediaParent(childId: number, parentId: number): Promise<void>;
     removeMediaParent(childId: number, parentId: number): Promise<void>;
     searchMediaFiles(query: string): Promise<{ id: number; file_name: string; title?: string; thumbnail_path?: string | null }[]>;

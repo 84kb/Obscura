@@ -245,6 +245,41 @@ body.dragging-file .main-header {
     align-items: center;
 }
 
+.filter-clear-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    width: 14px;
+    height: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid var(--layout-main-bg);
+    border-radius: 999px;
+    background: var(--bg-card);
+    color: var(--text-muted);
+    opacity: 0;
+    pointer-events: none;
+    cursor: pointer;
+    transition:
+        opacity 0.12s ease,
+        color 0.12s ease,
+        background 0.12s ease;
+    z-index: 2;
+}
+
+.filter-bar-item:hover .filter-clear-badge,
+.filter-clear-badge:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.filter-clear-badge:hover {
+    background: var(--primary);
+    color: #fff;
+}
+
 .filter-bar-btn {
     display: flex;
     align-items: center;
@@ -271,6 +306,32 @@ body.dragging-file .main-header {
 
 .filter-bar-btn svg {
     flex-shrink: 0;
+}
+
+.icon-btn {
+    position: relative;
+}
+
+.filter-count-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: var(--primary);
+    color: #fff;
+    border: 1px solid var(--layout-main-bg);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 15px;
+    pointer-events: none;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+    transform: translateY(1px);
 }
 
 .filter-bar-actions {
@@ -647,11 +708,11 @@ body.dragging-file .main-header {
     transition: 0.2s;
 }
 
-.switch input:checked+.slider {
+.switch input:checked + .slider {
     background-color: var(--accent);
 }
 
-.switch input:checked+.slider:before {
+.switch input:checked + .slider:before {
     transform: translateX(14px);
 }
 
@@ -663,8 +724,11 @@ body.dragging-file .main-header {
     transform: translateX(-50%);
     width: 60%;
     max-width: 600px;
-    background:
-        linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 92%, transparent), color-mix(in srgb, var(--bg-card) 98%, var(--primary) 2%));
+    background: linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--bg-card) 92%, transparent),
+        color-mix(in srgb, var(--bg-card) 98%, var(--primary) 2%)
+    );
     backdrop-filter: blur(10px);
     border: 1px solid color-mix(in srgb, var(--border) 85%, var(--primary) 15%);
     border-radius: 12px;
@@ -713,7 +777,11 @@ body.dragging-file .main-header {
 
 .bottom-progress-fill {
     height: 100%;
-    background: linear-gradient(90deg, var(--primary), color-mix(in srgb, var(--primary) 70%, var(--accent) 30%));
+    background: linear-gradient(
+        90deg,
+        var(--primary),
+        color-mix(in srgb, var(--primary) 70%, var(--accent) 30%)
+    );
     border-radius: 3px;
     transition: width 0.2s ease-out;
 }

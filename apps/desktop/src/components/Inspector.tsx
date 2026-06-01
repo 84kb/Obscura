@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useLayoutEffect } from 'react'
+import { useState, useEffect, useRef, useMemo, useLayoutEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { MediaFile, Tag, Folder, MediaComment, SharedUser, ObscuraPlugin, AppSettings, ExtensionInfoRow, ExtensionInspectorSection, ExtensionInspectorSectionBlock } from '@obscura/core'
 import './Inspector.css'
@@ -35,6 +35,7 @@ interface InspectorProps {
     onClose: () => void
     onRenameMedia?: (id: number, newName: string) => void
     onUpdateRating?: (id: number, rating: number) => void
+    onUpdateTitle?: (id: number, title: string | null) => void
     onUpdateArtist?: (id: number, artist: string | null) => void
     onUpdateDescription?: (id: number, description: string | null) => void
     onUpdateUrl?: (id: number, url: string | null) => void
@@ -48,6 +49,126 @@ interface InspectorProps {
     sharedUsers?: SharedUser[]
     settings?: AppSettings
     language?: AppLanguage
+}
+
+type UrlMetadata = {
+    title?: string
+    artist?: string
+    description?: string
+    thumbnailUrl?: string
+}
+
+const plainTextToHtml = (value: string): string => {
+    const div = document.createElement('div')
+    div.textContent = value
+    return div.innerHTML.replace(/\r?\n/g, '<br>')
+}
+
+const decodeHtmlEntities = (value: string): string => {
+    const textarea = document.createElement('textarea')
+    textarea.innerHTML = value
+    return textarea.value
+}
+
+const extractJsonObjectAfter = (source: string, marker: string): any | null => {
+    const markerIndex = source.indexOf(marker)
+    if (markerIndex < 0) return null
+    const start = source.indexOf('{', markerIndex + marker.length)
+    if (start < 0) return null
+
+    let depth = 0
+    let inString = false
+    let escaped = false
+    for (let index = start; index < source.length; index += 1) {
+        const char = source[index]
+        if (inString) {
+            if (escaped) {
+                escaped = false
+            } else if (char === '\\') {
+                escaped = true
+            } else if (char === '"') {
+                inString = false
+            }
+            continue
+        }
+        if (char === '"') {
+            inString = true
+            continue
+        }
+        if (char === '{') depth += 1
+        if (char === '}') {
+            depth -= 1
+            if (depth === 0) {
+                try {
+                    return JSON.parse(source.slice(start, index + 1))
+                } catch {
+                    return null
+                }
+            }
+        }
+    }
+    return null
+}
+
+const getMetaContent = (html: string, key: string): string => {
+    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const patterns = [
+        new RegExp(`<meta[^>]+(?:property|name)=["']${escapedKey}["'][^>]+content=["']([^"']*)["'][^>]*>`, 'i'),
+        new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+(?:property|name)=["']${escapedKey}["'][^>]*>`, 'i'),
+    ]
+    for (const pattern of patterns) {
+        const match = html.match(pattern)
+        if (match?.[1]) return decodeHtmlEntities(match[1]).trim()
+    }
+    return ''
+}
+
+const isYouTubeUrl = (value: string): boolean => {
+    try {
+        const host = new URL(value).hostname.replace(/^www\./i, '').toLowerCase()
+        return host === 'youtube.com' || host === 'm.youtube.com' || host === 'youtu.be' || host.endsWith('.youtube.com')
+    } catch {
+        return false
+    }
+}
+
+const isNicoNicoUrl = (value: string): boolean => {
+    try {
+        const host = new URL(value).hostname.replace(/^www\./i, '').toLowerCase()
+        return host === 'nicovideo.jp' || host.endsWith('.nicovideo.jp') || host === 'nico.ms'
+    } catch {
+        return false
+    }
+}
+
+const extractYouTubeMetadata = (html: string): UrlMetadata => {
+    const player = extractJsonObjectAfter(html, 'ytInitialPlayerResponse')
+    const details = player?.videoDetails || {}
+    const micro = player?.microformat?.playerMicroformatRenderer || {}
+    const thumbnails = [
+        ...((details?.thumbnail?.thumbnails || []) as any[]),
+        ...((micro?.thumbnail?.thumbnails || []) as any[]),
+    ]
+    const bestThumbnail = thumbnails
+        .filter((item) => typeof item?.url === 'string')
+        .sort((a, b) => Number(b.width || 0) - Number(a.width || 0))[0]?.url
+
+    const title =
+        String(details?.title || '').trim() ||
+        String(micro?.title?.simpleText || '').trim() ||
+        getMetaContent(html, 'og:title')
+    const artist =
+        String(details?.author || '').trim() ||
+        String(micro?.ownerChannelName || '').trim() ||
+        getMetaContent(html, 'author')
+    const description =
+        String(details?.shortDescription || '').trim() ||
+        String(micro?.description?.simpleText || '').trim() ||
+        getMetaContent(html, 'og:description') ||
+        getMetaContent(html, 'description')
+    const thumbnailUrl = String(bestThumbnail || getMetaContent(html, 'og:image') || '').trim()
+
+    return { title, artist, description: description ? plainTextToHtml(description) : '', thumbnailUrl }
 }
 
 export function Inspector({
@@ -73,6 +194,7 @@ export function Inspector({
     onClose,
     onRenameMedia,
     onUpdateRating,
+    onUpdateTitle,
     onUpdateArtist,
     onUpdateDescription,
     onUpdateUrl,
@@ -108,10 +230,12 @@ export function Inspector({
     const [currentRating, setCurrentRating] = useState(0)
 
     // 投稿者編集用
+    const [metadataTitle, setMetadataTitle] = useState('')
     const [artistName, setArtistName] = useState('')
 
     // URL編集用
     const [url, setUrl] = useState('')
+    const [isFetchingUrlMetadata, setIsFetchingUrlMetadata] = useState(false)
 
     // プラグイン用
     const [fetchingPlugins, setFetchingPlugins] = useState<Record<string, boolean>>({})
@@ -317,6 +441,18 @@ export function Inspector({
     }, [focusedFolderIndex, showFolderInput])
 
     useEffect(() => {
+        if (media.length > 0) return
+
+        setShowTagInput(false)
+        setShowFolderInput(false)
+        setShowRelationPicker(false)
+        setTagInput('')
+        setFolderInput('')
+        setFocusedTagIndex(-1)
+        setFocusedFolderIndex(-1)
+    }, [media.length])
+
+    useEffect(() => {
         if (textareaRef.current) {
             textareaRef.current.style.height = 'auto'
             textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px'
@@ -335,26 +471,47 @@ export function Inspector({
         return name.substring(lastDotIndex)
     }
 
+    const getMetadataTitle = (item: MediaFile) => {
+        const rawTitle = String(item.title || '').trim()
+        if (!rawTitle) return ''
+        const derivedName = getFileNameWithoutExt(item.file_name).trim()
+        return rawTitle === derivedName ? '' : rawTitle
+    }
+
     // media が実質的に変化したかどうかを追跡するための Ref
-    const prevMediaIdsRef = useRef<string>('')
+    const prevMediaSignatureRef = useRef<string>('')
 
     // mediaが変わったらファイル名と投稿者をリセット
     useEffect(() => {
-        const currentIds = media.map(m => m.id).sort().join(',')
-        const isMediaChanged = currentIds !== prevMediaIdsRef.current
-        prevMediaIdsRef.current = currentIds
+        const currentSignature = media
+            .map(m => [
+                m.id,
+                m.file_name || '',
+                m.title || '',
+                m.rating || 0,
+                m.artist || '',
+                m.url || '',
+            ].join('\u0001'))
+            .sort()
+            .join('\u0002')
+        const isMediaChanged = currentSignature !== prevMediaSignatureRef.current
+        prevMediaSignatureRef.current = currentSignature
 
         if (!isMediaChanged) return
 
         if (media.length === 1) {
-            setFileName(media[0].title || getFileNameWithoutExt(media[0].file_name))
+            setFileName(getFileNameWithoutExt(media[0].file_name))
             setCurrentRating(media[0].rating || 0)
+            setMetadataTitle(getMetadataTitle(media[0]))
             setArtistName(media[0].artist || '')
             setUrl(media[0].url || '')
             // メディア変更時に説明欄を閉じる
             setIsDescriptionExpanded(false)
         } else if (media.length > 1) {
             setFileName('')
+            const titles = media.map(m => getMetadataTitle(m))
+            const allSameTitle = titles.every(t => t === titles[0])
+            setMetadataTitle(allSameTitle ? titles[0] : '')
             // 共通の評価を確認
             const ratings = media.map(m => m.rating || 0)
             const allSameRating = ratings.every(r => r === ratings[0])
@@ -534,8 +691,21 @@ export function Inspector({
         return `${mins}:${secs.toString().padStart(2, '0')} `
     }
 
+    const closeTagPicker = useCallback(() => {
+        setShowTagInput(false)
+        setTagInput('')
+        setFocusedTagIndex(-1)
+    }, [])
+
+    const closeFolderPicker = useCallback(() => {
+        setShowFolderInput(false)
+        setFolderInput('')
+        setFocusedFolderIndex(-1)
+    }, [])
+
     const createOrAddTags = async (inputStr: string) => {
         if (!inputStr.trim() || media.length === 0) return
+        closeTagPicker()
 
         // カンマ、改行、全角カンマ、スペースなどで分割
         const inputs = inputStr.split(/[,，\n]/).map(s => s.trim()).filter(s => s.length > 0)
@@ -574,7 +744,6 @@ export function Inspector({
                 })
             }
         }
-        setTagInput('')
     }
 
     const handleCreateTag = () => {
@@ -584,6 +753,7 @@ export function Inspector({
     const handleCreateFolder = async () => {
         if (folderInput.trim() && media.length > 0) {
             const trimmedInput = folderInput.trim()
+            closeFolderPicker()
             const existingFolder = allFolders.find(f => f.name.toLowerCase() === trimmedInput.toLowerCase())
 
             if (existingFolder) {
@@ -597,7 +767,6 @@ export function Inspector({
                     media.forEach(m => onAddFolder(m.id, newFolder.id))
                 }
             }
-            setFolderInput('')
         }
     }
 
@@ -692,6 +861,17 @@ export function Inspector({
         }
     }
 
+    const handleTitleSave = () => {
+        if (media.length > 0 && onUpdateTitle) {
+            const newTitle = metadataTitle.trim() || null
+            media.forEach(m => {
+                if (newTitle !== (m.title || null)) {
+                    onUpdateTitle(m.id, newTitle)
+                }
+            })
+        }
+    }
+
     const handleUrlSave = () => {
         if (media.length > 0 && onUpdateUrl) {
             const newUrl = url.trim() || null
@@ -703,9 +883,90 @@ export function Inspector({
         }
     }
 
+    const handleFetchUrlMetadata = async () => {
+        const target = media[0]
+        const targetUrl = url.trim()
+        if (!target || media.length !== 1 || !targetUrl) return
+
+        const isYouTube = isYouTubeUrl(targetUrl)
+        const isNicoNico = isNicoNicoUrl(targetUrl)
+
+        if (!isYouTube && !isNicoNico) {
+            addNotification({
+                type: 'error',
+                title: tr('取得できません', 'Cannot fetch metadata'),
+                message: tr('現在は YouTube とニコニコ動画の URL に対応しています。', 'YouTube and NicoNico URLs are supported right now.'),
+                duration: 4000
+            })
+            return
+        }
+
+        setIsFetchingUrlMetadata(true)
+        try {
+            handleUrlSave()
+            let metadata: UrlMetadata
+            if (isNicoNico) {
+                metadata = await api.fetchUrlMetadata(targetUrl)
+            } else {
+                const response = await api.pluginFetch(targetUrl, {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 Obscura/1.0',
+                        'Accept-Language': language === 'en' ? 'en-US,en;q=0.9' : 'ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7',
+                    },
+                })
+                if (!response.ok || typeof response.data !== 'string') {
+                    throw new Error(response.statusText || 'Failed to fetch YouTube page')
+                }
+                metadata = extractYouTubeMetadata(response.data)
+            }
+            const updates: string[] = []
+            if (metadata.title && onUpdateTitle) {
+                setMetadataTitle(metadata.title)
+                onUpdateTitle(target.id, metadata.title)
+                updates.push(tr('タイトル', 'title'))
+            }
+            if (metadata.artist && onUpdateArtist) {
+                setArtistName(metadata.artist)
+                onUpdateArtist(target.id, metadata.artist)
+                updates.push(tr('投稿者名', 'creator'))
+            }
+            if (metadata.description && onUpdateDescription) {
+                onUpdateDescription(target.id, metadata.description)
+                updates.push(tr('概要', 'description'))
+            }
+            if (metadata.thumbnailUrl && api.setThumbnailFromUrl) {
+                const savedThumbnail = await api.setThumbnailFromUrl(target.id, metadata.thumbnailUrl)
+                if (savedThumbnail) {
+                    updates.push(tr('サムネイル', 'thumbnail'))
+                }
+            }
+
+            if (updates.length === 0) {
+                throw new Error(tr('適用できるメタデータが見つかりませんでした。', 'No applicable metadata was found.'))
+            }
+
+            addNotification({
+                type: 'success',
+                title: tr('メタデータを取得しました', 'Metadata fetched'),
+                message: updates.join(', '),
+                duration: 3000
+            })
+        } catch (error: any) {
+            addNotification({
+                type: 'error',
+                title: tr('メタデータ取得に失敗しました', 'Failed to fetch metadata'),
+                message: error?.message || String(error),
+                duration: 5000
+            })
+        } finally {
+            setIsFetchingUrlMetadata(false)
+        }
+    }
+
     // --- DnD & Layout State ---
-    const initialOrder = ['artist', 'description', 'relations', 'url', 'tags', 'folders', 'info', 'comments', 'playlist']
+    const initialOrder = ['title', 'artist', 'description', 'relations', 'url', 'tags', 'folders', 'info', 'comments', 'playlist']
     const sectionVisibility = {
+        title: settings?.inspector?.sectionVisibility?.title ?? false,
         artist: settings?.inspector?.sectionVisibility?.artist ?? true,
         description: settings?.inspector?.sectionVisibility?.description ?? true,
         relations: settings?.inspector?.sectionVisibility?.relations ?? true,
@@ -1038,6 +1299,31 @@ export function Inspector({
                             const isOpen = !collapsedSections[sectionId]
 
                             switch (sectionId) {
+                                case 'title':
+                                    return (
+                                        <InspectorSection
+                                            key={sectionId}
+                                            id={sectionId}
+                                            title={tr('タイトル', 'Title')}
+                                            isOpen={isOpen}
+                                            onToggle={() => toggleSection(sectionId)}
+                                        >
+                                            <input
+                                                type="text"
+                                                className="artist-input"
+                                                placeholder={media.length > 1 && !metadataTitle ? i18nT(language, 'inspector.multiValue') : tr('タイトルを入力', 'Enter title')}
+                                                value={metadataTitle}
+                                                onChange={(e) => setMetadataTitle(e.target.value)}
+                                                onBlur={handleTitleSave}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                        (e.target as HTMLInputElement).blur()
+                                                    }
+                                                }}
+                                            />
+                                            {renderPluginBlocks(sectionId as ExtensionInspectorSectionBlock['sectionId'])}
+                                        </InspectorSection>
+                                    )
                                 case 'tags':
                                     return (
                                         <InspectorSection
@@ -1297,6 +1583,23 @@ export function Inspector({
                                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
                                                     {i18nT(language, 'inspector.open')}
                                                 </button>
+                                                <button
+                                                    className="url-action-btn url-action-icon-btn"
+                                                    onClick={(e) => {
+                                                        e.preventDefault()
+                                                        e.stopPropagation()
+                                                        void handleFetchUrlMetadata()
+                                                    }}
+                                                    title={tr('URLからメタデータを取得', 'Fetch metadata from URL')}
+                                                    aria-label={tr('URLからメタデータを取得', 'Fetch metadata from URL')}
+                                                    disabled={!url || media.length !== 1 || isFetchingUrlMetadata}
+                                                >
+                                                    {isFetchingUrlMetadata ? (
+                                                        <svg className="url-action-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-3-6.7" /></svg>
+                                                    ) : (
+                                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v3"></path><path d="M12 18v3"></path><path d="m5.6 5.6 2.1 2.1"></path><path d="m16.3 16.3 2.1 2.1"></path><path d="M3 12h3"></path><path d="M18 12h3"></path><path d="m5.6 18.4 2.1-2.1"></path><path d="m16.3 7.7 2.1-2.1"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                                    )}
+                                                </button>
                                             </div>
                                             {renderPluginBlocks(sectionId as ExtensionInspectorSectionBlock['sectionId'])}
                                         </InspectorSection>
@@ -1491,7 +1794,7 @@ export function Inspector({
                             </div>
                             <div className="picker-popover-footer">
                                 <span className="picker-shortcuts">移動 ↑ ↓ ← →  選択 ⏎</span>
-                                <button className="picker-close-btn" onClick={() => { setShowTagInput(false); setTagInput(''); setFocusedTagIndex(-1) }}>
+                                <button className="picker-close-btn" onClick={closeTagPicker}>
                                     {tr('閉じる', 'Close')} ESC
                                 </button>
                             </div>
@@ -1572,7 +1875,7 @@ export function Inspector({
                             </div>
                             <div className="picker-popover-footer">
                                 <span className="picker-shortcuts">移動 ↑ ↓  選択 ⏎</span>
-                                <button className="picker-close-btn" onClick={() => { setShowFolderInput(false); setFolderInput(''); setFocusedFolderIndex(-1) }}>
+                                <button className="picker-close-btn" onClick={closeFolderPicker}>
                                     {tr('閉じる', 'Close')} ESC
                                 </button>
                             </div>

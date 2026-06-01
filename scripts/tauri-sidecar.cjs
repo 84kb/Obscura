@@ -110,6 +110,8 @@ let networkServerPort = null
 let networkServerHost = null
 let pendingShellActionIntent = null
 let currentFrontendSessionId = ''
+let libraryRefreshInProgress = false
+let lastLibraryRefreshStartedAt = 0
 
 const DISCORD_CLIENT_ID = '1462710290322952234'
 
@@ -1203,6 +1205,15 @@ function spawnPowerShellDetached(command) {
   child.unref()
 }
 
+function spawnPowerShellHiddenDetached(command) {
+  const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-Command', command], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  })
+  child.unref()
+}
+
 function toPowerShellLiteral(value) {
   return `'${String(value || '').replace(/'/g, "''")}'`
 }
@@ -1226,8 +1237,16 @@ function openPathWithDefaultFileManager(targetPath) {
   if (!target) throw new Error('file manager target is empty')
   if (isWindows()) {
     appendDebugLog(`openPathWithDefaultFileManager target=${target} mode=default-file-manager`)
-    appendDebugLog(`openPathWithDefaultFileManager command=explorer.exe \"${target}\"`)
-    spawnDetached('explorer.exe', [target])
+    appendDebugLog(`openPathWithDefaultFileManager command=cmd.exe /c start "" "${target}"`)
+    try {
+      spawnDetached('cmd.exe', ['/c', 'start', '', target])
+      return
+    } catch (error) {
+      const targetLiteral = toPowerShellLiteral(target)
+      const command = `$target = ${targetLiteral}; Invoke-Item -LiteralPath $target`
+      appendDebugLog(`openPathWithDefaultFileManager fallback_command=${command} reason=${error?.message || String(error)}`)
+      spawnPowerShellHiddenDetached(command)
+    }
     return
   }
   const child = spawn('xdg-open', [target], {
@@ -1262,12 +1281,11 @@ function launchInstaller(installerPath) {
   const ext = path.extname(target).toLowerCase()
   if (isWindows()) {
     if (ext === '.msi') {
-      const command = `Start-Process -FilePath 'msiexec.exe' -ArgumentList '/i', ${toPowerShellLiteral(target)}`
+      const command = `Start-Process -FilePath 'msiexec.exe' -ArgumentList '/i', ${toPowerShellLiteral(target)}, '/passive', '/promptrestart', 'AUTOLAUNCHAPP=True'`
       spawnPowerShellDetached(command)
       return
     }
-    const command = `Start-Process -FilePath ${toPowerShellLiteral(target)} -WorkingDirectory ${toPowerShellLiteral(path.dirname(target))}`
-    spawnPowerShellDetached(command)
+    spawnVisibleDetached(target, ['/P', '/R', '/UPDATE', '/ARGS'])
     return
   }
   spawnDetached('xdg-open', [target])
@@ -1338,6 +1356,21 @@ function decodeDataUrl(dataUrl) {
   if (mime === 'image/jpeg') extension = 'jpg'
   if (mime === 'image/webp') extension = 'webp'
   return { mime, bytes, extension }
+}
+
+function extensionFromMimeOrUrl(mime, sourceUrl) {
+  const normalizedMime = String(mime || '').split(';')[0].trim().toLowerCase()
+  if (normalizedMime.includes('png')) return 'png'
+  if (normalizedMime.includes('webp')) return 'webp'
+  if (normalizedMime.includes('gif')) return 'gif'
+  if (normalizedMime.includes('jpeg') || normalizedMime.includes('jpg')) return 'jpg'
+  try {
+    const ext = path.extname(new URL(String(sourceUrl || '')).pathname).replace(/^\./, '').toLowerCase()
+    if (['png', 'webp', 'gif', 'jpg', 'jpeg'].includes(ext)) return ext === 'jpeg' ? 'jpg' : ext
+  } catch {
+    // Fall through to jpg.
+  }
+  return 'jpg'
 }
 
 function normalizeInputFilePath(inputPath) {
@@ -1487,9 +1520,9 @@ function findSiblingThumbnailPath(filePath) {
   return ''
 }
 
-function extractThumbnailWithFfmpeg(filePath, outputPath) {
+function extractThumbnailWithFfmpeg(filePath, outputPath, enableGpuAcceleration = false) {
   const ffmpegPath = getFfmpegExecutablePath()
-  appendDebugLog(`ffmpeg_thumbnail start ffmpegPath=${ffmpegPath} filePath=${filePath} outputPath=${outputPath}`)
+  appendDebugLog(`ffmpeg_thumbnail start ffmpegPath=${ffmpegPath} filePath=${filePath} outputPath=${outputPath} enableGpuAcceleration=${enableGpuAcceleration}`)
   ensureDir(path.dirname(outputPath))
   try {
     if (fs.existsSync(outputPath)) {
@@ -1524,16 +1557,30 @@ function extractThumbnailWithFfmpeg(filePath, outputPath) {
   }
 
   const seekPoints = ['1.000', '0.100', '0.000', '3.000']
+  let hwaccelArgs = (enableGpuAcceleration && ffmpegHwaccelAvailable)
+    ? getFfmpegHwaccelArgs(true)
+    : []
   for (const seek of seekPoints) {
-    const ok = runExtract([
+    const baseArgs = [
       '-y',
       '-ss', seek,
       '-i', filePath,
       '-frames:v', '1',
       '-vf', 'scale=320:-1:flags=lanczos',
       outputPath,
-    ])
-    if (ok) return true
+    ]
+    const candidates = hwaccelArgs.length > 0
+      ? [[...hwaccelArgs, ...baseArgs], baseArgs]
+      : [baseArgs]
+    for (const args of candidates) {
+      const ok = runExtract(args)
+      if (ok) return true
+      if (hwaccelArgs.length > 0 && args === candidates[0]) {
+        ffmpegHwaccelAvailable = false
+        hwaccelArgs = []
+        appendDebugLog('ffmpeg_thumbnail hwaccel failed; falling back to software decode')
+      }
+    }
   }
   appendDebugLog(`ffmpeg_thumbnail failed filePath=${filePath} outputPath=${outputPath}`)
   return false
@@ -1554,7 +1601,7 @@ function unregisterFrontendSession(sessionId, reason, endedAt) {
   pendingShellActionIntent = null
 }
 
-function grantShellActionIntent(sessionId, token, expiresAt, action, filePath) {
+function grantShellActionIntent(sessionId, token, requestedAt, expiresAt, action, filePath) {
   const normalizedSessionId = String(sessionId || '').trim()
   if (!normalizedSessionId) {
     throw new Error('frontend sessionId is required')
@@ -1565,14 +1612,20 @@ function grantShellActionIntent(sessionId, token, expiresAt, action, filePath) {
   if (currentFrontendSessionId !== normalizedSessionId) {
     throw new Error(`frontend session mismatch: current=${currentFrontendSessionId} incoming=${normalizedSessionId}`)
   }
+  const normalizedRequestedAt = Number(requestedAt || Date.now())
+  if (libraryRefreshInProgress || (lastLibraryRefreshStartedAt > 0 && normalizedRequestedAt <= lastLibraryRefreshStartedAt)) {
+    appendDebugLog(`grant_shell_action_intent blocked refresh_boundary sessionId=${normalizedSessionId} action=${String(action || '').trim()} path=${normalizeInputFilePath(filePath)} requestedAt=${normalizedRequestedAt} lastRefreshStartedAt=${lastLibraryRefreshStartedAt} inProgress=${libraryRefreshInProgress}`)
+    throw new Error('shell action blocked: library refresh is in progress or just started')
+  }
   pendingShellActionIntent = {
     sessionId: normalizedSessionId,
     token: String(token || '').trim(),
+    requestedAt: normalizedRequestedAt,
     expiresAt: Number(expiresAt || 0),
     action: String(action || '').trim(),
     filePath: normalizeInputFilePath(filePath),
   }
-  appendDebugLog(`grant_shell_action_intent sessionId=${pendingShellActionIntent.sessionId} token=${pendingShellActionIntent.token} action=${pendingShellActionIntent.action} path=${pendingShellActionIntent.filePath} expiresAt=${pendingShellActionIntent.expiresAt}`)
+  appendDebugLog(`grant_shell_action_intent sessionId=${pendingShellActionIntent.sessionId} token=${pendingShellActionIntent.token} action=${pendingShellActionIntent.action} path=${pendingShellActionIntent.filePath} requestedAt=${pendingShellActionIntent.requestedAt} expiresAt=${pendingShellActionIntent.expiresAt}`)
 }
 
 function consumeShellActionIntent(sessionId, token, action, filePath) {
@@ -1594,10 +1647,13 @@ function consumeShellActionIntent(sessionId, token, action, filePath) {
     && normalizedAction === intent.action
     && normalizedPath
     && normalizedPath === intent.filePath
+    && Number.isFinite(intent.requestedAt)
+    && (lastLibraryRefreshStartedAt <= 0 || intent.requestedAt > lastLibraryRefreshStartedAt)
+    && !libraryRefreshInProgress
     && Number.isFinite(intent.expiresAt)
     && intent.expiresAt >= now
   )
-  appendDebugLog(`consume_shell_action_intent sessionId=${normalizedSessionId} currentSessionId=${currentFrontendSessionId} token=${normalizedToken} action=${normalizedAction} path=${normalizedPath} valid=${isValid} pending=${intent ? JSON.stringify(intent) : 'null'}`)
+  appendDebugLog(`consume_shell_action_intent sessionId=${normalizedSessionId} currentSessionId=${currentFrontendSessionId} token=${normalizedToken} action=${normalizedAction} path=${normalizedPath} valid=${isValid} inProgress=${libraryRefreshInProgress} lastRefreshStartedAt=${lastLibraryRefreshStartedAt} pending=${intent ? JSON.stringify(intent) : 'null'}`)
   pendingShellActionIntent = null
   return isValid
 }
@@ -1985,6 +2041,195 @@ async function fetchWithCertFallback(url, options) {
   }
 }
 
+function decodeHtmlEntitiesForMetadata(value) {
+  return String(value || '').replace(/&(#x?[0-9a-f]+|quot|amp|lt|gt|apos|nbsp);/gi, (match, entity) => {
+    const normalized = String(entity).toLowerCase()
+    if (normalized === 'quot') return '"'
+    if (normalized === 'amp') return '&'
+    if (normalized === 'lt') return '<'
+    if (normalized === 'gt') return '>'
+    if (normalized === 'apos') return "'"
+    if (normalized === 'nbsp') return ' '
+    if (normalized.startsWith('#x')) {
+      const code = Number.parseInt(normalized.slice(2), 16)
+      return Number.isFinite(code) ? String.fromCodePoint(code) : match
+    }
+    if (normalized.startsWith('#')) {
+      const code = Number.parseInt(normalized.slice(1), 10)
+      return Number.isFinite(code) ? String.fromCodePoint(code) : match
+    }
+    return match
+  })
+}
+
+function escapeHtmlForMetadata(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function sanitizeRichMetadataHtml(value) {
+  const source = String(value || '').trim()
+  if (!source) return ''
+  const hasTags = /<\/?[a-z][\s\S]*>/i.test(source)
+  const html = hasTags ? source : escapeHtmlForMetadata(source).replace(/\r?\n/g, '<br>')
+  const withoutUnsafeBlocks = html.replace(/<(script|style|iframe|object|embed|link|meta)[^>]*>[\s\S]*?<\/\1>/gi, '')
+  const allowed = new Set(['a', 'br', 'p', 'span', 'strong', 'em', 'b', 'i', 'u', 's', 'ul', 'ol', 'li'])
+  return withoutUnsafeBlocks.replace(/<\/?([a-z0-9]+)([^>]*)>/gi, (tag, rawName, rawAttrs) => {
+    const name = String(rawName || '').toLowerCase()
+    if (!allowed.has(name)) return ''
+    if (tag.startsWith('</')) return `</${name}>`
+    if (name === 'br') return '<br>'
+    if (name === 'a') {
+      const hrefMatch = String(rawAttrs || '').match(/\shref=(["'])(.*?)\1/i)
+      const href = hrefMatch ? decodeHtmlEntitiesForMetadata(hrefMatch[2]).trim() : ''
+      if (/^(https?:|mailto:)/i.test(href)) {
+        return `<a href="${escapeHtmlForMetadata(href)}" target="_blank" rel="noopener noreferrer">`
+      }
+    }
+    return `<${name}>`
+  })
+}
+
+function getMetadataMetaContent(html, key) {
+  const escapedKey = String(key || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const patterns = [
+    new RegExp(`<meta[^>]+(?:property|name)=["']${escapedKey}["'][^>]+content=["']([^"']*)["'][^>]*>`, 'i'),
+    new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+(?:property|name)=["']${escapedKey}["'][^>]*>`, 'i'),
+  ]
+  for (const pattern of patterns) {
+    const match = String(html || '').match(pattern)
+    if (match?.[1]) return decodeHtmlEntitiesForMetadata(match[1]).trim()
+  }
+  return ''
+}
+
+function isNicoNicoMetadataUrl(url) {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./i, '').toLowerCase()
+    return host === 'nicovideo.jp' || host.endsWith('.nicovideo.jp') || host === 'nico.ms'
+  } catch {
+    return false
+  }
+}
+
+function getYtDlpExecutablePath() {
+  const fromEnv = String(process.env.YT_DLP_PATH || '').trim()
+  if (fromEnv) return fromEnv
+  const managed = path.join(getManagedBinDir(), isWindows() ? 'yt-dlp.exe' : 'yt-dlp')
+  if (fs.existsSync(managed)) return managed
+  return 'yt-dlp'
+}
+
+function normalizeCookieBrowser(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  return ['chrome', 'edge', 'firefox', 'brave', 'vivaldi', 'opera', 'chromium'].includes(normalized)
+    ? normalized
+    : ''
+}
+
+function extractNicoMetadataFromHtml(html) {
+  const serverResponseMatch = String(html || '').match(/<meta[^>]+name=["']server-response["'][^>]+content=["']([^"']*)["'][^>]*>/i)
+  let response = null
+  if (serverResponseMatch?.[1]) {
+    try {
+      response = JSON.parse(decodeHtmlEntitiesForMetadata(serverResponseMatch[1]))
+    } catch {
+      response = null
+    }
+  }
+  const video = response?.data?.response?.video || response?.data?.metadata?.video || {}
+  const owner = response?.data?.response?.owner || response?.data?.response?.channel || {}
+  const thumbnail = video?.thumbnail || {}
+
+  let jsonLd = null
+  const jsonLdMatch = String(html || '').match(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/i)
+  if (jsonLdMatch?.[1]) {
+    try {
+      jsonLd = JSON.parse(jsonLdMatch[1])
+    } catch {
+      jsonLd = null
+    }
+  }
+
+  const title = String(video?.title || jsonLd?.name || getMetadataMetaContent(html, 'og:title') || '').trim()
+  const artist = String(owner?.nickname || owner?.name || jsonLd?.author?.name || getMetadataMetaContent(html, 'author') || '').trim()
+  const rawDescription = String(video?.description || jsonLd?.description || getMetadataMetaContent(html, 'description') || '').trim()
+  const thumbList = [
+    thumbnail?.ogp,
+    thumbnail?.player,
+    thumbnail?.largeUrl,
+    thumbnail?.middleUrl,
+    thumbnail?.url,
+    Array.isArray(jsonLd?.thumbnailUrl) ? jsonLd.thumbnailUrl[0] : jsonLd?.thumbnailUrl,
+    getMetadataMetaContent(html, 'og:image'),
+  ].filter(Boolean)
+  const thumbnailUrl = String(thumbList[0] || '').trim()
+
+  return {
+    provider: 'nicovideo',
+    title,
+    artist,
+    description: sanitizeRichMetadataHtml(rawDescription),
+    thumbnailUrl,
+  }
+}
+
+async function fetchNicoMetadata(url, cookieBrowser) {
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 Obscura/1.0',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'ja,en-US;q=0.8,en;q=0.6',
+  }
+
+  try {
+    const { response } = await fetchWithCertFallback(url, { headers })
+    if (response.ok) {
+      const html = await response.text()
+      const metadata = extractNicoMetadataFromHtml(html)
+      if (metadata.title || metadata.artist || metadata.description || metadata.thumbnailUrl) {
+        return metadata
+      }
+    }
+  } catch {
+    // Fall back to yt-dlp below.
+  }
+
+  const browser = normalizeCookieBrowser(cookieBrowser)
+  const args = ['--dump-single-json', '--no-playlist', '--skip-download']
+  if (browser) args.push('--cookies-from-browser', browser)
+  args.push(url)
+
+  const proc = spawnSync(getYtDlpExecutablePath(), args, {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 45000,
+    maxBuffer: 1024 * 1024 * 16,
+  })
+  if (proc.error) {
+    if (browser) {
+      throw new Error(`yt-dlp を起動できませんでした。yt-dlp を PATH または sidecar-data/bin に配置してください: ${proc.error.message}`)
+    }
+    throw new Error(`ニコニコ動画のメタデータを取得できませんでした。年齢制限やログインが必要な動画では、環境設定で Cookie 取得元ブラウザを指定し、yt-dlp を PATH または sidecar-data/bin に配置してください。`)
+  }
+  if (proc.status !== 0) {
+    const detail = String(proc.stderr || proc.stdout || '').trim()
+    const suffix = browser ? '' : ' 年齢制限やログインが必要な動画では、環境設定で Cookie 取得元ブラウザを指定してください。'
+    throw new Error(detail || `ニコニコ動画のメタデータを取得できませんでした。${suffix}`)
+  }
+  const parsed = JSON.parse(String(proc.stdout || '{}'))
+  return {
+    provider: 'nicovideo',
+    title: String(parsed?.title || '').trim(),
+    artist: String(parsed?.uploader || parsed?.channel || parsed?.creator || '').trim(),
+    description: sanitizeRichMetadataHtml(String(parsed?.description || '').trim()),
+    thumbnailUrl: String(parsed?.thumbnail || '').trim(),
+  }
+}
+
 function normalizeConnectionError(err) {
   const message = err?.message || String(err)
   const cause = err?.cause?.message || String(err?.cause || '')
@@ -2102,6 +2347,93 @@ function legacyAssociatedDataPath(mediaFilePath) {
   ensureDir(dir)
   const fileName = crypto.createHash('sha256').update(normalized).digest('hex')
   return path.join(dir, `${fileName}.json`)
+}
+
+function unwrapAssociatedDataPayload(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw ?? null
+  if (!Object.prototype.hasOwnProperty.call(raw, 'data')) return raw
+  const keys = Object.keys(raw)
+  if (
+    Object.prototype.hasOwnProperty.call(raw, 'mediaFilePath') ||
+    Object.prototype.hasOwnProperty.call(raw, 'media_file_path') ||
+    keys.every((key) => key === 'data' || key === 'mediaFilePath' || key === 'media_file_path')
+  ) {
+    return raw.data ?? null
+  }
+  return raw
+}
+
+function associatedDataCandidatePaths(mediaFilePath) {
+  const normalized = String(mediaFilePath || '').trim()
+  if (!normalized) return []
+  const dir = path.dirname(normalized)
+  const ext = path.extname(normalized)
+  const base = path.basename(normalized, ext)
+  const candidates = [
+    path.join(dir, `${base}.associated.json`),
+    path.join(dir, `${base}.comments.json`),
+    path.join(dir, `${base}.live_chat.json`),
+    path.join(dir, 'comments.json'),
+    path.join(dir, 'live_chat.json'),
+  ]
+  return [...new Set(candidates.map((value) => String(value || '').trim()).filter(Boolean))]
+}
+
+function loadAssociatedDataPayload(mediaFilePath) {
+  const target = associatedDataPath(mediaFilePath)
+  if (target && fs.existsSync(target)) {
+    const raw = readJsonIfExists(target, null)
+    return {
+      path: target,
+      data: unwrapAssociatedDataPayload(raw),
+    }
+  }
+
+  const legacyTarget = legacyAssociatedDataPath(mediaFilePath)
+  if (legacyTarget && fs.existsSync(legacyTarget)) {
+    const raw = readJsonIfExists(legacyTarget, null)
+    return {
+      path: legacyTarget,
+      data: unwrapAssociatedDataPayload(raw),
+    }
+  }
+
+  for (const candidate of associatedDataCandidatePaths(mediaFilePath)) {
+    if (!candidate || candidate === target || candidate === legacyTarget || !fs.existsSync(candidate)) continue
+    const raw = readJsonIfExists(candidate, null)
+    if (raw === null) continue
+    return {
+      path: candidate,
+      data: unwrapAssociatedDataPayload(raw),
+    }
+  }
+
+  const metadataData = readAssociatedDataFromMetadata(mediaFilePath)
+  if (metadataData != null) {
+    return {
+      path: getMetadataJsonPathForFile(mediaFilePath),
+      data: metadataData,
+    }
+  }
+
+  return {
+    path: null,
+    data: null,
+  }
+}
+
+function persistAssociatedData(mediaFilePath, data) {
+  const target = associatedDataPath(mediaFilePath)
+  if (!target) {
+    throw new Error('associated data target path not found')
+  }
+  const payloadText = JSON.stringify({ mediaFilePath, data: data ?? null }, null, 2)
+  fs.writeFileSync(target, payloadText, 'utf8')
+  const legacyTarget = legacyAssociatedDataPath(mediaFilePath)
+  if (legacyTarget) {
+    fs.writeFileSync(legacyTarget, payloadText, 'utf8')
+  }
+  return true
 }
 
 function readAssociatedDataFromMetadata(mediaFilePath) {
@@ -2286,6 +2618,32 @@ function collectLibraryMetadataEntries(libraryPath) {
     const raw = readJsonIfExists(metadataPath, null)
     if (raw == null) continue
     out[path.relative(normalized, metadataPath).replace(/\\/g, '/')] = raw
+  }
+  return out
+}
+
+function collectLibraryMediaFromMetadata(libraryPath) {
+  const normalized = String(libraryPath || '').trim()
+  if (!normalized) return []
+  const imagesRoot = path.join(normalized, 'images')
+  if (!fs.existsSync(imagesRoot)) return []
+
+  let dirs = []
+  try {
+    dirs = fs.readdirSync(imagesRoot, { withFileTypes: true })
+  } catch {
+    return []
+  }
+
+  const out = []
+  for (const dir of dirs) {
+    if (!dir?.isDirectory?.()) continue
+    const metadataPath = path.join(imagesRoot, dir.name, 'metadata.json')
+    const raw = readJsonIfExists(metadataPath, null)
+    const item = normalizeIndexedMediaItem(raw)
+    if (item) {
+      out.push(item)
+    }
   }
   return out
 }
@@ -2700,7 +3058,7 @@ function scanLocalMediaFiles(rootDir, limit = DEFAULT_SCAN_LIMIT) {
       const item = {
         id: toMediaId(fullPath),
         file_name: entry.name,
-        title: path.basename(entry.name, ext),
+        title: '',
         file_type: fileType,
         file_path: fullPath,
         thumbnail_path: siblingThumb || (isImage ? fullPath : ''),
@@ -2823,7 +3181,7 @@ async function scanLocalMediaFilesAsync(rootDir, limit = DEFAULT_SCAN_LIMIT, onP
       const item = {
         id: toMediaId(fullPath),
         file_name: entry.name,
-        title: path.basename(entry.name, ext),
+        title: '',
         file_type: fileType,
         file_path: fullPath,
         thumbnail_path: siblingThumb || (isImage ? fullPath : ''),
@@ -4059,14 +4417,13 @@ function refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache, optio
   const fileName = String(source?.file_name || path.basename(filePath)).replace(/[\\/:*?"<>|]/g, '_')
   const derivedTitle = path.basename(fileName, path.extname(fileName))
   const existingTitle = typeof source?.title === 'string' ? source.title.trim() : ''
+  const normalizedExistingTitle = existingTitle === derivedTitle || existingTitle === String(source?.file_name || '').trim()
+    ? ''
+    : existingTitle
   const existingCreatedAt = typeof source?.created_at === 'string' ? source.created_at.trim() : ''
   const existingAddedDate = typeof source?.added_date === 'string' ? source.added_date.trim() : ''
   const existingCreatedDate = typeof source?.created_date === 'string' ? source.created_date.trim() : ''
   const existingModifiedDate = typeof source?.modified_date === 'string' ? source.modified_date.trim() : ''
-  const shouldUseDerivedTitle =
-    !existingTitle ||
-    existingTitle === String(source?.file_name || '').trim() ||
-    `${existingTitle}${path.extname(fileName)}` !== fileName
   const fileDir = path.dirname(filePath)
   const fileBaseName = path.basename(fileName, path.extname(fileName))
 
@@ -4092,7 +4449,9 @@ function refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache, optio
     id: Number.isFinite(Number(source?.id)) ? Number(source.id) : toMediaId(filePath),
     uniqueId: source?.uniqueId ?? path.basename(fileDir),
     file_name: fileName,
-    title: shouldUseDerivedTitle ? derivedTitle : existingTitle,
+    title: (typeof probed?.title === 'string' && probed.title.trim())
+      ? probed.title.trim()
+      : normalizedExistingTitle,
     file_type: fileType,
     file_path: filePath,
     thumbnail_path: thumbnailPath,
@@ -4138,6 +4497,7 @@ function refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache, optio
   if (typeof probed?.codec_id === 'string' && probed.codec_id.trim()) overlay.codec_id = probed.codec_id.trim()
   if (typeof probed?.audio_codec === 'string' && probed.audio_codec.trim()) overlay.audio_codec = probed.audio_codec.trim()
   if (typeof probed?.video_codec === 'string' && probed.video_codec.trim()) overlay.video_codec = probed.video_codec.trim()
+  if (typeof probed?.title === 'string' && probed.title.trim()) overlay.title = probed.title.trim()
   if (typeof probed?.artist === 'string' && probed.artist.trim()) overlay.artist = probed.artist.trim()
   if (typeof probed?.description === 'string' && probed.description.trim()) overlay.description = probed.description.trim()
   if (typeof probed?.url === 'string' && probed.url.trim()) overlay.url = probed.url.trim()
@@ -4186,6 +4546,10 @@ function refreshMediaRecordFromLibraryFile(media, meta, metadataJsonCache, optio
     }
   }
   if (probed) {
+    if (typeof probed.title === 'string' && probed.title.trim()) {
+      item.title = probed.title.trim()
+      overlay.title = probed.title.trim()
+    }
     if (typeof probed.format_name === 'string' && probed.format_name.trim()) {
       item.format_name = probed.format_name.trim()
       overlay.format_name = probed.format_name.trim()
@@ -4351,6 +4715,7 @@ function probeMediaMetadata(filePath) {
       return undefined
     }
 
+    let title = getTag(['title'])
     let artist = getTag(['artist', 'uploader', 'performer', 'composer'])
     let description = getTag(['description', 'synopsis', 'comment'])
     let comment = getTag(['comment', 'url'])
@@ -4420,6 +4785,7 @@ function probeMediaMetadata(filePath) {
       codec_id: codecId || undefined,
       audio_codec: audioCodec || undefined,
       video_codec: videoCodec || undefined,
+      title: title || undefined,
       artist: artist || undefined,
       description: description || undefined,
       comment: comment || undefined,
@@ -4428,6 +4794,108 @@ function probeMediaMetadata(filePath) {
   } catch {
     appendDebugLog(`ffprobe exception filePath=${filePath}`)
     return null
+  }
+}
+
+function buildMetadataArgsForFile(media) {
+  const args = []
+  const title = String(media?.title || '').trim()
+  const artist = String(media?.artist || normalizeNamedList(media?.artists).join(', ') || '').trim()
+  const description = String(media?.description || '').trim()
+  const url = String(media?.url || '').trim()
+
+  if (title) {
+    args.push('-metadata', `title=${title}`)
+  }
+  if (artist) {
+    args.push('-metadata', `performer=${artist}`)
+  }
+  if (description) {
+    args.push('-metadata', `description=${description}`)
+    args.push('-metadata', `synopsis=${description}`)
+  }
+  if (url) {
+    args.push('-metadata', `comment=${url}`)
+  }
+
+  return args
+}
+
+function applyMetadataToMediaFile(media) {
+  const sourcePath = String(media?.file_path || '').trim()
+  if (!media) return { success: false, message: 'Media not found.' }
+  if (String(media?.file_type || '') !== 'video') {
+    return { success: false, message: 'Only video files can be updated.' }
+  }
+  if (!sourcePath || /^https?:\/\//i.test(sourcePath)) {
+    return { success: false, message: 'Only local files can be updated.' }
+  }
+  if (!fs.existsSync(sourcePath)) {
+    return { success: false, message: 'Source file does not exist.' }
+  }
+
+  const metadataArgs = buildMetadataArgsForFile(media)
+  if (metadataArgs.length === 0) {
+    return { success: false, message: 'No title, artist, description, or URL metadata is set.' }
+  }
+
+  const dir = path.dirname(sourcePath)
+  const ext = path.extname(sourcePath) || '.tmp'
+  const tempPath = path.join(dir, `.obscura-metadata-${process.pid}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ext}`)
+  const backupPath = path.join(dir, `.obscura-metadata-backup-${process.pid}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ext}`)
+  const ffmpegPath = getFfmpegExecutablePath()
+  const lowerExt = ext.toLowerCase()
+  const args = [
+    '-y',
+    '-i', sourcePath,
+    '-map', '0',
+    '-c', 'copy',
+    '-map_metadata', '0',
+    ...metadataArgs,
+  ]
+  if (lowerExt === '.mp4' || lowerExt === '.m4v' || lowerExt === '.mov') {
+    args.push('-movflags', 'use_metadata_tags')
+  }
+  args.push(tempPath)
+
+  appendDebugLog(`apply_metadata_to_file start mediaId=${media?.id} ffmpegPath=${ffmpegPath} source=${sourcePath} temp=${tempPath}`)
+  try {
+    const proc = spawnSync(ffmpegPath, args, {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 30 * 60 * 1000,
+      maxBuffer: 10 * 1024 * 1024,
+    })
+    if (proc.error || proc.status !== 0) {
+      const stderr = String(proc.stderr || '').trim()
+      const detail = proc.error ? String(proc.error.message || proc.error) : stderr
+      throw new Error(detail || 'ffmpeg failed to write metadata')
+    }
+    const stat = fs.statSync(tempPath)
+    if (!stat.isFile() || stat.size <= 0) {
+      throw new Error('ffmpeg returned an empty output file')
+    }
+
+    fs.renameSync(sourcePath, backupPath)
+    fs.renameSync(tempPath, sourcePath)
+    fs.unlinkSync(backupPath)
+    appendDebugLog(`apply_metadata_to_file success mediaId=${media?.id} source=${sourcePath}`)
+    return { success: true, path: sourcePath }
+  } catch (err) {
+    appendDebugLog(`apply_metadata_to_file failed mediaId=${media?.id} message=${err?.message || String(err)}`)
+    if (fs.existsSync(backupPath) && !fs.existsSync(sourcePath)) {
+      try {
+        fs.renameSync(backupPath, sourcePath)
+      } catch {
+        // Keep the original error; the backup path is logged above.
+      }
+    } else if (fs.existsSync(backupPath)) {
+      try { fs.unlinkSync(backupPath) } catch {}
+    }
+    if (fs.existsSync(tempPath)) {
+      try { fs.unlinkSync(tempPath) } catch {}
+    }
+    return { success: false, message: err?.message || String(err) }
   }
 }
 
@@ -4574,7 +5042,8 @@ function applyMediaSort(media, filters) {
   const direction = sortDirection === 'asc' ? 1 : -1
 
   const keyMap = {
-    name: (m) => String(m?.title || m?.file_name || ''),
+    name: (m) => String(m?.file_name || ''),
+    title: (m) => String(m?.title || ''),
     rating: (m) => Number(m?.rating || 0),
     added: (m) => String(m?.added_date || m?.created_at || ''),
     updated: (m) => String(m?.modified_date || m?.updated_at || ''),
@@ -4677,7 +5146,7 @@ function handleRequest(req) {
 
   if (method === 'grant_shell_action_intent') {
     try {
-      grantShellActionIntent(params?.sessionId, params?.token, params?.expiresAt, params?.action, params?.filePath)
+      grantShellActionIntent(params?.sessionId, params?.token, params?.requestedAt, params?.expiresAt, params?.action, params?.filePath)
       send({ id, ok: true, result: true })
     } catch (err) {
       send({ id, ok: false, error: `grant_shell_action_intent failed: ${err?.message || String(err)}` })
@@ -5078,37 +5547,26 @@ function handleRequest(req) {
   if (method === 'refresh_library') {
     ; (async () => {
       try {
-        appendDebugLog(`refresh_library start activeLibraryPath=${String(activeLibraryPath || '')}`)
+        libraryRefreshInProgress = true
+        lastLibraryRefreshStartedAt = Date.now()
+        pendingShellActionIntent = null
+        appendDebugLog(`refresh_library start activeLibraryPath=${String(activeLibraryPath || '')} startedAt=${lastLibraryRefreshStartedAt}`)
         send({ id: null, ok: true, event: 'refresh-progress', payload: { current: 0, total: 100 } })
         if (activeLibraryPath) {
-          const imagesRoot = path.join(activeLibraryPath, 'images')
-          const scanRoot = fs.existsSync(imagesRoot) ? imagesRoot : activeLibraryPath
-          appendDebugLog(`refresh_library scanRoot=${scanRoot}`)
-          const existingIndexedMedia = activeLibraryPath
-            ? readLibraryMediaIndex(activeLibraryPath)
-            : []
-          const existingByFilePath = new Map(
-            asArray(existingIndexedMedia)
-              .map((item) => [String(item?.file_path || '').trim(), item])
-              .filter(([filePath]) => Boolean(filePath)),
-          )
-          const scannedRaw = await scanLocalMediaFilesAsync(scanRoot, DEFAULT_SCAN_LIMIT, (pulse) => {
-            const progress = Math.min(30, Math.floor((Number(pulse?.processed || 0) / 25000) * 30))
-            send({ id: null, ok: true, event: 'refresh-progress', payload: { current: progress, total: 100 } })
-          })
-          appendDebugLog(`refresh_library scannedRaw=${scannedRaw.length}`)
-          send({ id: null, ok: true, event: 'refresh-progress', payload: { current: 30, total: 100 } })
-          const seededScan = scannedRaw.map((item) => {
+          const indexedMedia = readLibraryMediaIndex(activeLibraryPath)
+          const metadataMedia = indexedMedia.length > 0 ? [] : collectLibraryMediaFromMetadata(activeLibraryPath)
+          const indexedByFilePath = new Map()
+          for (const item of [...asArray(indexedMedia), ...asArray(metadataMedia)]) {
             const filePath = String(item?.file_path || '').trim()
-            const existing = existingByFilePath.get(filePath)
-            if (!existing) return item
-            return {
-              ...item,
-              created_at: existing.created_at || existing.added_date || item.created_at,
-              added_date: existing.added_date || existing.created_at || item.added_date,
-              created_date: existing.created_date || item.created_date,
-            }
+            if (filePath) indexedByFilePath.set(filePath, item)
+          }
+          const scannedRaw = [...indexedByFilePath.values()].filter((item) => {
+            const filePath = String(item?.file_path || '').trim()
+            return filePath && fs.existsSync(filePath)
           })
+          appendDebugLog(`refresh_library indexedOnly indexed=${indexedMedia.length} metadataFallback=${metadataMedia.length} existing=${scannedRaw.length}`)
+          send({ id: null, ok: true, event: 'refresh-progress', payload: { current: 30, total: 100 } })
+          const seededScan = scannedRaw
           writeLibraryMediaIndex(activeLibraryPath, seededScan)
 
           const meta = loadLocalMeta()
@@ -5146,6 +5604,8 @@ function handleRequest(req) {
       } catch (err) {
         appendDebugLog(`refresh_library error message=${err?.message || String(err)}`)
         send({ id, ok: false, error: `refresh_library failed: ${err?.message || String(err)}` })
+      } finally {
+        libraryRefreshInProgress = false
       }
     })()
     return
@@ -5220,7 +5680,7 @@ function handleRequest(req) {
         return
       }
 
-      const ok = extractThumbnailWithFfmpeg(sourcePath, thumbPath)
+      const ok = extractThumbnailWithFfmpeg(sourcePath, thumbPath, params?.enableGpuAcceleration !== false)
       if (ok && Number.isFinite(mediaId)) {
         updateMediaMetaById(mediaId, (prev) => ({ ...prev, thumbnail_path: thumbPath }))
       }
@@ -5815,6 +6275,27 @@ function handleRequest(req) {
     return
   }
 
+  if (method === 'fetch_url_metadata') {
+    ; (async () => {
+      try {
+        const url = String(params?.url || '').trim()
+        if (!/^https?:\/\//i.test(url)) {
+          send({ id, ok: false, error: 'fetch_url_metadata requires url' })
+          return
+        }
+        if (!isNicoNicoMetadataUrl(url)) {
+          send({ id, ok: false, error: 'fetch_url_metadata supports nicovideo URLs only' })
+          return
+        }
+        const metadata = await fetchNicoMetadata(url, params?.cookieBrowser)
+        send({ id, ok: true, result: metadata })
+      } catch (err) {
+        send({ id, ok: false, error: `fetch_url_metadata failed: ${err?.message || String(err)}` })
+      }
+    })()
+    return
+  }
+
   if (method === 'test_connection') {
     ; (async () => {
       try {
@@ -5954,17 +6435,7 @@ function handleRequest(req) {
         send({ id, ok: false, error: 'save_associated_data requires mediaFilePath' })
         return
       }
-      const target = associatedDataPath(mediaFilePath)
-      if (!target) {
-        send({ id, ok: false, error: 'save_associated_data could not resolve target path' })
-        return
-      }
-      const payloadText = JSON.stringify({ mediaFilePath, data: data ?? null }, null, 2)
-      fs.writeFileSync(target, payloadText, 'utf8')
-      const legacyTarget = legacyAssociatedDataPath(mediaFilePath)
-      if (legacyTarget) {
-        fs.writeFileSync(legacyTarget, payloadText, 'utf8')
-      }
+      persistAssociatedData(mediaFilePath, data)
       send({ id, ok: true, result: true })
     } catch (err) {
       send({ id, ok: false, error: `save_associated_data failed: ${err?.message || String(err)}` })
@@ -5979,26 +6450,8 @@ function handleRequest(req) {
         send({ id, ok: false, error: 'load_associated_data requires mediaFilePath' })
         return
       }
-      const target = associatedDataPath(mediaFilePath)
-      if (target && fs.existsSync(target)) {
-        const raw = fs.readFileSync(target, 'utf8')
-        const parsed = JSON.parse(raw)
-        send({ id, ok: true, result: parsed?.data ?? null })
-        return
-      }
-      const legacyTarget = legacyAssociatedDataPath(mediaFilePath)
-      if (legacyTarget && fs.existsSync(legacyTarget)) {
-        const raw = fs.readFileSync(legacyTarget, 'utf8')
-        const parsed = JSON.parse(raw)
-        send({ id, ok: true, result: parsed?.data ?? null })
-        return
-      }
-      const metadataData = readAssociatedDataFromMetadata(mediaFilePath)
-      if (metadataData != null) {
-        send({ id, ok: true, result: metadataData })
-        return
-      }
-      send({ id, ok: true, result: null })
+      const payload = loadAssociatedDataPayload(mediaFilePath)
+      send({ id, ok: true, result: payload.data })
     } catch (err) {
       send({ id, ok: false, error: `load_associated_data failed: ${err?.message || String(err)}` })
     }
@@ -6073,6 +6526,12 @@ function handleRequest(req) {
 
   if (method === 'file_open_path') {
     try {
+      if (libraryRefreshInProgress) {
+        pendingShellActionIntent = null
+        appendDebugLog(`file_open_path blocked library_refresh_in_progress path=${String(params?.filePath || '')}`)
+        send({ id, ok: false, error: 'file_open_path blocked: library refresh is in progress' })
+        return
+      }
       const filePath = normalizeInputFilePath(params?.filePath)
       if (!consumeShellActionIntent(params?.sessionId, params?.intentToken, 'openPath', filePath)) {
         appendDebugLog(`file_open_path blocked invalid_intent path=${String(params?.filePath || '')}`)
@@ -6107,6 +6566,12 @@ function handleRequest(req) {
 
   if (method === 'file_show_item_in_folder') {
     try {
+      if (libraryRefreshInProgress) {
+        pendingShellActionIntent = null
+        appendDebugLog(`file_show_item_in_folder blocked library_refresh_in_progress path=${String(params?.filePath || '')}`)
+        send({ id, ok: false, error: 'file_show_item_in_folder blocked: library refresh is in progress' })
+        return
+      }
       const filePath = normalizeInputFilePath(params?.filePath)
       if (!consumeShellActionIntent(params?.sessionId, params?.intentToken, 'showItemInFolder', filePath)) {
         appendDebugLog(`file_show_item_in_folder blocked invalid_intent path=${String(params?.filePath || '')}`)
@@ -6133,8 +6598,10 @@ function handleRequest(req) {
             appendDebugLog(`file_show_item_in_folder shell_open_default_manager=${targetDir}`)
             openPathWithDefaultFileManager(targetDir)
           } else {
-            appendDebugLog(`file_show_item_in_folder stat.isDirectory=false reveal=${resolved}`)
-            revealPathInWindowsExplorer(resolved)
+            targetDir = path.dirname(resolved)
+            appendDebugLog(`file_show_item_in_folder stat.isDirectory=false targetDir=${targetDir}`)
+            appendDebugLog(`file_show_item_in_folder shell_open_default_manager=${targetDir}`)
+            openPathWithDefaultFileManager(targetDir)
           }
         } else {
           const fallbackDir = getExistingParentDir(resolved) || path.dirname(resolved)
@@ -6158,6 +6625,12 @@ function handleRequest(req) {
 
   if (method === 'file_open_with') {
     try {
+      if (libraryRefreshInProgress) {
+        pendingShellActionIntent = null
+        appendDebugLog(`file_open_with blocked library_refresh_in_progress path=${String(params?.filePath || '')}`)
+        send({ id, ok: false, error: 'file_open_with blocked: library refresh is in progress' })
+        return
+      }
       const filePath = normalizeInputFilePath(params?.filePath)
       if (!consumeShellActionIntent(params?.sessionId, params?.intentToken, 'openWith', filePath)) {
         appendDebugLog(`file_open_with blocked invalid_intent path=${String(params?.filePath || '')}`)
@@ -6260,6 +6733,51 @@ function handleRequest(req) {
     } catch (err) {
       send({ id, ok: false, error: `set_captured_thumbnail failed: ${err?.message || String(err)}` })
     }
+    return
+  }
+
+  if (method === 'set_thumbnail_from_url') {
+    ; (async () => {
+      try {
+        const mediaId = Number(params?.mediaId)
+        const thumbnailUrl = String(params?.thumbnailUrl || '').trim()
+        if (!Number.isFinite(mediaId) || !/^https?:\/\//i.test(thumbnailUrl)) {
+          send({ id, ok: false, error: 'set_thumbnail_from_url requires mediaId and thumbnailUrl' })
+          return
+        }
+        const media = getMediaById(mediaId)
+        if (!media) {
+          send({ id, ok: true, result: null })
+          return
+        }
+        const { response } = await fetchWithCertFallback(thumbnailUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 Obscura/1.0',
+            'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+          },
+        })
+        if (!response.ok) {
+          throw new Error(`thumbnail fetch failed: ${response.status} ${response.statusText}`)
+        }
+        const contentType = response.headers.get('content-type') || ''
+        if (contentType && !contentType.toLowerCase().startsWith('image/')) {
+          throw new Error(`thumbnail response is not an image: ${contentType}`)
+        }
+        const bytes = Buffer.from(await response.arrayBuffer())
+        if (bytes.length === 0) {
+          throw new Error('thumbnail response is empty')
+        }
+        const thumbDir = path.join(getDataRoot(), 'thumbnails')
+        ensureDir(thumbDir)
+        const extension = extensionFromMimeOrUrl(contentType, thumbnailUrl)
+        const thumbPath = path.join(thumbDir, `${mediaId}-url-${Date.now()}.${extension}`)
+        fs.writeFileSync(thumbPath, bytes)
+        updateMediaMetaById(mediaId, (prev) => ({ ...prev, thumbnail_path: thumbPath }))
+        send({ id, ok: true, result: thumbPath })
+      } catch (err) {
+        send({ id, ok: false, error: `set_thumbnail_from_url failed: ${err?.message || String(err)}` })
+      }
+    })()
     return
   }
 
@@ -6915,6 +7433,24 @@ function handleRequest(req) {
       send({ id, ok: true, result: true })
     } catch {
       send({ id, ok: true, result: false })
+    }
+    return
+  }
+
+  if (method === 'apply_metadata_to_file') {
+    try {
+      const mediaId = Number(params?.mediaId)
+      const media = getMediaById(mediaId)
+      send({ id, ok: true, result: applyMetadataToMediaFile(media) })
+    } catch (err) {
+      send({
+        id,
+        ok: true,
+        result: {
+          success: false,
+          message: err?.message || String(err),
+        },
+      })
     }
     return
   }
@@ -7636,7 +8172,9 @@ function handleRequest(req) {
           id: toMediaId(destPath),
           uniqueId: uniqueId,
           file_name: sourceNameSanitized,
-          title: path.basename(sourceNameSanitized, path.extname(sourceNameSanitized)),
+          title: (typeof probed?.title === 'string' && probed.title.trim())
+            ? probed.title.trim()
+            : path.basename(sourceNameSanitized, path.extname(sourceNameSanitized)),
           file_type: fileType,
           file_path: destPath,
           thumbnail_path: thumbnailPath,
@@ -7682,6 +8220,7 @@ function handleRequest(req) {
         if (typeof probed?.codec_id === 'string' && probed.codec_id.trim()) overlay.codec_id = probed.codec_id.trim()
         if (typeof probed?.audio_codec === 'string' && probed.audio_codec.trim()) overlay.audio_codec = probed.audio_codec.trim()
         if (typeof probed?.video_codec === 'string' && probed.video_codec.trim()) overlay.video_codec = probed.video_codec.trim()
+        if (typeof probed?.title === 'string' && probed.title.trim()) overlay.title = probed.title.trim()
         if (typeof probed?.artist === 'string' && probed.artist.trim()) overlay.artist = probed.artist.trim()
         if (typeof probed?.description === 'string' && probed.description.trim()) overlay.description = probed.description.trim()
         if (typeof probed?.url === 'string' && probed.url.trim()) overlay.url = probed.url.trim()
@@ -7725,6 +8264,16 @@ function handleRequest(req) {
           fs.writeFileSync(path.join(destDir, 'metadata.json'), JSON.stringify(item, null, 2), 'utf8')
         } catch {
           // metadata.json write errors should not abort import
+        }
+
+        try {
+          const sourceAssociated = loadAssociatedDataPayload(sourcePath)
+          if (sourceAssociated.path && sourceAssociated.data != null) {
+            persistAssociatedData(destPath, sourceAssociated.data)
+            appendDebugLog(`import_media associated-data-copied source=${sourceAssociated.path} dest=${associatedDataPath(destPath)}`)
+          }
+        } catch (associatedDataError) {
+          appendDebugLog(`import_media associated-data-copy-failed sourcePath=${sourcePath} message=${associatedDataError?.message || String(associatedDataError)}`)
         }
 
         imported.push(item)
@@ -7794,7 +8343,6 @@ function handleRequest(req) {
       const ext = path.extname(newName)
       const updated = updateMediaMetaById(mediaId, (prev) => ({
         ...prev,
-        title: ext ? path.basename(newName, ext) : newName,
         file_name: newName,
       }))
       send({ id, ok: true, result: updated })
@@ -7824,6 +8372,18 @@ function handleRequest(req) {
       send({ id, ok: true, result: true })
     } catch (err) {
       send({ id, ok: false, error: `update_artist failed: ${err?.message || String(err)}` })
+    }
+    return
+  }
+
+  if (method === 'update_title') {
+    try {
+      const mediaId = Number(params?.mediaId)
+      const title = params?.title == null ? null : String(params.title)
+      updateMediaMetaById(mediaId, (prev) => ({ ...prev, title }))
+      send({ id, ok: true, result: true })
+    } catch (err) {
+      send({ id, ok: false, error: `update_title failed: ${err?.message || String(err)}` })
     }
     return
   }

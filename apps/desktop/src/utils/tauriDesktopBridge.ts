@@ -25,6 +25,7 @@ let autoImportBridgeReady = false
 let nativeFileDragSuppressedUntil = 0
 let nativeFileDragEnabled = true
 let shellActionsEnabled = true
+let shellActionsDisabledSince = 0
 const autoImportSeenByWatchId = new Map<string, Set<string>>()
 let cachedEnableGpuAcceleration: boolean | null = null
 let pendingRefreshLibraryPromise: Promise<boolean> | null = null
@@ -169,9 +170,10 @@ async function grantShellActionIntent(action: ShellAction, filePath: string): Pr
     if (!normalizedPath) {
         throw new Error(`Cannot ${action} without a file path`)
     }
+    const requestedAt = Date.now()
     const token = createShellActionToken()
-    const expiresAt = Date.now() + SHELL_ACTION_INTENT_WINDOW_MS
-    logShellActionDebug('grant', action, normalizedPath, { token, expiresAt })
+    const expiresAt = requestedAt + SHELL_ACTION_INTENT_WINDOW_MS
+    logShellActionDebug('grant', action, normalizedPath, { token, requestedAt, expiresAt })
     if (isTauriRuntime()) {
         await ensureFrontendSessionRegistered()
         await invoke('sidecar_request', {
@@ -181,6 +183,7 @@ async function grantShellActionIntent(action: ShellAction, filePath: string): Pr
                 token,
                 action,
                 filePath: normalizedPath,
+                requestedAt,
                 expiresAt,
             },
         })
@@ -197,6 +200,14 @@ async function invokeShellAction(action: ShellAction, filePath: string): Promise
     const decodedPath = decodeMediaProtocolPath(filePath)
     logShellActionDebug('invoke-start', action, decodedPath)
     const intentToken = await grantShellActionIntent(action, decodedPath)
+    if (!shellActionsEnabled) {
+        logShellActionDebug('invoke-blocked', action, decodedPath, {
+            reason: 'shell-actions-disabled-after-grant',
+            token: intentToken,
+            disabledSince: shellActionsDisabledSince,
+        })
+        throw new Error('Shell actions are temporarily disabled')
+    }
     const method =
         action === 'openPath'
             ? 'file_open_path'
@@ -279,9 +290,12 @@ function getFallbackConfig() {
         myUserToken: undefined,
         autoImport: { enabled: false, watchPaths: [] },
         dragDropImportMoveSource: false,
+        metadataCookieBrowser: '',
         thumbnailMode: 'speed' as const,
         discordRichPresenceEnabled: false,
         libraryBackupRetention: 5,
+        enableGPUAcceleration: true,
+        duplicateDefaultAction: 'skip' as const,
         enableF12DeveloperTools: false,
         audioDevice: 'auto',
         exclusiveMode: false,
@@ -320,7 +334,13 @@ function normalizeClientConfig(config: any) {
         dragDropImportMoveSource: typeof config?.dragDropImportMoveSource === 'boolean'
             ? config.dragDropImportMoveSource
             : fallback.dragDropImportMoveSource,
+        metadataCookieBrowser: typeof config?.metadataCookieBrowser === 'string'
+            ? config.metadataCookieBrowser
+            : fallback.metadataCookieBrowser,
         libraryViewSettings,
+        duplicateDefaultAction: ['skip', 'replace', 'both'].includes(String(config?.duplicateDefaultAction))
+            ? config.duplicateDefaultAction
+            : fallback.duplicateDefaultAction,
         localLibraries: normalizedLocalLibraries,
         activeLibraryPath: normalizedActiveLibraryPath,
     }
@@ -810,7 +830,10 @@ export function setNativeFileDragEnabled(enabled: boolean): void {
 
 export function setShellActionsEnabled(enabled: boolean): void {
     shellActionsEnabled = Boolean(enabled)
-    void appendDebugLogFromBridge(`[ShellDebug] enabled=${shellActionsEnabled}`)
+    if (!shellActionsEnabled) {
+        shellActionsDisabledSince = Date.now()
+    }
+    void appendDebugLogFromBridge(`[ShellDebug] enabled=${shellActionsEnabled} disabledSince=${shellActionsDisabledSince}`)
 }
 
 async function setupNativeDropBridge(): Promise<void> {
@@ -1213,6 +1236,12 @@ export function initTauriDesktopBridge(): void {
                 params: { mediaId, rating },
             })
         },
+        updateTitle: async (mediaId: number, title: string | null) => {
+            await invoke('sidecar_request', {
+                method: 'update_title',
+                params: { mediaId, title },
+            })
+        },
         updateArtist: async (mediaId: number, artist: string | null) => {
             await invoke('sidecar_request', {
                 method: 'update_artist',
@@ -1230,6 +1259,19 @@ export function initTauriDesktopBridge(): void {
                 method: 'update_url',
                 params: { mediaId, url },
             })
+        },
+        applyMetadataToFile: async (mediaId: number) => {
+            const result = await invoke<any>('sidecar_request', {
+                method: 'apply_metadata_to_file',
+                params: { mediaId },
+            })
+            return result && typeof result === 'object'
+                ? {
+                    success: Boolean(result.success),
+                    message: result.message ? String(result.message) : undefined,
+                    path: result.path ? String(result.path) : undefined,
+                }
+                : { success: false, message: 'Invalid apply metadata response' }
         },
         backfillMetadata: async () => {
             const result = await invoke<number>('sidecar_request', {
@@ -1593,7 +1635,7 @@ export function initTauriDesktopBridge(): void {
                 try {
                     const result = await invoke<string | null>('sidecar_request', {
                         method: 'generate_thumbnail',
-                        params: { mediaId, filePath: _filePath },
+                        params: { mediaId, filePath: _filePath, enableGpuAcceleration: getEnableGpuAccelerationFast() },
                     })
                     return typeof result === 'string' && result ? toPlayableSrc(result) : null
                 } catch {
@@ -1681,6 +1723,27 @@ export function initTauriDesktopBridge(): void {
             } catch {
                 return null
             }
+        },
+        setThumbnailFromUrl: async (mediaId: number, thumbnailUrl: string) => {
+            try {
+                const result = await invoke<string | null>('sidecar_request', {
+                    method: 'set_thumbnail_from_url',
+                    params: { mediaId, thumbnailUrl },
+                })
+                return typeof result === 'string' && result ? result : null
+            } catch {
+                return null
+            }
+        },
+        fetchUrlMetadata: async (url: string) => {
+            const config = await getStoredClientConfig()
+            return await invoke<any>('sidecar_request', {
+                method: 'fetch_url_metadata',
+                params: {
+                    url,
+                    cookieBrowser: config.metadataCookieBrowser || '',
+                },
+            })
         },
         captureFrameDataUrl: async (filePath: string, timeSeconds: number) => {
             try {

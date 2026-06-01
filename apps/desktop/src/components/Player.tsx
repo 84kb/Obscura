@@ -40,6 +40,25 @@ interface PlayerProps {
     } | null
 }
 
+const getSeekPreviewBoxSize = (aspectRatio: number | null) => {
+    const fallbackAspectRatio = 16 / 9
+    const ratio = Number.isFinite(Number(aspectRatio)) && Number(aspectRatio) > 0
+        ? Number(aspectRatio)
+        : fallbackAspectRatio
+    const maxWidth = 160
+    const baseHeight = 90
+    let height = baseHeight
+    let width = height * ratio
+    if (width > maxWidth) {
+        width = maxWidth
+        height = width / ratio
+    }
+    return {
+        width: Math.max(1, Math.round(width)),
+        height: Math.max(1, Math.round(height)),
+    }
+}
+
 export const Player: React.FC<PlayerProps> = ({
     media,
     playbackStartToken = 0,
@@ -248,6 +267,7 @@ export const Player: React.FC<PlayerProps> = ({
     const [showCommentInput, setShowCommentInput] = useState(false)
     const [previewTime, setPreviewTime] = useState<number | null>(null)
     const [previewImage, setPreviewImage] = useState<string | null>(null)
+    const [previewAspectRatio, setPreviewAspectRatio] = useState<number | null>(null)
     const [previewX, setPreviewX] = useState(0)
     const [showAudioSettings, setShowAudioSettings] = useState(false)
     const [playerContextMenu, setPlayerContextMenu] = useState<{ x: number; y: number } | null>(null)
@@ -259,6 +279,7 @@ export const Player: React.FC<PlayerProps> = ({
     const applyingRemoteStateRef = useRef(false)
 
     const getMediaElement = () => (videoRef.current || audioRef.current) as (HTMLVideoElement | HTMLAudioElement | null)
+    const seekPreviewBoxSize = getSeekPreviewBoxSize(previewAspectRatio)
 
     useEffect(() => {
         if (!playerContextMenu) return
@@ -698,6 +719,10 @@ export const Player: React.FC<PlayerProps> = ({
             const dataUrl = await api.captureFrameDataUrl(media.file_path, timeSeconds)
             if (requestSeq !== previewRequestSeqRef.current) return
             if (typeof dataUrl === 'string' && dataUrl) {
+                const mediaAspectRatio = Number(media.width || 0) > 0 && Number(media.height || 0) > 0
+                    ? Number(media.width) / Number(media.height)
+                    : null
+                setPreviewAspectRatio(mediaAspectRatio)
                 setPreviewImage(dataUrl)
             } else {
                 setPreviewImage(null)
@@ -782,6 +807,7 @@ export const Player: React.FC<PlayerProps> = ({
                     canvas.width = 160
                     canvas.height = Math.round(160 / aspectRatio)
                     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+                    setPreviewAspectRatio(aspectRatio)
                     setPreviewImage(canvas.toDataURL('image/jpeg', 0.7))
                 } catch (err) {
                     // Cross-origin / tainted canvas fallback
@@ -798,6 +824,7 @@ export const Player: React.FC<PlayerProps> = ({
         previewRequestSeqRef.current += 1
         setPreviewTime(null)
         setPreviewImage(null)
+        setPreviewAspectRatio(null)
         lastPreviewTimeRef.current = -1
     }
 
@@ -1615,7 +1642,13 @@ export const Player: React.FC<PlayerProps> = ({
                             style={{ left: previewX }}
                         >
                             {previewImage && (
-                                <div className="preview-image-box">
+                                <div
+                                    className="preview-image-box"
+                                    style={{
+                                        width: `${seekPreviewBoxSize.width}px`,
+                                        height: `${seekPreviewBoxSize.height}px`,
+                                    }}
+                                >
                                     <img
                                         src={previewImage}
                                         alt="preview"

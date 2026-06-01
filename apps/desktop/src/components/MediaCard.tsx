@@ -1,9 +1,8 @@
-﻿import { useState, useEffect, useRef } from 'react'
+﻿import { useState, useEffect, useMemo, useRef } from 'react'
 import { MediaFile, ItemInfoType } from '@obscura/core'
 import { api } from '../api'
 import './MediaCard.css'
-import { createObjectUrlFromLocalImagePath, isLocalAssetUrl, toThumbnailUrl } from '../utils/fileUrl'
-import { enqueueThumbnailLoad } from '../utils/thumbnailLoadQueue'
+import { toThumbnailUrl } from '../utils/fileUrl'
 
 const thumbnailUrlCache = new Map<string, string>()
 
@@ -53,100 +52,33 @@ export function MediaCard({
     priorityLoad = false,
     ...props
 }: MediaCardProps) {
-    const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null)
     const [isLoaded, setIsLoaded] = useState(false)
     const mouseDownHandled = useRef(false) // MouseDown縺ｧ驕ｸ謚槫・逅・ｒ陦後▲縺溘°繧定ｿｽ霍｡
-    const pendingThumbnailLoadRef = useRef<{ release: () => void, cancel: () => void } | null>(null)
-    const objectUrlRef = useRef<string | null>(null)
-    const objectUrlCleanupTimerRef = useRef<number | null>(null)
     const nativeDragInFlightRef = useRef(false)
-    const releasePendingThumbnailLoad = () => {
-        pendingThumbnailLoadRef.current?.release()
-        pendingThumbnailLoadRef.current = null
-    }
 
-    // 繧ｵ繝繝阪う繝ｫ縺後↑縺・ｴ蜷医・閾ｪ蜍慕函謌舌ｒ繝医Μ繧ｬ繝ｼ・亥刀雉ｪ蜆ｪ蜈医Δ繝ｼ繝峨・蝣ｴ蜷医・縺ｿ・・
-    useEffect(() => {
-        pendingThumbnailLoadRef.current?.cancel()
-        pendingThumbnailLoadRef.current = null
-
+    const thumbnailUrl = useMemo(() => {
         const cacheKey = `${media.id}|${thumbnailMode}|${media.thumbnail_path || ''}`
         const cachedUrl = thumbnailUrlCache.get(cacheKey)
+        if (cachedUrl) return cachedUrl
+        if (!media.thumbnail_path) return null
 
-        if (cachedUrl) {
-            setThumbnailUrl(cachedUrl)
-            setIsLoaded(false)
-            return
-        }
-
-        setIsLoaded(false)
-        setThumbnailUrl(null)
-        if (!media.thumbnail_path) return
-
-        // Use already generated thumbnail as-is. Do not trigger resize/generation on render.
         const resolved = toThumbnailUrl(media.thumbnail_path)
+        if (!resolved) return null
+        thumbnailUrlCache.set(cacheKey, resolved)
+        return resolved
+    }, [media.id, media.thumbnail_path, thumbnailMode])
 
-        const revokeObjectUrl = () => {
-            if (objectUrlCleanupTimerRef.current !== null) {
-                window.clearTimeout(objectUrlCleanupTimerRef.current)
-                objectUrlCleanupTimerRef.current = null
-            }
-            if (objectUrlRef.current) {
-                const staleUrl = objectUrlRef.current
-                objectUrlRef.current = null
-                objectUrlCleanupTimerRef.current = window.setTimeout(() => {
-                    URL.revokeObjectURL(staleUrl)
-                    objectUrlCleanupTimerRef.current = null
-                }, 30000)
-            }
+    useEffect(() => {
+        setIsLoaded(false)
+        if (!thumbnailUrl) return
+
+        const perf = (window as any).__obscuraRandomPerf
+        if (perf && !perf.firstThumbRequestLogged) {
+            perf.firstThumbRequestLogged = true
+            const elapsed = performance.now() - Number(perf.start || 0)
+            console.log(`[Perf][Random] first thumbnail request in ${elapsed.toFixed(1)}ms (mediaId=${media.id})`)
         }
-
-        const startLoad = () => {
-            const perf = (window as any).__obscuraRandomPerf
-            if (perf && !perf.firstThumbRequestLogged) {
-                perf.firstThumbRequestLogged = true
-                const elapsed = performance.now() - Number(perf.start || 0)
-                console.log(`[Perf][Random] first thumbnail request in ${elapsed.toFixed(1)}ms (mediaId=${media.id})`)
-            }
-            if (!isLocalAssetUrl(resolved)) {
-                thumbnailUrlCache.set(cacheKey, resolved)
-                setThumbnailUrl(resolved)
-                releasePendingThumbnailLoad()
-                return
-            }
-
-            void createObjectUrlFromLocalImagePath(media.thumbnail_path)
-                .then((safeUrl) => {
-                    if (!safeUrl) {
-                        releasePendingThumbnailLoad()
-                        return
-                    }
-                    revokeObjectUrl()
-                    if (safeUrl !== resolved) {
-                        objectUrlRef.current = safeUrl
-                    }
-                    setThumbnailUrl(safeUrl)
-                    releasePendingThumbnailLoad()
-                })
-                .catch((error) => {
-                    console.warn('[MediaCard] Failed to resolve safe thumbnail URL:', error)
-                    setThumbnailUrl(null)
-                    releasePendingThumbnailLoad()
-                })
-        }
-
-        if (priorityLoad) {
-            startLoad()
-        } else {
-            pendingThumbnailLoadRef.current = enqueueThumbnailLoad(startLoad)
-        }
-
-        return () => {
-            pendingThumbnailLoadRef.current?.cancel()
-            pendingThumbnailLoadRef.current = null
-            revokeObjectUrl()
-        }
-    }, [media.id, media.thumbnail_path, thumbnailMode, priorityLoad])
+    }, [media.id, thumbnailUrl])
 
     // 繝輔ぃ繧､繝ｫ繧ｿ繧､繝励↓蠢懊§縺溘い繧､繧ｳ繝ｳ
     const getIcon = () => {
@@ -228,17 +160,9 @@ export function MediaCard({
     }
 
     const getDisplayTitle = () => {
-        const rawTitle = String(media.title || media.file_name || '').trim()
-        const hasExtension = /\.[^/.]+$/.test(rawTitle)
-        const lastDotIndex = media.file_name.lastIndexOf('.')
-        const fileExtWithDot = lastDotIndex > 0 ? media.file_name.substring(lastDotIndex) : ''
-
-        if (showExtension) {
-            if (hasExtension) return rawTitle
-            return fileExtWithDot ? `${rawTitle}${fileExtWithDot}` : rawTitle
-        }
-
-        return rawTitle.replace(/\.[^/.]+$/, "")
+        const fileName = String(media.file_name || '').trim()
+        if (showExtension) return fileName
+        return fileName.replace(/\.[^/.]+$/, "")
     }
 
 
@@ -373,7 +297,6 @@ export function MediaCard({
 
     const handleThumbnailLoad = () => {
         setIsLoaded(true)
-        releasePendingThumbnailLoad()
         const perf = (window as any).__obscuraRandomPerf
         if (!perf || perf.firstThumbLogged) return
         perf.firstThumbLogged = true
@@ -387,10 +310,6 @@ export function MediaCard({
                     ? 'http'
                     : 'other'
         console.log(`[Perf][Random] first thumbnail loaded in ${elapsed.toFixed(1)}ms (mediaId=${media.id}, type=${media.file_type}, src=${srcKind})`)
-    }
-
-    const handleThumbnailError = () => {
-        releasePendingThumbnailLoad()
     }
 
     const imgLoadingMode: 'eager' | 'lazy' = priorityLoad ? 'eager' : 'lazy'
@@ -435,7 +354,7 @@ export function MediaCard({
                         decoding="async"
                         {...imgPriorityProps}
                         onLoad={handleThumbnailLoad}
-                        onError={handleThumbnailError}
+                        onError={() => setIsLoaded(false)}
                     onDragStart={(e) => e.preventDefault()}
                         className={`media-card-thumbnail-image ${isLoaded ? 'loaded' : ''}`}
                     />
@@ -454,7 +373,7 @@ export function MediaCard({
                                 defaultValue={(() => {
                                     // 諡｡蠑ｵ蟄舌ｒ髯､縺・◆蜷榊燕繧定｡ｨ遉ｺ
                                     // 諡｡蠑ｵ蟄舌ｒ髯､縺・◆蜷榊燕繧定｡ｨ遉ｺ
-                                    const displayValue = media.title || media.file_name
+                                    const displayValue = media.file_name
                                     const lastDotIndex = displayValue.lastIndexOf('.')
                                     if (lastDotIndex > 0) {
                                         return displayValue.substring(0, lastDotIndex)

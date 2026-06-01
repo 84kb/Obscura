@@ -477,7 +477,7 @@ export const RelationSectionContent = ({
                                 )}
                             </div>
                             <div className="relation-info" onClick={() => onSelectMedia(parent)}>
-                                <div className="relation-title" title={parent.file_name}>{parent.title || parent.file_name}</div>
+                                <div className="relation-title" title={parent.file_name}>{parent.file_name}</div>
                             </div>
                             <button className="relation-remove-btn" onClick={(e) => {
                                 e.stopPropagation()
@@ -511,7 +511,7 @@ export const RelationSectionContent = ({
                                 )}
                             </div>
                             <div className="relation-info" onClick={() => onSelectMedia(child)}>
-                                <div className="relation-title" title={child.file_name}>{child.title || child.file_name}</div>
+                                <div className="relation-title" title={child.file_name}>{child.file_name}</div>
                             </div>
                             <button className="relation-remove-btn" onClick={(e) => {
                                 e.stopPropagation()
@@ -650,7 +650,7 @@ export const MediaPicker = ({
                                 )}
                             </div>
                             <div className="picker-result-info">
-                                <div className="picker-result-title" title={item.file_name}>{item.title || item.file_name}</div>
+                                <div className="picker-result-title" title={item.file_name}>{item.file_name}</div>
                                 <div className="picker-result-path">{item.file_name}</div>
                             </div>
                             <div className="picker-result-actions">

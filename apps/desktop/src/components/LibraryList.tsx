@@ -2,8 +2,7 @@ import React, { useEffect, useRef, useContext, useCallback, useMemo, useState, u
 import { TableVirtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { MediaFile, ViewSettings, FilterOptions } from '@obscura/core'
 import { formatSize, formatDate } from '../utils/format'
-import { createObjectUrlFromLocalImagePath, isLocalAssetUrl, toThumbnailUrl } from '../utils/fileUrl'
-import { enqueueThumbnailLoad } from '../utils/thumbnailLoadQueue'
+import { toThumbnailUrl } from '../utils/fileUrl'
 import { ShortcutContext, useShortcut } from '../contexts/ShortcutContext'
 import { api } from '../api'
 import './LibraryList.css'
@@ -85,83 +84,24 @@ const HeaderContextMenu: React.FC<{
 
 // 一覧表示用のサムネイルコンポーネント (高速スクロール対策)
 const ListThumbnail: React.FC<{ media: MediaFile, thumbnailMode: 'speed' | 'quality' }> = ({ media, thumbnailMode }) => {
-    const [src, setSrc] = useState<string | null>(null);
     const [isLoaded, setIsLoaded] = useState(false);
-    const pendingThumbnailLoadRef = useRef<{ release: () => void, cancel: () => void } | null>(null);
-    const objectUrlRef = useRef<string | null>(null);
-    const objectUrlCleanupTimerRef = useRef<number | null>(null);
-    const releasePendingThumbnailLoad = () => {
-        pendingThumbnailLoadRef.current?.release()
-        pendingThumbnailLoadRef.current = null
-    }
 
-    useEffect(() => {
-        pendingThumbnailLoadRef.current?.cancel()
-        pendingThumbnailLoadRef.current = null
-
+    const src = useMemo(() => {
         const cacheKey = `${media.id}|${thumbnailMode}|${media.thumbnail_path || ''}`
         const cached = listThumbnailUrlCache.get(cacheKey)
-        if (cached) {
-            setSrc(cached)
-            setIsLoaded(false)
-            return
-        }
-
-        setSrc(null)
-        setIsLoaded(false)
-        if (!media.thumbnail_path) return
+        if (cached) return cached
+        if (!media.thumbnail_path) return null
 
         // Use pre-generated thumbnail directly. Avoid runtime resize query.
         const resolved = toThumbnailUrl(media.thumbnail_path)
-        const revokeObjectUrl = () => {
-            if (objectUrlCleanupTimerRef.current !== null) {
-                window.clearTimeout(objectUrlCleanupTimerRef.current)
-                objectUrlCleanupTimerRef.current = null
-            }
-            if (objectUrlRef.current) {
-                const staleUrl = objectUrlRef.current
-                objectUrlRef.current = null
-                objectUrlCleanupTimerRef.current = window.setTimeout(() => {
-                    URL.revokeObjectURL(staleUrl)
-                    objectUrlCleanupTimerRef.current = null
-                }, 30000)
-            }
-        }
+        if (!resolved) return null
+        listThumbnailUrlCache.set(cacheKey, resolved)
+        return resolved
+    }, [media.id, media.thumbnail_path, thumbnailMode])
 
-        pendingThumbnailLoadRef.current = enqueueThumbnailLoad(() => {
-            if (!isLocalAssetUrl(resolved)) {
-                listThumbnailUrlCache.set(cacheKey, resolved)
-                setSrc(resolved)
-                releasePendingThumbnailLoad()
-                return
-            }
-
-            void createObjectUrlFromLocalImagePath(media.thumbnail_path)
-                .then((safeUrl) => {
-                    if (!safeUrl) {
-                        releasePendingThumbnailLoad()
-                        return
-                    }
-                    revokeObjectUrl()
-                    if (safeUrl !== resolved) {
-                        objectUrlRef.current = safeUrl
-                    }
-                    setSrc(safeUrl)
-                    releasePendingThumbnailLoad()
-                })
-                .catch((error) => {
-                    console.warn('[LibraryList] Failed to resolve safe thumbnail URL:', error)
-                    setSrc(null)
-                    releasePendingThumbnailLoad()
-                })
-        })
-
-        return () => {
-            pendingThumbnailLoadRef.current?.cancel()
-            pendingThumbnailLoadRef.current = null
-            revokeObjectUrl()
-        }
-    }, [media.id, media.thumbnail_path, thumbnailMode]);
+    useEffect(() => {
+        setIsLoaded(false)
+    }, [src])
 
     if (!media.thumbnail_path) return null;
 
@@ -193,12 +133,9 @@ const ListThumbnail: React.FC<{ media: MediaFile, thumbnailMode: 'speed' | 'qual
                     }}
                     onLoad={() => {
                         setIsLoaded(true)
-                        releasePendingThumbnailLoad()
                     }}
                     onDragStart={(e) => e.preventDefault()}
-                    onError={() => {
-                        releasePendingThumbnailLoad()
-                    }}
+                    onError={() => setIsLoaded(false)}
                 />
             )}
         </div>
@@ -235,6 +172,11 @@ export const LibraryList: React.FC<LibraryListProps> = ({
     const virtuosoRef = useRef<VirtuosoHandle>(null);
     const visibleRangeRef = useRef({ startIndex: 0, endIndex: 0 });
     const scrollerRef = useRef<HTMLDivElement | null>(null);
+    const onScrollPositionChangeRef = useRef(onScrollPositionChange);
+
+    useEffect(() => {
+        onScrollPositionChangeRef.current = onScrollPositionChange;
+    }, [onScrollPositionChange]);
 
     // Register Scope
     useEffect(() => {
@@ -424,7 +366,7 @@ export const LibraryList: React.FC<LibraryListProps> = ({
                 }}
                 onScroll={(e) => {
                     props.onScroll?.(e);
-                    onScrollPositionChange?.((e.currentTarget as HTMLDivElement).scrollTop);
+                    onScrollPositionChangeRef.current?.((e.currentTarget as HTMLDivElement).scrollTop);
                 }}
             />
         )),
@@ -542,7 +484,7 @@ export const LibraryList: React.FC<LibraryListProps> = ({
                 />
             )
         })
-    }), [onInternalDragEnd, onInternalDragStart, onScrollPositionChange])
+    }), [onInternalDragEnd, onInternalDragStart])
 
     useLayoutEffect(() => {
         if (!scrollerRef.current) return;
@@ -563,6 +505,7 @@ export const LibraryList: React.FC<LibraryListProps> = ({
                 ref={virtuosoRef}
                 style={{ height: '100%' }}
                 data={mediaFiles}
+                computeItemKey={(_index, item) => item.id}
                 fixedHeaderContent={fixedHeaderContent}
                 itemContent={rowContent}
                 components={virtuosoComponents}

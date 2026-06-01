@@ -143,6 +143,37 @@ export function MainHeader({
     }, [pluginHeaderContext, plugins])
     const pluginHeaderLeftButtons = pluginHeaderButtons.filter((button) => (button.location || 'right') === 'left')
     const pluginHeaderRightButtons = pluginHeaderButtons.filter((button) => (button.location || 'right') !== 'left')
+    const activeFilterCount = useMemo(() => {
+        let count = 0
+        const itemCount = (value: unknown) => Array.isArray(value) ? value.length : 0
+
+        count += itemCount(filterOptions.selectedFolders) + itemCount(filterOptions.excludedFolders)
+        count += itemCount(filterOptions.selectedTags) + itemCount(filterOptions.excludedTags)
+        count += itemCount(filterOptions.selectedRatings) + itemCount(filterOptions.excludedRatings)
+        count += itemCount(filterOptions.selectedExtensions) + itemCount(filterOptions.excludedExtensions)
+        count += itemCount(filterOptions.selectedArtists) + itemCount(filterOptions.excludedArtists)
+        if (filterOptions.durationMin !== undefined && filterOptions.durationMin !== null) count += 1
+        if (filterOptions.durationMax !== undefined && filterOptions.durationMax !== null) count += 1
+        if (filterOptions.dateModifiedMin) count += 1
+        if (filterOptions.dateModifiedMax) count += 1
+
+        return count
+    }, [
+        filterOptions.dateModifiedMax,
+        filterOptions.dateModifiedMin,
+        filterOptions.durationMax,
+        filterOptions.durationMin,
+        filterOptions.excludedArtists,
+        filterOptions.excludedExtensions,
+        filterOptions.excludedFolders,
+        filterOptions.excludedRatings,
+        filterOptions.excludedTags,
+        filterOptions.selectedArtists,
+        filterOptions.selectedExtensions,
+        filterOptions.selectedFolders,
+        filterOptions.selectedRatings,
+        filterOptions.selectedTags,
+    ])
 
     const handleConfirmRefresh = () => {
         setIsRefreshModalOpen(false)
@@ -227,14 +258,25 @@ export function MainHeader({
 
 
     // 選択されたタグ名を取得
+    const formatFilterLabel = (included: string[], excluded: string[], visibleLimit: number = 2) => {
+        const labels = [
+            ...included.filter(Boolean),
+            ...excluded.filter(Boolean).map((name) => `-${name}`),
+        ]
+        if (labels.length === 0) return null
+        if (labels.length === 1) return labels[0]
+        if (labels.length <= visibleLimit) return labels.join(', ')
+        return `${labels.slice(0, Math.max(1, visibleLimit - 1)).join(', ')}...(${labels.length})`
+    }
+
     const getSelectedTagNames = () => {
-        if (filterOptions.selectedTags.length === 0) return null
         const selectedTagNames = filterOptions.selectedTags
             .map(id => tags.find(t => t.id === id)?.name)
-            .filter(Boolean)
-        if (selectedTagNames.length === 1) return selectedTagNames[0]
-        if (selectedTagNames.length <= 3) return selectedTagNames.join(', ')
-        return `${selectedTagNames.slice(0, 2).join(', ')}...`
+            .filter(Boolean) as string[]
+        const excludedTagNames = (filterOptions.excludedTags || [])
+            .map(id => tags.find(t => t.id === id)?.name)
+            .filter(Boolean) as string[]
+        return formatFilterLabel(selectedTagNames, excludedTagNames, 3)
     }
 
     const tagLabel = getSelectedTagNames()
@@ -270,17 +312,20 @@ export function MainHeader({
 
     // 選択されたフォルダー名を取得
     const getSelectedFolderNames = () => {
-        if (filterOptions.selectedFolders.length === 0) return null
         const selectedFolderNames = filterOptions.selectedFolders
             .map(id => {
                 const folder = folders.find(f => f.id === id)
                 return folder?.name
             })
-            .filter(Boolean)
+            .filter(Boolean) as string[]
+        const excludedFolderNames = (filterOptions.excludedFolders || [])
+            .map(id => {
+                const folder = folders.find(f => f.id === id)
+                return folder?.name
+            })
+            .filter(Boolean) as string[]
 
-        if (selectedFolderNames.length === 1) return selectedFolderNames[0]
-        if (selectedFolderNames.length <= 2) return selectedFolderNames.join(', ')
-        return `${selectedFolderNames.slice(0, 1).join(', ')}...(${selectedFolderNames.length})`
+        return formatFilterLabel(selectedFolderNames, excludedFolderNames, 2)
     }
 
     const folderLabel = getSelectedFolderNames()
@@ -297,11 +342,9 @@ export function MainHeader({
     }, [allMediaFiles])
 
     const getSelectedRatingLabel = () => {
-        if (!filterOptions.selectedRatings || filterOptions.selectedRatings.length === 0) return null
-        const labels = filterOptions.selectedRatings.map(r => r === 0 ? 'なし' : `${r}★`)
-        if (labels.length === 1) return labels[0]
-        if (labels.length <= 2) return labels.join(', ')
-        return `${labels[0]}...(${labels.length})`
+        const selectedLabels = (filterOptions.selectedRatings || []).map(r => r === 0 ? 'なし' : `${r}★`)
+        const excludedLabels = (filterOptions.excludedRatings || []).map(r => r === 0 ? 'なし' : `${r}★`)
+        return formatFilterLabel(selectedLabels, excludedLabels, 2)
     }
 
     const ratingLabel = getSelectedRatingLabel()
@@ -327,7 +370,7 @@ export function MainHeader({
 
         const labels = [
             ...selected.map(e => e.toUpperCase()),
-            ...excluded.map(e => `!${e.toUpperCase()}`)
+            ...excluded.map(e => `-${e.toUpperCase()}`)
         ]
 
         if (labels.length === 1) return labels[0]
@@ -375,7 +418,7 @@ export function MainHeader({
 
         const labels = [
             ...selected,
-            ...excluded.map(a => `!${a}`)
+            ...excluded.map(a => `-${a}`)
         ]
 
         if (labels.length === 1) return labels[0]
@@ -384,6 +427,38 @@ export function MainHeader({
     }
 
     const artistLabel = getSelectedArtistLabel()
+
+    const clearFilterGroup = (updates: Partial<FilterOptions>) => {
+        onFilterChange({
+            ...filterOptions,
+            ...updates,
+        })
+    }
+
+    const renderFilterClearBadge = (isActive: boolean, label: string, onClear: () => void) => {
+        if (!isActive) return null
+        return (
+            <button
+                type="button"
+                className="filter-clear-badge"
+                title={`${label}をクリア`}
+                aria-label={`${label}をクリア`}
+                onMouseDown={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                }}
+                onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    onClear()
+                }}
+            >
+                <svg width="6" height="6" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+                    <path d="M1 1l8 8M9 1L1 9" />
+                </svg>
+            </button>
+        )
+    }
 
     const handleSaveCurrentFilterPreset = () => {
         const nextName = window.prompt('プリセット名を入力してください', '')
@@ -579,7 +654,8 @@ export function MainHeader({
                                             onChange={(e) => onFilterChange({ ...filterOptions, sortOrder: e.target.value as any })}
                                             className="dropdown-select"
                                         >
-                                            <option value="name">タイトル</option>
+                                            <option value="name">ファイル名</option>
+                                            <option value="title">タイトル</option>
                                             <option value="date">追加日</option>
                                             <option value="modified">変更日</option>
                                             <option value="size">ファイルサイズ</option>
@@ -743,6 +819,11 @@ export function MainHeader({
                         onClick={() => setIsFilterBarOpen(!isFilterBarOpen)}
                     >
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+                        {activeFilterCount > 0 && (
+                            <span className="filter-count-badge" aria-label={`適用中フィルター ${activeFilterCount} 件`}>
+                                {activeFilterCount > 99 ? '99+' : activeFilterCount}
+                            </span>
+                        )}
                     </button>
 
                     <div className="header-search" ref={searchContainerRef}>
@@ -881,7 +962,7 @@ export function MainHeader({
                     {/* フォルダーフィルター */}
                     <div className="filter-bar-item" ref={folderFilterBtnRef}>
                         <button
-                            className={`filter-bar-btn ${filterOptions.selectedFolders.length > 0 ? 'active' : ''}`}
+                            className={`filter-bar-btn ${folderLabel ? 'active' : ''}`}
                             onClick={() => setIsFolderFilterOpen(!isFolderFilterOpen)}
                         >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -889,6 +970,7 @@ export function MainHeader({
                             </svg>
                             <span>{folderLabel || 'フォルダー'}</span>
                         </button>
+                        {renderFilterClearBadge(Boolean(folderLabel), 'フォルダー', () => clearFilterGroup({ selectedFolders: [], excludedFolders: [] }))}
                         {shouldRenderFolderFilter && (
                             <FolderFilterDropdown
                                 folders={foldersWithCounts}
@@ -903,7 +985,7 @@ export function MainHeader({
                     {/* タグフィルター */}
                     <div className="filter-bar-item" ref={tagFilterBtnRef}>
                         <button
-                            className={`filter-bar-btn ${filterOptions.selectedTags.length > 0 ? 'active' : ''}`}
+                            className={`filter-bar-btn ${tagLabel ? 'active' : ''}`}
                             onClick={() => setIsTagFilterOpen(!isTagFilterOpen)}
                         >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -912,6 +994,7 @@ export function MainHeader({
                             </svg>
                             <span>{tagLabel || 'タグ'}</span>
                         </button>
+                        {renderFilterClearBadge(Boolean(tagLabel), 'タグ', () => clearFilterGroup({ selectedTags: [], excludedTags: [] }))}
                         {shouldRenderTagFilter && (
                             <TagFilterDropdown
                                 tags={tags}
@@ -936,6 +1019,7 @@ export function MainHeader({
                             </svg>
                             <span>{ratingLabel || '評価'}</span>
                         </button>
+                        {renderFilterClearBadge(Boolean(ratingLabel), '評価', () => clearFilterGroup({ selectedRatings: [], excludedRatings: [] }))}
                         {shouldRenderRatingFilter && (
                             <RatingFilterDropdown
                                 filterOptions={filterOptions}
@@ -959,6 +1043,7 @@ export function MainHeader({
                             </svg>
                             <span>{typeLabel || 'タイプ'}</span>
                         </button>
+                        {renderFilterClearBadge(Boolean(typeLabel), 'タイプ', () => clearFilterGroup({ selectedExtensions: [], excludedExtensions: [] }))}
                         {shouldRenderTypeFilter && (
                             <TypeFilterDropdown
                                 filterOptions={filterOptions}
@@ -982,6 +1067,7 @@ export function MainHeader({
                             </svg>
                             <span>{artistLabel || '投稿者'}</span>
                         </button>
+                        {renderFilterClearBadge(Boolean(artistLabel), '投稿者', () => clearFilterGroup({ selectedArtists: [], excludedArtists: [] }))}
                         {shouldRenderArtistFilter && (
                             <ArtistFilterDropdown
                                 artists={artistCounts}
@@ -995,8 +1081,12 @@ export function MainHeader({
 
                     {/* 再生時間フィルター */}
                     <div className="filter-bar-item" ref={durationFilterBtnRef}>
+                        {(() => {
+                            const isDurationActive = filterOptions.durationMin !== undefined || filterOptions.durationMax !== undefined
+                            return (
+                                <>
                         <button
-                            className={`filter-bar-btn ${isDurationFilterOpen || filterOptions.durationMin !== undefined || filterOptions.durationMax !== undefined ? 'active' : ''}`}
+                            className={`filter-bar-btn ${isDurationFilterOpen || isDurationActive ? 'active' : ''}`}
                             onClick={() => setIsDurationFilterOpen(!isDurationFilterOpen)}
                         >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1005,6 +1095,10 @@ export function MainHeader({
                             </svg>
                             <span>再生時間</span>
                         </button>
+                        {renderFilterClearBadge(isDurationActive, '再生時間', () => clearFilterGroup({ durationMin: undefined, durationMax: undefined }))}
+                                </>
+                            )
+                        })()}
                         {shouldRenderDurationFilter && (
                             <DurationFilterDropdown
                                 filterOptions={filterOptions}
@@ -1017,8 +1111,12 @@ export function MainHeader({
 
                     {/* 変更日フィルター */}
                     <div className="filter-bar-item" ref={dateFilterBtnRef}>
+                        {(() => {
+                            const isDateActive = Boolean(filterOptions.dateModifiedMin || filterOptions.dateModifiedMax)
+                            return (
+                                <>
                         <button
-                            className={`filter-bar-btn ${isDateFilterOpen || filterOptions.dateModifiedMin || filterOptions.dateModifiedMax ? 'active' : ''}`}
+                            className={`filter-bar-btn ${isDateFilterOpen || isDateActive ? 'active' : ''}`}
                             onClick={() => setIsDateFilterOpen(!isDateFilterOpen)}
                         >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1029,6 +1127,10 @@ export function MainHeader({
                             </svg>
                             <span>変更日</span>
                         </button>
+                        {renderFilterClearBadge(isDateActive, '変更日', () => clearFilterGroup({ dateModifiedMin: undefined, dateModifiedMax: undefined }))}
+                                </>
+                            )
+                        })()}
                         {shouldRenderDateFilter && (
                             <DateFilterDropdown
                                 filterOptions={filterOptions}

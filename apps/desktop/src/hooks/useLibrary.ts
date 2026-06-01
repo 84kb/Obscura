@@ -212,7 +212,14 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
         if (!activeLibrary && !activeRemoteLibrary) return null
         try {
             const newFolder = await api.createFolder(name, parentId)
-            await loadFolders()
+            if (newFolder) {
+                setFolders(prev => (
+                    prev.some(folder => Number(folder.id) === Number(newFolder.id))
+                        ? prev
+                        : [...prev, newFolder].sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0) || a.name.localeCompare(b.name))
+                ))
+                void loadFolders()
+            }
             return newFolder
         } catch (error) {
             console.error('Failed to create folder:', error)
@@ -269,10 +276,7 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
                 })
                 activeNotifications.set(data.id, notificationId)
             } else {
-                updateProgress(notificationId, data.percentage)
-                // メッセージも更新したいが NotificationContext が現在メッセージ更新をサポートしていない場合は
-                // コンテキストを拡張するか、一旦プログレスのみとする。
-                // 現状の updateProgress は progress のみ。
+                updateProgress(notificationId, data.percentage, message)
             }
 
             if (data.percentage >= 100 && data.current === data.total) {
@@ -641,7 +645,14 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
             if (activeRemoteLibrary) {
                 try {
                     const newTag = await api.createRemoteTag(activeRemoteLibrary.url, activeRemoteLibrary.token, name)
-                    await loadTags()
+                    if (newTag) {
+                        setTags(prev => (
+                            prev.some(tag => Number(tag.id) === Number(newTag.id))
+                                ? prev
+                                : [...prev, newTag].sort((a, b) => a.name.localeCompare(b.name))
+                        ))
+                        void loadTags()
+                    }
                     return newTag
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
@@ -651,7 +662,14 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
                 }
             }
             const newTag = await api.createTag(name)
-            await loadTags()
+            if (newTag) {
+                setTags(prev => (
+                    prev.some(tag => Number(tag.id) === Number(newTag.id))
+                        ? prev
+                        : [...prev, newTag].sort((a, b) => a.name.localeCompare(b.name))
+                ))
+                void loadTags()
+            }
             return newTag
         } catch (error) {
             console.error('Failed to create tag:', error)
@@ -1106,6 +1124,30 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
     }, [loadMediaFiles, activeRemoteLibrary, addNotification])
 
 
+    const updateTitle = useCallback(async (id: number, title: string | null) => {
+        setMediaFiles(prev => prev.map(m => m.id === id ? { ...m, title } : m))
+
+        try {
+            if (activeRemoteLibrary) {
+                try {
+                    await api.updateRemoteMedia(activeRemoteLibrary.url, activeRemoteLibrary.token, id, { title })
+                    return
+                } catch (e: any) {
+                    if (e.message && e.message.includes('403')) {
+                        addNotification({ type: 'error', title: '権限不足', message: 'タイトルを更新する権限がありません。' })
+                    }
+                    await loadMediaFiles()
+                    throw e
+                }
+            }
+            await api.updateTitle(id, title)
+        } catch (error) {
+            console.error('Failed to update title:', error)
+            await loadMediaFiles()
+        }
+    }, [loadMediaFiles, activeRemoteLibrary, addNotification])
+
+
     // 投稿者更新
     const updateArtist = useCallback(async (id: number, artist: string | null) => {
         // Optimistic
@@ -1477,6 +1519,9 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
                 case 'name':
                     key = item.file_name
                     break
+                case 'title':
+                    key = (item.title || '').toLocaleLowerCase()
+                    break
                 case 'date':
                     key = new Date(item.created_at).getTime()
                     break
@@ -1836,6 +1881,7 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
         restoreFilesFromTrash,
         deleteFilesPermanently,
         updateRating,
+        updateTitle,
         renameMedia,
         updateArtist,
         libraryStats,
@@ -1892,7 +1938,7 @@ export function useLibrary(options?: { showSubfolderContent?: boolean }) {
         createTag, deleteTag, createFolder, deleteFolder, addTagToMedia, removeTagFromMedia,
         addTagsToMedia, addFolderToMedia, removeFolderFromMedia, moveToTrash, restoreFromTrash, deletePermanently,
         moveFilesToTrash, restoreFilesFromTrash, deleteFilesPermanently,
-        updateLastPlayed, importMedia, updateRating, renameMedia, updateArtist, libraryStats,
+        updateLastPlayed, importMedia, updateRating, updateTitle, renameMedia, updateArtist, libraryStats,
         loadMediaFiles, loadFolders, renameFolder, activeRemoteLibrary, switchToRemoteLibrary,
         switchToLocalLibrary, removeLocalLibraryHistory, openLibrary, myUserToken, updateDescription, updateUrl,
         page, hasMore, loadingTime

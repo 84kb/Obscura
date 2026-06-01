@@ -1,5 +1,7 @@
 ﻿import { MediaFile, Tag, Folder, TagGroup, Library, MediaComment, ServerConfig, SharedUser, ClientConfig, LibraryTransferSettings } from './index'
 
+import type { UrlMetadataResult } from './index'
+
 declare global {
     interface Window {
         obscuraAPI?: DesktopAPI
@@ -57,6 +59,8 @@ export interface DesktopAPI {
     copyFrameToClipboard: (dataUrl: string) => Promise<boolean>
     saveCapturedFrame: (dataUrl: string) => Promise<boolean>
     setCapturedThumbnail: (mediaId: number, dataUrl: string) => Promise<string | null>
+    setThumbnailFromUrl: (mediaId: number, thumbnailUrl: string) => Promise<string | null>
+    fetchUrlMetadata: (url: string) => Promise<UrlMetadataResult>
     captureFrameDataUrl: (filePath: string, timeSeconds: number) => Promise<string | null>
 
     // 繧ｳ繝｡繝ｳ繝・

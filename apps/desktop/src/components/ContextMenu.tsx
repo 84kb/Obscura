@@ -19,6 +19,7 @@ interface ContextMenuProps {
     onMoveToTrash: () => void
     onDownload?: () => void
     onExport?: (media: MediaFile) => void
+    onApplyMetadataToFile?: (media: MediaFile) => void
     availableLibraries?: { name: string; path: string }[]
     remoteLibraries?: RemoteLibrary[]
     onAddToLibrary?: (libraryId: string) => void
@@ -43,6 +44,7 @@ export function ContextMenu({
     onMoveToTrash,
     onDownload,
     onExport,
+    onApplyMetadataToFile,
     availableLibraries,
     remoteLibraries,
     onAddToLibrary,
@@ -137,6 +139,12 @@ export function ContextMenu({
 
     // フォルダーに追加済みかどうか
     const mediaFolderIds = media.folders?.map(f => f.id) || []
+    const canApplyMetadataToFile = Boolean(
+        onApplyMetadataToFile &&
+        !isRemote &&
+        media.file_type === 'video' &&
+        !/^https?:\/\//i.test(String(media.file_path || ''))
+    )
 
     return (
         <div
@@ -337,6 +345,24 @@ export function ContextMenu({
                             <line x1="12" y1="15" x2="12" y2="3" />
                         </svg>
                         <span>エクスポート</span>
+                    </div>
+                )
+            }
+
+            {
+                onApplyMetadataToFile && (
+                    <div
+                        className={`context-menu-item ${canApplyMetadataToFile ? '' : 'disabled'}`}
+                        onMouseDown={canApplyMetadataToFile ? (e) => armMenuAction(e, 'apply-metadata-to-file') : undefined}
+                        onMouseUp={canApplyMetadataToFile ? (e) => handleMenuAction(e, 'apply-metadata-to-file', () => onApplyMetadataToFile(media)) : undefined}
+                    >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                            <path d="M12 18v-6" />
+                            <path d="M9 15l3 3 3-3" />
+                        </svg>
+                        <span>メタデータをファイルに適用</span>
                     </div>
                 )
             }

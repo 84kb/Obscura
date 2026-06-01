@@ -41,7 +41,14 @@ export function useFolders(
         if (!activeLibrary && !activeRemoteLibrary) return null
         try {
             const newFolder = await api.createFolder(name, parentId)
-            await loadFolders()
+            if (newFolder) {
+                setFolders(prev => (
+                    prev.some(folder => Number(folder.id) === Number(newFolder.id))
+                        ? prev
+                        : [...prev, newFolder].sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0) || a.name.localeCompare(b.name))
+                ))
+                void loadFolders()
+            }
             return newFolder
         } catch (error) {
             console.error('Failed to create folder:', error)

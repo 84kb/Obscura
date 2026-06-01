@@ -72,7 +72,14 @@ export function useTags(
             if (activeRemoteLibrary) {
                 try {
                     const newTag = await api.createRemoteTag(activeRemoteLibrary.url, activeRemoteLibrary.token, name)
-                    await loadTags()
+                    if (newTag) {
+                        setTags(prev => (
+                            prev.some(tag => Number(tag.id) === Number(newTag.id))
+                                ? prev
+                                : [...prev, newTag].sort((a, b) => a.name.localeCompare(b.name))
+                        ))
+                        void loadTags()
+                    }
                     return newTag
                 } catch (e: any) {
                     if (e.message && e.message.includes('403')) {
@@ -82,7 +89,14 @@ export function useTags(
                 }
             }
             const newTag = await api.createTag(name)
-            await loadTags()
+            if (newTag) {
+                setTags(prev => (
+                    prev.some(tag => Number(tag.id) === Number(newTag.id))
+                        ? prev
+                        : [...prev, newTag].sort((a, b) => a.name.localeCompare(b.name))
+                ))
+                void loadTags()
+            }
             return newTag
         } catch (error) {
             console.error('Failed to create tag:', error)

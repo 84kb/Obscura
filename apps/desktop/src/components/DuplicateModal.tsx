@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { MediaFile } from '@obscura/core'
 import { toThumbnailUrl } from '../utils/fileUrl'
 import './DuplicateModal.css'
@@ -9,6 +9,7 @@ interface DuplicateModalProps {
         existingMedia: MediaFile
     }
     onResolve: (action: 'skip' | 'replace' | 'both') => void
+    defaultAction?: 'skip' | 'replace' | 'both'
 }
 
 // ファイルサイズを読みやすい形式に変換
@@ -20,10 +21,20 @@ const formatSize = (bytes: number) => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
-export const DuplicateModal: React.FC<DuplicateModalProps> = ({ duplicate, onResolve }) => {
-    const [selectedOption, setSelectedOption] = useState<'existing' | 'new' | 'both'>('existing')
+const actionToOption = (action: 'skip' | 'replace' | 'both' | undefined): 'existing' | 'new' | 'both' => {
+    if (action === 'replace') return 'new'
+    if (action === 'both') return 'both'
+    return 'existing'
+}
+
+export const DuplicateModal: React.FC<DuplicateModalProps> = ({ duplicate, onResolve, defaultAction = 'skip' }) => {
+    const [selectedOption, setSelectedOption] = useState<'existing' | 'new' | 'both'>(() => actionToOption(defaultAction))
 
     const { newMedia, existingMedia } = duplicate
+
+    useEffect(() => {
+        setSelectedOption(actionToOption(defaultAction))
+    }, [defaultAction, newMedia.id, existingMedia.id])
 
     // 既存ファイルのサムネイルURL
     const existingThumbUrl = toThumbnailUrl(existingMedia.thumbnail_path)
