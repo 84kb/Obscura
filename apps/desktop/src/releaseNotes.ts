@@ -10,8 +10,19 @@ type ReleaseNotesEntry = {
 };
 
 const RELEASE_NOTES: Record<string, ReleaseNotesEntry> = {
+    "0.8.27": {
+        ja: [
+            "[修正] タグ管理画面でサイドバーを閉じた後も、画面上部からサイドバーを再表示できるようにしました。",
+            "[変更] タグ管理画面のUIを変更しました。",
+        ].join("\n"),
+        en: [
+            "[Fix] The Tag Manager now shows a restore button when the sidebar is hidden, so the sidebar can be reopened from the all-tags view.",
+            "[Change] Changed Tag Manager UI.",
+        ].join("\n"),
+    },
     "0.8.26": {
         ja: [
+            "[修正] ニコニコ動画のメタデータ取得で yt-dlp が古い場合、管理下の yt-dlp を最新版へ自動更新してから再試行するようにしました。",
             "[修正] シークバーにカーソルを合わせた時のプレビューサムネイルが、縦幅を基準に動画ファイル本来のアスペクト比で表示されるようにしました。",
             "[修正] 一覧表示でライブラリデータが再取得された時に仮想リストのスクローラーが作り直され、スクロール位置が先頭へ戻る問題を修正しました。",
             "[修正] 環境設定のインポート・ダウンロードを開いた時に、古いクライアント設定で「D&D インポート後に元ファイルを移動する」が一時的にオフ表示される問題を修正しました。",
@@ -48,6 +59,7 @@ const RELEASE_NOTES: Record<string, ReleaseNotesEntry> = {
             "[変更] Inspector のタグ作成とフォルダー追加は入力確定後にピッカーを先に閉じ、新規作成結果も一覧 state へ即時反映してからバックグラウンドで再同期するようにし、体感速度を改善しました。",
         ].join("\n"),
         en: [
+            "[Fix] NicoNico metadata fetch now auto-updates the managed yt-dlp binary and retries when yt-dlp is outdated.",
             "[Fix] Seek bar hover preview thumbnails now size from a fixed height while preserving the video's real aspect ratio.",
             "[Fix] List view now keeps the virtual scroller stable during library data reloads, preventing periodic jumps back to the top.",
             "[Fix] Import & Download settings now wait for the latest client config before rendering, preventing Move source files after drag-and-drop import from appearing off due to stale settings.",

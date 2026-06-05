@@ -46,6 +46,21 @@ body.dragging-file .main-header {
     border: 1px solid var(--border);
 }
 
+.tag-manager-header-mode .size-slider-container,
+.tag-manager-header-mode .view-menu-container,
+.tag-manager-header-mode .header-right > .icon-btn:first-child,
+.tag-manager-header-mode .view-menu-container + .icon-btn {
+    display: none;
+}
+
+.tag-manager-header-mode .header-search-icon-btn {
+    cursor: default;
+}
+
+.tag-manager-header-mode .header-search-icon-btn svg:last-child {
+    display: none;
+}
+
 .header-window-controls {
     display: flex;
     align-items: center;

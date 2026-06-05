@@ -3287,17 +3287,46 @@ function AppContent() {
             )
         } else if (filterOptions.filterType === 'tag_manager') {
             mainContent = (
-                <TagManager
-                    tags={tags}
-                    tagGroups={tagGroups}
-                    onCreateTag={createTag}
-                    onDeleteTag={deleteTag}
-                    disabled={!hasActiveLibrary && !activeRemoteLibrary}
-                    onRefresh={refreshLibrary}
-                    onInternalDragStart={beginInternalUiDrag}
-                    onInternalDragEnd={endInternalMediaDrag}
-                    allMediaFiles={allMediaFiles}
-                />
+                <div className="content-container">
+                    <MainHeader
+                        title={`すべてのタグ (${tags.length.toLocaleString()})`}
+                        filterOptions={filterOptions}
+                        onFilterChange={applyFilterChange}
+                        filterPresets={filterPresets}
+                        onApplyFilterPreset={handleApplyFilterPreset}
+                        onSaveFilterPreset={handleSaveFilterPreset}
+                        onDeleteFilterPreset={handleDeleteFilterPreset}
+                        onRenameFilterPreset={handleRenameFilterPreset}
+                        onResetFilters={handleResetFilters}
+                        gridSize={gridSize}
+                        onGridSizeChange={setGridSize}
+                        viewMode={viewMode}
+                        onViewModeChange={setViewMode}
+                        tags={tags}
+                        tagGroups={tagGroups}
+                        allMediaFiles={allMediaFiles}
+                        viewSettings={{ ...viewSettings, showInspector: false }}
+                        onViewSettingsChange={setViewSettings}
+                        folders={folders}
+                        onRefreshLibrary={handleRefreshLibrary}
+                        onReload={reloadLibrary}
+                        showSidebar={viewSettings.showSidebar}
+                        onToggleSidebar={() => handleUpdateViewSettings({ showSidebar: !viewSettings.showSidebar })}
+                        onOpenSettings={() => setShowSettingsModal(true)}
+                        mode="tag-manager"
+                    />
+                    <TagManager
+                        tags={tags}
+                        tagGroups={tagGroups}
+                        onDeleteTag={deleteTag}
+                        disabled={!hasActiveLibrary && !activeRemoteLibrary}
+                        onRefresh={refreshLibrary}
+                        onInternalDragStart={beginInternalUiDrag}
+                        onInternalDragEnd={endInternalMediaDrag}
+                        allMediaFiles={allMediaFiles}
+                        searchQuery={filterOptions.searchQuery}
+                    />
+                </div>
             )
         } else {
             mainContent = (
@@ -3551,7 +3580,7 @@ function AppContent() {
                 )}
             </main>
 
-            {viewSettings.showInspector && (
+            {viewSettings.showInspector && filterOptions.filterType !== 'tag_manager' && (
                 <>
                     <div
                         className={`panel-resize-handle inspector-resize-handle ${activeResizePanel === 'inspector' ? 'active' : ''}`}

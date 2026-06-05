@@ -40,6 +40,7 @@ interface MainHeaderProps {
     showSidebar: boolean
     onToggleSidebar: () => void
     onOpenSettings: () => void
+    mode?: 'library' | 'tag-manager'
 }
 
 import { FileSystemCleanupModal } from './FileSystemCleanupModal'
@@ -71,6 +72,7 @@ export function MainHeader({
     showSidebar,
     onToggleSidebar,
     onOpenSettings,
+    mode = 'library',
 }: MainHeaderProps) {
     const plugins = usePlugins()
     const [isFilterBarOpen, setIsFilterBarOpen] = useState(false)
@@ -143,6 +145,7 @@ export function MainHeader({
     }, [pluginHeaderContext, plugins])
     const pluginHeaderLeftButtons = pluginHeaderButtons.filter((button) => (button.location || 'right') === 'left')
     const pluginHeaderRightButtons = pluginHeaderButtons.filter((button) => (button.location || 'right') !== 'left')
+    const isTagManagerMode = mode === 'tag-manager'
     const activeFilterCount = useMemo(() => {
         let count = 0
         const itemCount = (value: unknown) => Array.isArray(value) ? value.length : 0
@@ -523,7 +526,7 @@ export function MainHeader({
     )
 
     return (
-        <div className="main-header-container">
+        <div className={`main-header-container ${isTagManagerMode ? 'tag-manager-header-mode' : ''}`}>
             <header className="main-header">
                 <div className="header-left">
                     {!showSidebar && (
@@ -569,7 +572,7 @@ export function MainHeader({
                 </div>
 
                 <div className="header-center">
-                    <div className="size-slider-container">
+                    {!isTagManagerMode && <div className="size-slider-container">
                         <span className="slider-icon minus">-</span>
                         <input
                             type="range"
@@ -581,7 +584,7 @@ export function MainHeader({
                             className="size-slider"
                         />
                         <span className="slider-icon plus">+</span>
-                    </div>
+                    </div>}
                 </div>
 
                 <div className="header-right">
@@ -828,9 +831,11 @@ export function MainHeader({
 
                     <div className="header-search" ref={searchContainerRef}>
                         <button
-                            className={`header-search-icon-btn ${isSearchMenuOpen ? 'active' : ''}`}
-                            onClick={() => setIsSearchMenuOpen(!isSearchMenuOpen)}
-                            title="検索範囲"
+                            className={`header-search-icon-btn ${!isTagManagerMode && isSearchMenuOpen ? 'active' : ''}`}
+                            onClick={() => {
+                                if (!isTagManagerMode) setIsSearchMenuOpen(!isSearchMenuOpen)
+                            }}
+                            title={isTagManagerMode ? 'タグを検索' : '検索範囲'}
                         >
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <circle cx="11" cy="11" r="8"></circle>
@@ -842,7 +847,7 @@ export function MainHeader({
                         </button>
                         <input
                             type="text"
-                            placeholder="検索..."
+                            placeholder={isTagManagerMode ? 'タグを検索...' : '検索...'}
                             value={filterOptions.searchQuery}
                             onChange={(e) => onFilterChange({ ...filterOptions, searchQuery: e.target.value })}
                             onFocus={() => {
@@ -862,7 +867,7 @@ export function MainHeader({
                             </button>
                         )}
 
-                        {isSearchMenuOpen && (
+                        {!isTagManagerMode && isSearchMenuOpen && (
                             <div className="search-options-dropdown">
                                 <div className="search-options-header">検索範囲:</div>
                                 {([
@@ -956,7 +961,7 @@ export function MainHeader({
             </header>
 
             {/* フィルターバー */}
-            {isFilterBarOpen && (
+            {!isTagManagerMode && isFilterBarOpen && (
                 <div className="filter-bar">
                     <div className="filter-bar-filters">
                     {/* フォルダーフィルター */}

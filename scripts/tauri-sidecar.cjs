@@ -2124,6 +2124,39 @@ function getYtDlpExecutablePath() {
   return 'yt-dlp'
 }
 
+function getManagedYtDlpExecutablePath() {
+  return path.join(getManagedBinDir(), isWindows() ? 'yt-dlp.exe' : 'yt-dlp')
+}
+
+async function updateManagedYtDlpExecutable() {
+  const targetPath = getManagedYtDlpExecutablePath()
+  const downloadUrl = isWindows()
+    ? 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe'
+    : 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp'
+  await downloadFileWithProgress(downloadUrl, targetPath)
+  if (!isWindows()) {
+    try {
+      fs.chmodSync(targetPath, 0o755)
+    } catch {
+      // chmod failure will be surfaced when spawning the binary.
+    }
+  }
+  return targetPath
+}
+
+function shouldUpdateYtDlpFromOutput(output) {
+  const text = String(output || '').toLowerCase()
+  return (
+    text.includes('update yt-dlp') ||
+    text.includes('please update') ||
+    text.includes('you should update') ||
+    text.includes('yt-dlp is out of date') ||
+    text.includes('unsupported url') ||
+    text.includes('unable to extract') ||
+    text.includes('signature extraction failed')
+  )
+}
+
 function normalizeCookieBrowser(value) {
   const normalized = String(value || '').trim().toLowerCase()
   return ['chrome', 'edge', 'firefox', 'brave', 'vivaldi', 'opera', 'chromium'].includes(normalized)
@@ -2199,24 +2232,57 @@ async function fetchNicoMetadata(url, cookieBrowser) {
   }
 
   const browser = normalizeCookieBrowser(cookieBrowser)
-  const args = ['--dump-single-json', '--no-playlist', '--skip-download']
-  if (browser) args.push('--cookies-from-browser', browser)
-  args.push(url)
-
-  const proc = spawnSync(getYtDlpExecutablePath(), args, {
+  const buildArgs = () => {
+    const args = ['--dump-single-json', '--no-playlist', '--skip-download']
+    if (browser) args.push('--cookies-from-browser', browser)
+    args.push(url)
+    return args
+  }
+  const runYtDlp = (executablePath) => spawnSync(executablePath, buildArgs(), {
     encoding: 'utf8',
     windowsHide: true,
     timeout: 45000,
     maxBuffer: 1024 * 1024 * 16,
   })
+
+  let proc = runYtDlp(getYtDlpExecutablePath())
   if (proc.error) {
-    if (browser) {
-      throw new Error(`yt-dlp を起動できませんでした。yt-dlp を PATH または sidecar-data/bin に配置してください: ${proc.error.message}`)
+    try {
+      appendDebugLog(`yt-dlp auto-install start reason=${proc.error.message || String(proc.error)}`)
+      const updatedPath = await updateManagedYtDlpExecutable()
+      appendDebugLog(`yt-dlp auto-install complete path=${updatedPath}`)
+      proc = runYtDlp(updatedPath)
+    } catch (installError) {
+      throw new Error(`yt-dlp を起動できず、自動取得にも失敗しました: ${installError?.message || String(installError)}`)
     }
-    throw new Error(`ニコニコ動画のメタデータを取得できませんでした。年齢制限やログインが必要な動画では、環境設定で Cookie 取得元ブラウザを指定し、yt-dlp を PATH または sidecar-data/bin に配置してください。`)
+    if (proc.error) {
+      throw new Error(`yt-dlp を起動できませんでした: ${proc.error.message || String(proc.error)}`)
+    }
   }
   if (proc.status !== 0) {
     const detail = String(proc.stderr || proc.stdout || '').trim()
+    if (shouldUpdateYtDlpFromOutput(detail)) {
+      try {
+        appendDebugLog(`yt-dlp auto-update start reason=${detail.slice(0, 300).replace(/\s+/g, ' ')}`)
+        const updatedPath = await updateManagedYtDlpExecutable()
+        appendDebugLog(`yt-dlp auto-update complete path=${updatedPath}`)
+        proc = runYtDlp(updatedPath)
+        if (!proc.error && proc.status === 0) {
+          const parsed = JSON.parse(String(proc.stdout || '{}'))
+          return {
+            provider: 'nicovideo',
+            title: String(parsed?.title || '').trim(),
+            artist: String(parsed?.uploader || parsed?.channel || parsed?.creator || '').trim(),
+            description: sanitizeRichMetadataHtml(String(parsed?.description || '').trim()),
+            thumbnailUrl: String(parsed?.thumbnail || '').trim(),
+          }
+        }
+        const retryDetail = String(proc.stderr || proc.stdout || proc.error?.message || '').trim()
+        throw new Error(retryDetail || 'yt-dlp retry failed after update')
+      } catch (updateError) {
+        throw new Error(`yt-dlp が古いため最新版への更新を試みましたが失敗しました: ${updateError?.message || String(updateError)}`)
+      }
+    }
     const suffix = browser ? '' : ' 年齢制限やログインが必要な動画では、環境設定で Cookie 取得元ブラウザを指定してください。'
     throw new Error(detail || `ニコニコ動画のメタデータを取得できませんでした。${suffix}`)
   }

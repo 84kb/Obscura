@@ -8,17 +8,16 @@ import './TagManager.css'
 interface TagManagerProps {
     tags: Tag[]
     tagGroups?: TagGroup[]
-    onCreateTag: (name: string) => void
     onDeleteTag: (id: number) => void
     disabled?: boolean
     onRefresh?: () => void
     onInternalDragStart?: () => void
     onInternalDragEnd?: () => void
     allMediaFiles: MediaFile[]
+    searchQuery?: string
 }
 
-export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDeleteTag, disabled = false, onRefresh, onInternalDragStart, onInternalDragEnd, allMediaFiles }: TagManagerProps) {
-    const [newTagName, setNewTagName] = useState('')
+export function TagManager({ tags, tagGroups: propTagGroups, onDeleteTag, disabled = false, onRefresh, onInternalDragStart, onInternalDragEnd, allMediaFiles, searchQuery = '' }: TagManagerProps) {
     // const [newFolderName, setNewFolderName] = useState('') // Removed
     const [tagGroups, setTagGroups] = useState<TagGroup[]>([])
     const [selectedGroupId, setSelectedGroupId] = useState<number | null | 'all'>('all')
@@ -71,11 +70,6 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
         )
     }, [groupOverrideByTagId, tags])
 
-    const selectedGroupName = useMemo(() => {
-        if (selectedGroupId === 'all') return 'すべてのタグ'
-        if (selectedGroupId === null) return '未分類のタグ'
-        return tagGroups.find((group) => group.id === selectedGroupId)?.name || 'タグ'
-    }, [selectedGroupId, tagGroups])
 
     // グループ一覧を取得
     useEffect(() => {
@@ -96,6 +90,7 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
     }
 
     const displayedTags = useMemo(() => {
+        const query = searchQuery.trim().toLowerCase()
         return tags.map((tag) => {
             if (!Object.prototype.hasOwnProperty.call(groupOverrideByTagId, tag.id)) {
                 return tag
@@ -104,8 +99,8 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
                 ...tag,
                 groupId: groupOverrideByTagId[tag.id],
             }
-        })
-    }, [groupOverrideByTagId, tags])
+        }).filter((tag) => !query || tag.name.toLowerCase().includes(query))
+    }, [groupOverrideByTagId, searchQuery, tags])
 
     useEffect(() => {
         setGroupOverrideByTagId((prev) => {
@@ -130,14 +125,6 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
             return changed ? next : prev
         })
     }, [tags])
-
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault()
-        if (newTagName.trim()) {
-            onCreateTag(newTagName.trim())
-            setNewTagName('')
-        }
-    }
 
     const handleCreateGroup = async (e: React.MouseEvent) => {
         e.preventDefault()
@@ -492,8 +479,6 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
         if (e.button !== 0) return // 左クリックのみ
         if ((e.target as HTMLElement).closest('.tag-manager-item')) return
         if ((e.target as HTMLElement).closest('.tag-manager-header')) return
-        if ((e.target as HTMLElement).closest('.tag-manager-form')) return
-
         e.preventDefault()
 
         const startPos = { x: e.clientX, y: e.clientY }
@@ -715,27 +700,6 @@ export function TagManager({ tags, tagGroups: propTagGroups, onCreateTag, onDele
                 </div>
             )}
             {/* グループサイドバー */}
-            <div className="tag-manager-topbar">
-                <div className="tag-manager-topbar-title">
-                    <span className="tag-manager-topbar-title-main">{selectedGroupName}</span>
-                    <span className="tag-manager-topbar-title-sub">
-                        {selectedGroupId === 'all'
-                            ? `${displayedTags.length.toLocaleString()} 件のタグ`
-                            : `${filteredTags.length.toLocaleString()} 件のタグ`}
-                    </span>
-                </div>
-                <form onSubmit={handleSubmit} className="tag-manager-form">
-                    <input
-                        type="text"
-                        value={newTagName}
-                        onChange={(e) => setNewTagName(e.target.value)}
-                        placeholder={disabled ? "ライブラリが選択されていません" : "新しいタグ名..."}
-                        className="tag-manager-input"
-                        disabled={disabled}
-                    />
-                    <button type="submit" className="btn btn-primary btn-small" disabled={disabled}>追加</button>
-                </form>
-            </div>
             <div className="tag-manager-content">
             <div className="tag-group-sidebar">
                 {/* すべて */}
